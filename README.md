@@ -48,10 +48,6 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 ---
 
 ## Technologies Used 
-Table 10. SBOUP Technology Stack
-
-<img width="940" height="1061" alt="image" src="https://github.com/user-attachments/assets/c6066268-3e8e-4ae8-9c47-122ae4f815d3" />
-
 
 ---
 
