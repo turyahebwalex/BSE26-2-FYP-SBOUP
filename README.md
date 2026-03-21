@@ -41,13 +41,30 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 ---
 
 ## Target Users
-- formal multi-skilled workers
+- Formal multi-skilled workers
 - Informal multi-skilled workers
 - Potential Employers
 
 ---
 
-## Technologies Used 
+## Technologies Used
+
+### SBOUP Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Frontend (Web) | React.js | Responsive web application with component-based UI |
+| Frontend (Mobile) | React Native | Cross-platform mobile application for Android and iOS |
+| Backend | Node.js + Express | RESTful API server, business logic, authentication |
+| AI Services | Python (Flask) | Microservices for ML models: matching, fraud detection, NLP |
+| Database | MongoDB Atlas | Primary document-oriented database |
+| Caching | Redis | Session management, caching, rate limiting |
+| File Storage | Amazon S3 / Azure Blob | User uploads, generated CVs, portfolio files |
+| Authentication | JWT + OAuth 2.0 | Token-based auth with optional Google OAuth |
+| Email | SendGrid / Amazon SES | Transactional emails: verification, notifications |
+| Push Notifications | FCM + APNs | Mobile push notifications for Android and iOS |
+| Containerisation | Docker + Kubernetes | Application packaging, deployment, and scaling |
+| ML Libraries | scikit-learn, NLTK | Machine learning models and NLP processing |
 
 ---
 
@@ -57,7 +74,7 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 ---
 
 ## Academic Information
-This project is submitted as a **Final Year Project (FYP)** in partial fulfillment of the requirements for the award of a Bachelor’s degree.
+This project is submitted as a **Final Year Project (FYP)** in partial fulfillment of the requirements for the award of a Bachelor's degree.
 
 ---
 
