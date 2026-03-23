@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "SkillBridge",
+    "slug": "sboup-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sboup.skillbridge"
+    },
+    "android": {
+      "package": "com.sboup.skillbridge"
+    },
+    "extra": {
+      "apiUrl": "http://localhost:5000/api"
+    }
+  }
+}

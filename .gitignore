@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Testing
+coverage/
+.pytest_cache/
+htmlcov/
+
+# ML Models (large files)
+ai-services/*/models/*.pkl
+ai-services/*/models/*.joblib
+ai-services/*/models/*.h5
+
+# Uploads
+uploads/
+temp/

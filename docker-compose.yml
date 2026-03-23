@@ -1,0 +1,181 @@
+services:
+  # ─── Data Layer ───
+  mongodb:
+    image: mongo:7
+    container_name: sboup-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: sboup_dev
+    networks:
+      - sboup-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sboup-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sboup-network
+
+  # ─── Application Services Layer ───
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-server
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
+      - JWT_ACCESS_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=7d
+      - CLIENT_URL=http://localhost:3000
+      - MATCHING_SERVICE_URL=http://matching-engine:5001
+      - FRAUD_DETECTION_SERVICE_URL=http://fraud-detection:5002
+      - CV_GENERATION_SERVICE_URL=http://cv-generation:5003
+      - LEARNING_SERVICE_URL=http://learning-engine:5004
+      - CHATBOT_SERVICE_URL=http://chatbot-service:5005
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    networks:
+      - sboup-network
+
+  # ─── Presentation Layer ───
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-client
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000/api
+    depends_on:
+      - server
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    networks:
+      - sboup-network
+
+  # ─── Intelligence Layer ───
+  matching-engine:
+    build:
+      context: ./ai-services/matching-engine
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-matching
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+    depends_on:
+      - mongodb
+    networks:
+      - sboup-network
+
+  fraud-detection:
+    build:
+      context: ./ai-services/fraud-detection
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-fraud
+    ports:
+      - "5002:5002"
+    environment:
+      - FLASK_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+    depends_on:
+      - mongodb
+    networks:
+      - sboup-network
+
+  cv-generation:
+    build:
+      context: ./ai-services/cv-generation
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-cv
+    ports:
+      - "5003:5003"
+    environment:
+      - FLASK_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+    depends_on:
+      - mongodb
+    networks:
+      - sboup-network
+
+  learning-engine:
+    build:
+      context: ./ai-services/learning-engine
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-learning
+    ports:
+      - "5004:5004"
+    environment:
+      - FLASK_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+    depends_on:
+      - mongodb
+    networks:
+      - sboup-network
+
+  chatbot-service:
+    build:
+      context: ./ai-services/chatbot-service
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-chatbot
+    ports:
+      - "5005:5005"
+    environment:
+      - FLASK_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+    depends_on:
+      - mongodb
+    networks:
+      - sboup-network
+
+  # ─── Mobile App (Expo Dev Server) ───
+  mobile:
+    build:
+      context: ./mobile
+      dockerfile: Dockerfile
+      network: host
+    container_name: sboup-mobile
+    network_mode: host
+    stdin_open: true
+    tty: true
+    environment:
+      - EXPO_PUBLIC_API_URL=http://localhost:5000/api
+      - EXPO_OFFLINE=1
+    depends_on:
+      - server
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  sboup-network:
+    driver: bridge
