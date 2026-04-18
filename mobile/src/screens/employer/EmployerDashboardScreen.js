@@ -1,398 +1,487 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
-  RefreshControl,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../context/AuthContext';
-import { opportunityAPI, applicationAPI } from '../../services/api';
 
-const EmployerDashboardScreen = ({ navigation }) => {
-  const { user } = useAuth();
-  const [opportunities, setOpportunities] = useState([]);
-  const [stats, setStats] = useState({ active: 0, totalApps: 0, pending: 0 });
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+import { Button, Card, Badge, Avatar } from '../../components/ui';
+import { layout, text, feedback } from '../../styles';
+import colors from '../../theme/colors';
+import spacing from '../../theme/spacing';
+import typography from '../../theme/typography';
 
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      setError(null);
-      const { data } = await opportunityAPI.getMyOpportunities();
-      const list = data.opportunities || data.data || data || [];
-      const oppList = Array.isArray(list) ? list : [];
-      setOpportunities(oppList);
+// ─── Dummy Data ───────────────────────────────────────────────────────────────
+const STATS = { activePostings: 5, totalApplications: 34 };
 
-      const activeCount = oppList.filter(
-        (o) => o.status === 'active' || o.status === 'open' || !o.status
-      ).length;
+const POSTINGS = [
+  { _id: '1', title: 'Senior Frontend Engineer', postedAgo: '2 days ago', appCount: 12, icon: '</>' },
+  { _id: '2', title: 'Product Designer',          postedAgo: '5 days ago', appCount: 8,  icon: '✏️' },
+  { _id: '3', title: 'Backend Engineer',           postedAgo: '1 week ago', appCount: 14, icon: '⚙️' },
+];
 
-      // Gather application counts
-      let totalApps = 0;
-      let pendingApps = 0;
-      oppList.forEach((opp) => {
-        const appCount = opp.applicationCount || opp.applicants || 0;
-        totalApps += appCount;
-        pendingApps += opp.pendingCount || 0;
-      });
+const CANDIDATES = [
+  {
+    _id: '1',
+    name: 'Amina Jumbe',
+    role: 'React Developer',
+    yearsExp: 4,
+    matchScore: 95,
+    skills: ['TYPESCRIPT', 'TAILWIND'],
+  },
+  {
+    _id: '2',
+    name: 'Kevin Otiero',
+    role: 'UI/UX Designer',
+    yearsExp: 3,
+    matchScore: 92,
+    skills: ['FIGMA', 'UX'],
+  },
+];
 
-      setStats({
-        active: activeCount,
-        totalApps,
-        pending: pendingApps,
-      });
-    } catch (err) {
-      setError('Failed to load dashboard data.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+// ─── Posting Card ─────────────────────────────────────────────────────────────
+const PostingCard = ({ posting, onPress }) => (
+  <Card onPress={onPress} style={styles.postingCard}>
+    <View style={styles.postingIcon}>
+      <Text style={styles.postingIconText}>{posting.icon}</Text>
+    </View>
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    <Badge variant="match" style={{ marginBottom: spacing[2] }}>
+      {posting.appCount} Apps
+    </Badge>
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchDashboardData();
-  };
+    <Text style={styles.postingTitle} numberOfLines={2}>
+      {posting.title}
+    </Text>
+    <Text style={styles.postingDate}>Posted {posting.postedAgo}</Text>
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#F97316" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
+    <TouchableOpacity onPress={onPress} style={{ marginTop: spacing[2] }}>
+      <Text style={styles.viewApplicantsLink}>View Applicants →</Text>
+    </TouchableOpacity>
+  </Card>
+);
+
+// ─── Candidate Card ───────────────────────────────────────────────────────────
+const CandidateCard = ({ candidate, onView, onShortlist }) => (
+  <Card style={styles.candidateCard}>
+    <View style={layout.row}>
+      <Avatar
+        name={candidate.name}
+        size="lg"
+        style={{ marginRight: spacing[3] }}
+      />
+
+      <View style={{ flex: 1 }}>
+        <View style={[layout.row, { flexWrap: 'wrap', gap: spacing[2] }]}>
+          <Text style={styles.candidateName}>
+            {candidate.name.length > 10
+              ? candidate.name.slice(0, 10) + '...'
+              : candidate.name}
+          </Text>
+          <Badge variant="match">{candidate.matchScore}% Match</Badge>
         </View>
-      </SafeAreaView>
-    );
-  }
+
+        <Text style={styles.candidateRole}>
+          {candidate.role} • {candidate.yearsExp} yrs exp
+        </Text>
+
+        <View style={styles.skillsRow}>
+          {candidate.skills.map((s) => (
+            <View key={s} style={styles.skillChip}>
+              <Text style={styles.skillChipText}>{s}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.candidateActions}>
+        <TouchableOpacity onPress={onView} style={styles.viewBtn}>
+          <Text style={styles.viewBtnText}>VIEW</Text>
+        </TouchableOpacity>
+        <Button size="sm" onPress={onShortlist} style={{ marginTop: spacing[2] }}>
+          Shortlist
+        </Button>
+      </View>
+    </View>
+  </Card>
+);
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+const EmployerDashboardScreen = ({ navigation }) => {
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={layout.screen}>
       <ScrollView
-        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} />
-        }
       >
-        {/* Welcome */}
-        <View style={styles.welcomeSection}>
-          <View>
-            <Text style={styles.greeting}>Welcome back,</Text>
-            <Text style={styles.userName}>
-              {user?.fullName || user?.name || 'Employer'}
-            </Text>
-          </View>
+        {/* ── Header ── */}
+        <View style={styles.header}>
           <TouchableOpacity
-            style={styles.profileAvatar}
-            onPress={() => navigation.navigate('ProfileTab', { screen: 'Profile' })}
+            onPress={() => navigation.goBack()}
+            style={styles.headerBtn}
+            accessibilityLabel="Go back"
           >
-            <Text style={styles.avatarText}>
-              {(user?.fullName || user?.name || 'E').charAt(0).toUpperCase()}
-            </Text>
+            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
+            style={styles.headerBtn}
+            accessibilityLabel="Notifications"
+          >
+            <Ionicons name="notifications-outline" size={24} color={colors.textPrimary} />
+            {/* unread dot */}
+            <View style={styles.notifDot} />
           </TouchableOpacity>
         </View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: '#FFF7ED' }]}>
-            <Ionicons name="briefcase-outline" size={24} color="#F97316" />
-            <Text style={styles.statNumber}>{stats.active}</Text>
-            <Text style={styles.statLabel}>Active Jobs</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: '#EFF6FF' }]}>
-            <Ionicons name="people-outline" size={24} color="#3B82F6" />
-            <Text style={styles.statNumber}>{stats.totalApps}</Text>
-            <Text style={styles.statLabel}>Applications</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
-            <Ionicons name="time-outline" size={24} color="#D97706" />
-            <Text style={styles.statNumber}>{stats.pending}</Text>
-            <Text style={styles.statLabel}>Pending</Text>
-          </View>
+        {/* ── Greeting ── */}
+        <View style={{ marginBottom: spacing[5] }}>
+          <Text style={styles.greeting}>{greeting}, John!</Text>
+          <Text style={text.bodySmall}>Talent Acquisition Manager</Text>
         </View>
 
-        {/* Quick Action */}
-        <TouchableOpacity
-          style={styles.postButton}
-          onPress={() => navigation.navigate('PostTab')}
-        >
-          <Ionicons name="add-circle-outline" size={22} color="#FFFFFF" />
-          <Text style={styles.postButtonText}>Post New Opportunity</Text>
+        {/* ── Stats ── */}
+        <View style={styles.statsRow}>
+          <Card style={styles.statCard}>
+            <Text style={styles.statNumberOrange}>{STATS.activePostings}</Text>
+            <Text style={styles.statLabel}>ACTIVE{'\n'}POSTINGS</Text>
+          </Card>
+          <Card style={styles.statCard}>
+            <Text style={styles.statNumberDark}>{STATS.totalApplications}</Text>
+            <Text style={styles.statLabel}>TOTAL{'\n'}APPLICATIONS</Text>
+          </Card>
+        </View>
+
+        {/* ── Quick Actions ── */}
+        <View style={styles.actionsRow}>
+          <Button
+            style={styles.actionBtn}
+            onPress={() => navigation.navigate('PostTab')}
+          >
+            + Post Opportunity
+          </Button>
+          <Button
+            variant="secondary"
+            style={styles.actionBtn}
+            onPress={() => navigation.navigate('ViewApplications')}
+          >
+            View Applications
+          </Button>
+        </View>
+
+        {/* ── Active Postings ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={text.sectionTitle}>Your Active Postings</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('ManageOpportunities')}>
+            <Text style={styles.seeAll}>See All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <FlatList
+          data={POSTINGS}
+          keyExtractor={(item) => item._id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: spacing[2] }}
+          style={{ marginBottom: spacing[6] }}
+          renderItem={({ item }) => (
+            <PostingCard
+              posting={item}
+              onPress={() =>
+                navigation.navigate('ViewApplications', {
+                  opportunityId: item._id,
+                  opportunityTitle: item.title,
+                })
+              }
+            />
+          )}
+          ItemSeparatorComponent={() => <View style={{ width: spacing[3] }} />}
+        />
+
+        {/* ── Top Candidates ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={text.sectionTitle}>Top Candidates This Week</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('ViewApplications')}>
+            <Text style={styles.seeAll}>View All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ gap: spacing[3] }}>
+          {CANDIDATES.map((c) => (
+            <CandidateCard
+              key={c._id}
+              candidate={c}
+              onView={() => navigation.navigate('ProfileTab', { screen: 'Profile' })}
+              onShortlist={() => {}}
+            />
+          ))}
+        </View>
+      </ScrollView>
+
+      {/* ── Bottom Nav ── */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity style={styles.navItem}>
+          <Ionicons name="home" size={24} color={colors.primary} />
+          <Text style={[styles.navLabel, { color: colors.primary }]}>Home</Text>
         </TouchableOpacity>
 
-        {error && (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate('ManageOpportunities')}
+        >
+          <Ionicons name="people-outline" size={24} color={colors.textMuted} />
+          <Text style={styles.navLabel}>Market</Text>
+        </TouchableOpacity>
 
-        {/* My Opportunities */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>My Opportunities</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('ManageOpportunities')}>
-            <Text style={styles.seeAll}>Manage All</Text>
-          </TouchableOpacity>
-        </View>
+        {/* FAB */}
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('PostTab')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={30} color={colors.textInverse} />
+        </TouchableOpacity>
 
-        {opportunities.length > 0 ? (
-          opportunities.slice(0, 5).map((opp) => {
-            const oppId = opp._id || opp.id;
-            return (
-              <TouchableOpacity
-                key={oppId}
-                style={styles.oppCard}
-                onPress={() =>
-                  navigation.navigate('ViewApplications', {
-                    opportunityId: oppId,
-                    opportunityTitle: opp.title,
-                  })
-                }
-                activeOpacity={0.7}
-              >
-                <View style={styles.oppCardHeader}>
-                  <Text style={styles.oppTitle} numberOfLines={1}>
-                    {opp.title}
-                  </Text>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      {
-                        backgroundColor:
-                          opp.status === 'active' || opp.status === 'open' || !opp.status
-                            ? '#10B981'
-                            : '#9CA3AF',
-                      },
-                    ]}
-                  />
-                </View>
-                <View style={styles.oppCardMeta}>
-                  <View style={styles.metaItem}>
-                    <Ionicons name="people-outline" size={14} color="#6B7280" />
-                    <Text style={styles.metaText}>
-                      {opp.applicationCount || opp.applicants || 0} applicants
-                    </Text>
-                  </View>
-                  <View style={styles.metaItem}>
-                    <Ionicons name="location-outline" size={14} color="#6B7280" />
-                    <Text style={styles.metaText}>{opp.location || 'Uganda'}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        ) : (
-          <View style={styles.emptyCard}>
-            <Ionicons name="megaphone-outline" size={40} color="#D1D5DB" />
-            <Text style={styles.emptyTitle}>No Opportunities Yet</Text>
-            <Text style={styles.emptyText}>
-              Post your first opportunity to start receiving applications.
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate('MessagesTab')}
+        >
+          <Ionicons name="chatbubble-outline" size={24} color={colors.textMuted} />
+          <Text style={styles.navLabel}>Inbox</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate('ProfileTab', { screen: 'Profile' })}
+        >
+          <Ionicons name="person-circle-outline" size={24} color={colors.textMuted} />
+          <Text style={styles.navLabel}>Profile</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#9CA3AF',
-  },
-  scrollView: {
-    flex: 1,
-  },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.screenPadding,
+    paddingBottom: 100,
   },
-  welcomeSection: {
+
+  // Header
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 20,
+    paddingVertical: spacing[3],
   },
-  greeting: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  userName: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  profileAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#1F2937',
+  headerBtn: {
+    width: spacing.touchTarget,
+    height: spacing.touchTarget,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  notifDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
   },
+
+  // Greeting
+  greeting: {
+    fontSize: typography.size['2xl'],
+    fontWeight: typography.weight.bold,
+    color: colors.textPrimary,
+  },
+
+  // Stats
   statsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
+    gap: spacing[3],
+    marginBottom: spacing[4],
   },
   statCard: {
     flex: 1,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    paddingVertical: spacing[4],
   },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginTop: 6,
+  statNumberOrange: {
+    fontSize: typography.size['3xl'],
+    fontWeight: typography.weight.bold,
+    color: colors.primary,
+    lineHeight: typography.size['3xl'] * 1.1,
+  },
+  statNumberDark: {
+    fontSize: typography.size['3xl'],
+    fontWeight: typography.weight.bold,
+    color: colors.textPrimary,
+    lineHeight: typography.size['3xl'] * 1.1,
   },
   statLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-    marginTop: 2,
+    fontSize: typography.size.xs,
+    color: colors.textMuted,
+    marginTop: spacing[1],
+    letterSpacing: 0.5,
   },
-  postButton: {
-    backgroundColor: '#F97316',
-    borderRadius: 12,
-    paddingVertical: 14,
+
+  // Actions
+  actionsRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
+    gap: spacing[3],
+    marginBottom: spacing[6],
   },
-  postButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+  actionBtn: {
+    flex: 1,
   },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    borderRadius: 8,
-    padding: 10,
-    gap: 6,
-    marginBottom: 12,
-  },
-  errorText: {
-    fontSize: 13,
-    color: '#EF4444',
-  },
+
+  // Section header
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F2937',
+    marginBottom: spacing[3],
   },
   seeAll: {
-    fontSize: 14,
-    color: '#F97316',
-    fontWeight: '500',
+    fontSize: typography.size.sm,
+    color: colors.primary,
+    fontWeight: typography.weight.semibold,
   },
-  oppCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+
+  // Posting card
+  postingCard: {
+    width: 200,
   },
-  oppCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  postingIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primaryLight,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing[2],
   },
-  oppTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1F2937',
-    flex: 1,
-    marginRight: 8,
+  postingIconText: {
+    fontSize: typography.size.base,
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  postingTitle: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing[1],
   },
-  oppCardMeta: {
+  postingDate: {
+    fontSize: typography.size.xs,
+    color: colors.textMuted,
+  },
+  viewApplicantsLink: {
+    fontSize: typography.size.xs,
+    color: colors.primary,
+    fontWeight: typography.weight.semibold,
+  },
+
+  // Candidate card
+  candidateCard: {
+    marginBottom: 0,
+  },
+  candidateName: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.semibold,
+    color: colors.textPrimary,
+  },
+  candidateRole: {
+    fontSize: typography.size.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  skillsRow: {
     flexDirection: 'row',
-    gap: 16,
+    flexWrap: 'wrap',
+    gap: spacing[1],
+    marginTop: spacing[2],
   },
-  metaItem: {
+  skillChip: {
+    backgroundColor: colors.divider,
+    borderRadius: spacing.radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+  },
+  skillChipText: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    fontWeight: typography.weight.medium,
+  },
+  candidateActions: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginLeft: spacing[2],
+  },
+  viewBtn: {
+    minHeight: spacing.touchTarget,
+    justifyContent: 'flex-start',
+    paddingTop: spacing[1],
+  },
+  viewBtnText: {
+    fontSize: typography.size.xs,
+    color: colors.primary,
+    fontWeight: typography.weight.bold,
+  },
+
+  // Bottom nav
+  bottomNav: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 70,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'space-around',
+    paddingBottom: spacing[2],
   },
-  metaText: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  emptyCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 32,
+  navItem: {
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    justifyContent: 'center',
+    minWidth: spacing.touchTarget,
+    minHeight: spacing.touchTarget,
   },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginTop: 12,
-    marginBottom: 6,
+  navLabel: {
+    fontSize: typography.size.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: typography.weight.medium,
   },
-  emptyText: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    textAlign: 'center',
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+    marginBottom: spacing[4],
   },
 });
 

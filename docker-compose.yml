@@ -40,7 +40,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
       - JWT_ACCESS_EXPIRY=15m
       - JWT_REFRESH_EXPIRY=7d
-      - CLIENT_URL=http://localhost:3000
+      - CLIENT_URL=http://172.18.0.10:3000
       - MATCHING_SERVICE_URL=http://matching-engine:5001
       - FRAUD_DETECTION_SERVICE_URL=http://fraud-detection:5002
       - CV_GENERATION_SERVICE_URL=http://cv-generation:5003
@@ -62,9 +62,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://localhost:5000/api
-      - CHOKIDAR_USEPOLLING=true
-      - WDS_SOCKET_PORT=3000
+      - VITE_API_URL=/api
     depends_on:
       - server
     networks:

@@ -41,7 +41,9 @@ const server = http.createServer(app);
 // Socket.IO setup for real-time messaging and chatbot
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: process.env.NODE_ENV === 'development'
+      ? '*'
+      : (process.env.CLIENT_URL || 'http://localhost:3000').split(',').map(s => s.trim()),
     methods: ['GET', 'POST'],
   },
 });
@@ -49,7 +51,16 @@ const io = new Server(server, {
 // ─── Middleware ───
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    // and any origin in development
+    if (!origin || process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    const allowed = (process.env.CLIENT_URL || '').split(',').map(s => s.trim());
+    if (allowed.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
 }));
 app.use(compression());

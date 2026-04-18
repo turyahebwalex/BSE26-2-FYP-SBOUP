@@ -20,7 +20,8 @@ import LearningPage from './pages/LearningPage';
 import GenerateCVPage from './pages/GenerateCVPage';
 
 // Employer Pages
-import EmployerDashboard from './pages/EmployerDashboard';
+import EmployerDashboard from './features/employer/dashboard/EmployerDashboard';
+import EmployerDashboardOld from './pages/EmployerDashboard';
 import PostOpportunityPage from './pages/PostOpportunityPage';
 import ManageOpportunitiesPage from './pages/ManageOpportunitiesPage';
 import ViewApplicationsPage from './pages/ViewApplicationsPage';
@@ -86,7 +87,8 @@ function AppContent() {
           <Route path="/cv/generate" element={<ProtectedRoute roles={['skilled_worker']}><GenerateCVPage /></ProtectedRoute>} />
 
           {/* Employer Routes */}
-          <Route path="/employer" element={<ProtectedRoute roles={['employer']}><EmployerDashboard /></ProtectedRoute>} />
+          <Route path="/employer" element={<ProtectedRoute roles={['employer']}><EmployerDashboardOld /></ProtectedRoute>} />
+          <Route path="/employer_dashboard" element={<EmployerDashboard />} />
           <Route path="/employer/post" element={<ProtectedRoute roles={['employer']}><PostOpportunityPage /></ProtectedRoute>} />
           <Route path="/employer/opportunities" element={<ProtectedRoute roles={['employer']}><ManageOpportunitiesPage /></ProtectedRoute>} />
           <Route path="/employer/applications/:opportunityId" element={<ProtectedRoute roles={['employer']}><ViewApplicationsPage /></ProtectedRoute>} />
