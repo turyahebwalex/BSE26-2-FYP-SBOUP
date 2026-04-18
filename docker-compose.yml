@@ -49,9 +49,6 @@ services:
     depends_on:
       - mongodb
       - redis
-    volumes:
-      - ./server:/app
-      - /app/node_modules
     networks:
       - sboup-network
 
@@ -65,12 +62,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:5000/api
+      - VITE_API_URL=http://localhost:5000/api
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_PORT=3000
     depends_on:
       - server
-    volumes:
-      - ./client:/app
-      - /app/node_modules
     networks:
       - sboup-network
 
