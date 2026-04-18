@@ -70,6 +70,7 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 
 ## How to Run the Project
 *(Instructions to be added once deployment and setup are finalized)*
+Tentative Initial Instructions: https://github.com/turyahebwalex/BSE26-2-FYP-SBOUP/blob/main/docs/git-setup-and-contributor-guide.md
 
 ---
 
