@@ -1,44 +1,41 @@
 import React from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import colors from '../theme/colors';
-import spacing from '../theme/spacing';
-import typography from '../theme/typography';
 
-const LoadingScreen = () => (
-  <View style={styles.container}>
-    <Text style={styles.brand}>SBOUP</Text>
-    <Text style={styles.tagline}>Connecting Skills to Opportunities</Text>
-    <ActivityIndicator size="large" color={colors.primary} style={styles.spinner} />
-    <Text style={styles.loadingText}>Loading...</Text>
-  </View>
-);
+const LoadingScreen = () => {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.brand}>SkillBridge</Text>
+      <Text style={styles.tagline}>Connecting Skills to Opportunities</Text>
+      <ActivityIndicator size="large" color="#F97316" style={styles.spinner} />
+      <Text style={styles.loadingText}>Loading...</Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: spacing.screenPadding,
   },
   brand: {
-    fontSize: typography.size['3xl'],
-    fontWeight: typography.weight.bold,
-    color: colors.primary,
-    marginBottom: spacing[2],
-    letterSpacing: 1,
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#F97316',
+    marginBottom: 8,
   },
   tagline: {
-    fontSize: typography.size.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing[8],
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 32,
   },
   spinner: {
-    marginBottom: spacing[3],
+    marginBottom: 12,
   },
   loadingText: {
-    fontSize: typography.size.sm,
-    color: colors.textMuted,
+    fontSize: 14,
+    color: '#9CA3AF',
   },
 });
 

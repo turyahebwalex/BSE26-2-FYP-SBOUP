@@ -80,7 +80,7 @@ const LoginPage = () => {
 
           <div className="mt-4">
             <a
-              href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/google`}
+              href={`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/auth/google`}
               className="btn-outline w-full flex items-center justify-center gap-2"
             >
               Sign in with Google
