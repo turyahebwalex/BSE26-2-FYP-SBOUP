@@ -58,26 +58,54 @@ exports.getConversation = async (req, res) => {
 
 exports.getInbox = async (req, res) => {
   try {
-    // Get latest message from each conversation
-    const messages = await Message.aggregate([
+    const userId = req.user._id;
+    const grouped = await Message.aggregate([
       {
         $match: {
-          $or: [{ senderId: req.user._id }, { receiverId: req.user._id }],
+          $or: [{ senderId: userId }, { receiverId: userId }],
         },
       },
       { $sort: { sentAt: -1 } },
       {
         $group: {
           _id: {
-            $cond: [{ $eq: ['$senderId', req.user._id] }, '$receiverId', '$senderId'],
+            $cond: [{ $eq: ['$senderId', userId] }, '$receiverId', '$senderId'],
           },
           lastMessage: { $first: '$$ROOT' },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$receiverId', userId] },
+                    { $eq: ['$readStatus', false] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
         },
       },
       { $sort: { 'lastMessage.sentAt': -1 } },
     ]);
 
-    res.json({ conversations: messages });
+    const User = require('../models/User');
+    const otherIds = grouped.map((g) => g._id);
+    const users = await User.find({ _id: { $in: otherIds } })
+      .select('fullName email role')
+      .lean();
+    const userMap = new Map(users.map((u) => [u._id.toString(), u]));
+
+    const conversations = grouped.map((g) => ({
+      otherUser: userMap.get(g._id.toString()) || { _id: g._id, fullName: 'User' },
+      lastMessage: g.lastMessage,
+      unreadCount: g.unreadCount,
+      updatedAt: g.lastMessage?.sentAt,
+    }));
+
+    res.json({ conversations });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch inbox.' });
   }

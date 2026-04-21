@@ -1,52 +1,53 @@
 const Application = require('../models/Application');
 const Opportunity = require('../models/Opportunity');
-const Notification = require('../models/Notification');
-const axios = require('axios');
+const Profile = require('../models/Profile');
+const mlService = require('../services/ml.service');
+const notify = require('../services/notification.service');
 const logger = require('../utils/logger');
 
 exports.applyForOpportunity = async (req, res) => {
   try {
-    const { opportunityId, coverLetter, profileId } = req.body;
+    const { opportunityId, coverLetter, profileId, cvId, attachments } = req.body;
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.status !== 'published') {
       return res.status(400).json({ error: 'Opportunity not available.' });
     }
 
-    // Check for duplicate application
     const existing = await Application.findOne({ profileId, opportunityId });
     if (existing) return res.status(400).json({ error: 'Already applied.' });
 
-    // Get match score from matching engine
+    // Sanity-check the profile belongs to the caller
+    const profile = await Profile.findOne({ _id: profileId, userId: req.user._id });
+    if (!profile) return res.status(403).json({ error: 'Not authorised for that profile.' });
+
+    // Compute match score from the matching engine (fire-and-cache).
     let matchScore = 0;
-    try {
-      const matchRes = await axios.post(
-        `${process.env.MATCHING_SERVICE_URL}/api/match/score`,
-        { profileId, opportunityId }
-      );
-      matchScore = matchRes.data.matchScore || 0;
-    } catch (err) {
-      logger.warn('Matching service unavailable');
+    let matchBreakdown = { skillScore: 0, experienceScore: 0, collaborativeScore: 0 };
+    const matchResult = await mlService.scoreMatch({ profileId, opportunityId });
+    if (matchResult.ok) {
+      matchScore = matchResult.data.matchScore || 0;
+      matchBreakdown = matchResult.data.breakdown || matchBreakdown;
     }
 
     const application = await Application.create({
       profileId,
       opportunityId,
+      cvId: cvId || null,
       coverLetter,
       matchScore,
-      attachments: req.body.attachments || [],
+      matchBreakdown,
+      attachments: attachments || [],
     });
 
-    // Update application count
     opportunity.applicationCount += 1;
     await opportunity.save();
 
-    // Notify employer
-    await Notification.create({
-      userId: opportunity.employerId,
+    await notify.create({
+      userId: opportunity.postedByUserId,
       type: 'application_update',
-      content: `New application received for "${opportunity.title}"`,
-      metadata: { applicationId: application._id, opportunityId },
+      content: `New application received for "${opportunity.title}" (match ${Math.round(matchScore)}).`,
+      metadata: { applicationId: application._id, opportunityId, matchScore },
     });
 
     res.status(201).json({ application });
@@ -58,14 +59,15 @@ exports.applyForOpportunity = async (req, res) => {
 
 exports.getMyApplications = async (req, res) => {
   try {
-    const Profile = require('../models/Profile');
     const profile = await Profile.findOne({ userId: req.user._id });
     if (!profile) return res.json({ applications: [] });
 
     const applications = await Application.find({ profileId: profile._id })
-      .populate('opportunityId')
+      .populate({
+        path: 'opportunityId',
+        populate: { path: 'companyId', select: 'name logoUrl' },
+      })
       .sort({ submittedAt: -1 });
-
     res.json({ applications });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch applications.' });
@@ -76,7 +78,7 @@ exports.getApplicationsForOpportunity = async (req, res) => {
   try {
     const opportunity = await Opportunity.findOne({
       _id: req.params.opportunityId,
-      employerId: req.user._id,
+      postedByUserId: req.user._id,
     });
     if (!opportunity) return res.status(404).json({ error: 'Opportunity not found.' });
 
@@ -86,7 +88,6 @@ exports.getApplicationsForOpportunity = async (req, res) => {
         populate: { path: 'userId', select: 'fullName email' },
       })
       .sort({ matchScore: -1 });
-
     res.json({ applications });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch applications.' });
@@ -102,16 +103,14 @@ exports.updateApplicationStatus = async (req, res) => {
 
     if (!application) return res.status(404).json({ error: 'Application not found.' });
 
-    // Verify employer owns the opportunity
-    if (application.opportunityId.employerId.toString() !== req.user._id.toString()) {
+    if (application.opportunityId.postedByUserId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized.' });
     }
 
     application.status = status;
     await application.save();
 
-    // Notify worker
-    await Notification.create({
+    await notify.create({
       userId: application.profileId.userId,
       type: 'application_update',
       content: `Your application for "${application.opportunityId.title}" has been ${status.replace('_', ' ')}.`,
@@ -121,5 +120,20 @@ exports.updateApplicationStatus = async (req, res) => {
     res.json({ application });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update application status.' });
+  }
+};
+
+exports.withdrawApplication = async (req, res) => {
+  try {
+    const profile = await Profile.findOne({ userId: req.user._id });
+    const application = await Application.findOneAndUpdate(
+      { _id: req.params.id, profileId: profile?._id },
+      { status: 'withdrawn' },
+      { new: true }
+    );
+    if (!application) return res.status(404).json({ error: 'Application not found.' });
+    res.json({ application });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to withdraw application.' });
   }
 };

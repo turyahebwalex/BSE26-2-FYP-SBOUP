@@ -32,7 +32,7 @@ exports.getReports = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const [reports, total] = await Promise.all([
       Report.find(filter)
-        .populate('reporterId', 'firstName lastName email')
+        .populate('reporterId', 'fullName email')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(limit)),
@@ -57,7 +57,7 @@ exports.getReportsByTarget = async (req, res) => {
   try {
     const { targetType, targetId } = req.params;
     const reports = await Report.find({ targetType, targetId })
-      .populate('reporterId', 'firstName lastName email')
+      .populate('reporterId', 'fullName email')
       .sort({ createdAt: -1 });
 
     res.json({ reports });
@@ -69,7 +69,7 @@ exports.getReportsByTarget = async (req, res) => {
 exports.updateReportStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['reviewed', 'dismissed', 'action_taken'];
+    const validStatuses = ['reviewed', 'resolved'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }

@@ -14,6 +14,7 @@ const { configurePassport } = require('./config/passport');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const { setupSocketIO } = require('./config/socket');
+const notificationService = require('./services/notification.service');
 const logger = require('./utils/logger');
 
 // Route imports
@@ -31,6 +32,7 @@ const cvRoutes = require('./routes/cv.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const skillRoutes = require('./routes/skill.routes');
+const companyRoutes = require('./routes/company.routes');
 
 // Load environment variables
 require('dotenv').config();
@@ -80,6 +82,7 @@ app.use('/api/cv', cvRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/skills', skillRoutes);
+app.use('/api/companies', companyRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -102,6 +105,7 @@ const startServer = async () => {
     await connectDB();
     await connectRedis();
     setupSocketIO(io);
+    notificationService.registerIO(io);
 
     server.listen(PORT, () => {
       logger.info(`SBOUP Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);

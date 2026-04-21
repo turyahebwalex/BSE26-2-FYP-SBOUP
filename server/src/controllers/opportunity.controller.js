@@ -1,60 +1,62 @@
-const axios = require('axios');
 const Opportunity = require('../models/Opportunity');
-const Notification = require('../models/Notification');
+const User = require('../models/User');
+const Company = require('../models/Company');
+const mlService = require('../services/ml.service');
+const notify = require('../services/notification.service');
 const logger = require('../utils/logger');
+
+const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
+const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
 
 /**
  * POST /api/opportunities
- * Create a new opportunity (employers only)
+ * Create + run fraud screen (30/70 risk gate) + notify matching engine.
  */
 exports.createOpportunity = async (req, res) => {
   try {
-    const opportunityData = {
+    // Inherit companyId from posting employer if not provided
+    let companyId = req.body.companyId || null;
+    if (!companyId && req.user.companyId) companyId = req.user.companyId;
+
+    const opportunity = await Opportunity.create({
       ...req.body,
-      employerId: req.user._id,
+      companyId,
+      postedByUserId: req.user._id,
       status: 'draft',
-    };
+    });
 
-    const opportunity = await Opportunity.create(opportunityData);
+    const fraudResult = await mlService.detectFraud(opportunity);
+    if (fraudResult.ok) {
+      const { fraudScore, signals } = fraudResult.data;
+      opportunity.fraudRiskScore = fraudScore || 0;
+      opportunity.fraudSignals = signals || [];
 
-    // Forward to Fraud Detection Microservice
-    try {
-      const fraudResponse = await axios.post(
-        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/detect`,
-        {
-          opportunityId: opportunity._id.toString(),
-          title: opportunity.title,
-          description: opportunity.description,
-          employerId: opportunity.employerId.toString(),
-          compensationRange: opportunity.compensationRange,
-        }
-      );
-
-      const { fraudScore, classification } = fraudResponse.data;
-      opportunity.fraudRiskScore = fraudScore;
-
-      if (fraudScore < 30) {
+      if (opportunity.fraudRiskScore < FRAUD_LOW) {
         opportunity.status = 'published';
-      } else if (fraudScore >= 70) {
+      } else if (opportunity.fraudRiskScore >= FRAUD_HIGH) {
         opportunity.status = 'blocked';
       } else {
         opportunity.status = 'under_review';
       }
       await opportunity.save();
 
-      // If published, trigger matching engine
       if (opportunity.status === 'published') {
-        try {
-          await axios.post(
-            `${process.env.MATCHING_SERVICE_URL}/api/match/opportunity`,
-            { opportunityId: opportunity._id.toString() }
-          );
-        } catch (matchErr) {
-          logger.warn('Matching service unavailable:', matchErr.message);
-        }
+        mlService.triggerOpportunityMatch(opportunity._id);
+      } else if (opportunity.status === 'under_review') {
+        const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
+        await Promise.all(
+          admins.map((admin) =>
+            notify.create({
+              userId: admin._id,
+              type: 'fraud_alert',
+              content: `Opportunity "${opportunity.title}" needs review (risk ${opportunity.fraudRiskScore}).`,
+              metadata: { opportunityId: opportunity._id, fraudRiskScore: opportunity.fraudRiskScore },
+            })
+          )
+        );
       }
-    } catch (fraudErr) {
-      logger.warn('Fraud detection service unavailable:', fraudErr.message);
+    } else {
+      // Fraud service down: fail safe by holding for admin review.
       opportunity.status = 'under_review';
       await opportunity.save();
     }
@@ -67,14 +69,21 @@ exports.createOpportunity = async (req, res) => {
 };
 
 /**
- * GET /api/opportunities
- * Search and filter opportunities with pagination
+ * GET /api/opportunities  (public discovery feed)
  */
 exports.getOpportunities = async (req, res) => {
   try {
     const {
-      page = 1, limit = 20, category, location, search,
-      experienceLevel, isRemote, minPay, maxPay, sortBy = 'createdAt',
+      page = 1,
+      limit = 20,
+      category,
+      location,
+      search,
+      experienceLevel,
+      isRemote,
+      minPay,
+      maxPay,
+      sortBy = 'createdAt',
     } = req.query;
 
     const filter = { status: 'published', deadline: { $gte: new Date() } };
@@ -90,7 +99,8 @@ exports.getOpportunities = async (req, res) => {
     const [opportunities, total] = await Promise.all([
       Opportunity.find(filter)
         .populate('requiredSkills', 'skillName category')
-        .populate('employerId', 'fullName email')
+        .populate('postedByUserId', 'fullName email')
+        .populate('companyId', 'name logoUrl verificationStatus')
         .sort({ [sortBy]: -1 })
         .skip(skip)
         .limit(Number(limit)),
@@ -112,83 +122,76 @@ exports.getOpportunities = async (req, res) => {
   }
 };
 
-/**
- * GET /api/opportunities/:id
- */
 exports.getOpportunityById = async (req, res) => {
   try {
     const opportunity = await Opportunity.findById(req.params.id)
       .populate('requiredSkills', 'skillName category')
-      .populate('employerId', 'fullName email');
+      .populate('postedByUserId', 'fullName email')
+      .populate('companyId', 'name logoUrl verificationStatus website description');
 
-    if (!opportunity) {
-      return res.status(404).json({ error: 'Opportunity not found.' });
-    }
+    if (!opportunity) return res.status(404).json({ error: 'Opportunity not found.' });
 
-    // Increment view count
     opportunity.viewCount += 1;
     await opportunity.save();
-
     res.json({ opportunity });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch opportunity.' });
   }
 };
 
-/**
- * PUT /api/opportunities/:id
- */
 exports.updateOpportunity = async (req, res) => {
   try {
     const opportunity = await Opportunity.findOne({
       _id: req.params.id,
-      employerId: req.user._id,
+      postedByUserId: req.user._id,
     });
+    if (!opportunity) return res.status(404).json({ error: 'Opportunity not found.' });
 
-    if (!opportunity) {
-      return res.status(404).json({ error: 'Opportunity not found.' });
-    }
+    // Block editing after publication of fraud-critical fields
+    const { title, description, compensationRange } = req.body;
+    const fraudFieldsChanged =
+      (title && title !== opportunity.title) ||
+      (description && description !== opportunity.description) ||
+      (compensationRange && JSON.stringify(compensationRange) !== JSON.stringify(opportunity.compensationRange));
 
     Object.assign(opportunity, req.body);
-    await opportunity.save();
 
+    if (fraudFieldsChanged && opportunity.status === 'published') {
+      const fraudResult = await mlService.detectFraud(opportunity);
+      if (fraudResult.ok) {
+        opportunity.fraudRiskScore = fraudResult.data.fraudScore || 0;
+        opportunity.fraudSignals = fraudResult.data.signals || [];
+        if (opportunity.fraudRiskScore >= FRAUD_HIGH) opportunity.status = 'blocked';
+        else if (opportunity.fraudRiskScore >= FRAUD_LOW) opportunity.status = 'under_review';
+      }
+    }
+    await opportunity.save();
     res.json({ opportunity });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update opportunity.' });
   }
 };
 
-/**
- * DELETE /api/opportunities/:id (soft delete - archive)
- */
 exports.archiveOpportunity = async (req, res) => {
   try {
     const opportunity = await Opportunity.findOneAndUpdate(
-      { _id: req.params.id, employerId: req.user._id },
+      { _id: req.params.id, postedByUserId: req.user._id },
       { status: 'archived' },
       { new: true }
     );
-
-    if (!opportunity) {
-      return res.status(404).json({ error: 'Opportunity not found.' });
-    }
-
+    if (!opportunity) return res.status(404).json({ error: 'Opportunity not found.' });
     res.json({ message: 'Opportunity archived.', opportunity });
   } catch (error) {
     res.status(500).json({ error: 'Failed to archive opportunity.' });
   }
 };
 
-/**
- * GET /api/opportunities/employer/mine
- * Get employer's own opportunities
- */
 exports.getMyOpportunities = async (req, res) => {
   try {
-    const opportunities = await Opportunity.find({ employerId: req.user._id })
+    const opportunities = await Opportunity.find({ postedByUserId: req.user._id })
       .populate('requiredSkills', 'skillName category')
+      .populate('companyId', 'name logoUrl')
       .sort({ createdAt: -1 });
-
     res.json({ opportunities });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch opportunities.' });

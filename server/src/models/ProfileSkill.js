@@ -21,6 +21,7 @@ const profileSkillSchema = new mongoose.Schema({
     enum: ['primary', 'secondary'],
     default: 'primary',
   },
+  numberOfYears: { type: Number, min: 0, default: 0 },
 });
 
 profileSkillSchema.index({ profileId: 1, skillId: 1 }, { unique: true });

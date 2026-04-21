@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+/**
+ * User (SDD Chapter 4, Table 4.1)
+ * Central identity record. Drives authentication, role-based access
+ * (RBAC), and links to Profile (workers) or Company (employers).
+ */
 const userSchema = new mongoose.Schema(
   {
     email: {
@@ -15,12 +20,18 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Password is required'],
       maxlength: 60,
+      select: true,
     },
     role: {
       type: String,
       required: true,
       enum: ['skilled_worker', 'employer', 'admin'],
       default: 'skilled_worker',
+    },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
+      default: null,
     },
     fullName: {
       type: String,
@@ -29,11 +40,11 @@ const userSchema = new mongoose.Schema(
     },
     phoneNumber: {
       type: String,
-      maxlength: 15,
+      maxlength: 20,
     },
     accountStatus: {
       type: String,
-      enum: ['active', 'locked', 'deactivated'],
+      enum: ['active', 'locked', 'suspended', 'deactivated'],
       default: 'active',
     },
     failedAttempts: {
@@ -58,41 +69,38 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Index for fast lookups
-userSchema.index({ email: 1 });
+userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ role: 1, accountStatus: 1 });
+userSchema.index({ companyId: 1 });
 
-// Hash password before saving
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('passwordHash') || this.oauthProvider) return next();
-  if (this.passwordHash === 'oauth-no-password') return next();
+  if (!this.isModified('passwordHash')) return next();
+  if (this.oauthProvider && this.passwordHash === 'oauth-no-password') return next();
   const salt = await bcrypt.genSalt(12);
   this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
   next();
 });
 
-// Compare password method
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (this.passwordHash === 'oauth-no-password') return false;
   return bcrypt.compare(candidatePassword, this.passwordHash);
 };
 
-// Increment failed attempts and lock if exceeded
 userSchema.methods.incrementFailedAttempts = async function () {
   this.failedAttempts += 1;
-  if (this.failedAttempts >= 5) {
+  const limit = parseInt(process.env.MAX_LOGIN_ATTEMPTS, 10) || 5;
+  if (this.failedAttempts >= limit) {
     this.accountStatus = 'locked';
   }
   await this.save();
 };
 
-// Reset failed attempts on successful login
 userSchema.methods.resetFailedAttempts = async function () {
   this.failedAttempts = 0;
   this.lastLoginAt = new Date();
   await this.save();
 };
 
-// Remove sensitive fields from JSON output
 userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.passwordHash;

@@ -12,16 +12,17 @@ const experienceSchema = new mongoose.Schema({
   startDate: { type: Date, required: true },
   endDate: { type: Date },
   durationMonths: { type: Number },
+  numberOfYears: { type: Number },
   description: { type: String, maxlength: 2000 },
 });
 
-// Auto-compute duration in months
 experienceSchema.pre('save', function (next) {
   if (this.startDate) {
     const end = this.endDate || new Date();
     const months = (end.getFullYear() - this.startDate.getFullYear()) * 12
       + (end.getMonth() - this.startDate.getMonth());
     this.durationMonths = Math.max(0, months);
+    this.numberOfYears = Math.round((this.durationMonths / 12) * 10) / 10;
   }
   next();
 });
