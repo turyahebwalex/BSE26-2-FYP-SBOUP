@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { opportunityAPI, applicationAPI, matchingAPI } from '../../services/api';
+import { opportunityAPI, applicationAPI, matchingAPI, profileAPI } from '../../services/api';
 
 const OpportunityDetailScreen = ({ route, navigation }) => {
   const { opportunityId, opportunity: passedOpp, matchScore: passedScore } = route.params || {};
@@ -23,14 +23,13 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [coverLetter, setCoverLetter] = useState('');
   const [applied, setApplied] = useState(false);
   const [error, setError] = useState(null);
+  const [profileId, setProfileId] = useState(null);
 
   useEffect(() => {
     if (!passedOpp && opportunityId) {
       fetchOpportunity();
     }
-    if (opportunityId && matchScore == null) {
-      fetchMatchScore();
-    }
+    fetchProfileAndScore();
   }, [opportunityId]);
 
   const fetchOpportunity = async () => {
@@ -44,20 +43,31 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
   };
 
-  const fetchMatchScore = async () => {
+  const fetchProfileAndScore = async () => {
     try {
-      const { data } = await matchingAPI.getMatchScore(opportunityId);
-      setMatchScore(data.score || data.matchScore);
-    } catch {
-      // Match score is optional
-    }
+      const { data } = await profileAPI.getMyProfile();
+      const pid = data.profile?._id || data._id;
+      if (!pid) return;
+      setProfileId(pid);
+      if (opportunityId && matchScore == null) {
+        try {
+          const scoreRes = await matchingAPI.getMatchScore(pid, opportunityId);
+          setMatchScore(scoreRes.data.score || scoreRes.data.matchScore);
+        } catch (_) {}
+      }
+    } catch (_) {}
   };
 
   const handleApply = async () => {
+    if (!profileId) {
+      Alert.alert('Profile Required', 'Please create your profile before applying.');
+      return;
+    }
     setApplying(true);
     try {
       await applicationAPI.apply({
         opportunityId: opportunityId || opportunity._id || opportunity.id,
+        profileId,
         coverLetter: coverLetter.trim(),
       });
       setApplied(true);
@@ -99,19 +109,18 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const {
     title,
     description,
-    company,
-    employer,
+    companyId,
+    postedByUserId,
     location,
-    type,
-    skills,
+    category,
     requiredSkills,
-    compensation,
+    compensationRange,
     experienceLevel,
     deadline,
   } = opportunity;
 
-  const displaySkills = skills || requiredSkills || [];
-  const displayCompany = company || employer?.fullName || employer?.company || 'Company';
+  const displaySkills = requiredSkills || [];
+  const displayCompany = companyId?.name || postedByUserId?.fullName || 'Company';
 
   const typeBadgeColors = {
     formal: { bg: '#DBEAFE', text: '#1D4ED8' },
@@ -119,7 +128,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     freelance: { bg: '#D1FAE5', text: '#059669' },
     apprenticeship: { bg: '#EDE9FE', text: '#7C3AED' },
   };
-  const badge = typeBadgeColors[type] || typeBadgeColors.formal;
+  const badge = typeBadgeColors[category] || typeBadgeColors.formal;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -152,25 +161,25 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
             <View style={[styles.typeBadge, { backgroundColor: badge.bg }]}>
               <Text style={[styles.typeBadgeText, { color: badge.text }]}>
-                {(type || 'formal').charAt(0).toUpperCase() + (type || 'formal').slice(1)}
+                {(category || 'formal').charAt(0).toUpperCase() + (category || 'formal').slice(1)}
               </Text>
             </View>
           </View>
         </View>
 
         {/* Compensation */}
-        {compensation && (
+        {compensationRange && (compensationRange.min || compensationRange.max) && (
           <View style={styles.infoCard}>
             <View style={styles.infoHeader}>
               <Ionicons name="cash-outline" size={18} color="#F97316" />
               <Text style={styles.infoTitle}>Compensation</Text>
             </View>
             <Text style={styles.infoText}>
-              {compensation.min && compensation.max
-                ? `UGX ${compensation.min.toLocaleString()} - ${compensation.max.toLocaleString()}`
-                : compensation.amount
-                ? `UGX ${compensation.amount.toLocaleString()}`
-                : 'Negotiable'}
+              {`${compensationRange.currency || 'UGX'} ${
+                compensationRange.min ? compensationRange.min.toLocaleString() : '—'
+              }${compensationRange.max ? ` – ${compensationRange.max.toLocaleString()}` : ''}${
+                compensationRange.period ? ` / ${compensationRange.period}` : ''
+              }`}
             </Text>
           </View>
         )}
@@ -217,9 +226,12 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             <Text style={styles.sectionTitle}>Required Skills</Text>
             <View style={styles.skillsContainer}>
               {displaySkills.map((skill, index) => {
-                const skillName = typeof skill === 'string' ? skill : skill.name || skill.skill;
+                const skillName =
+                  typeof skill === 'string'
+                    ? skill
+                    : skill.skillName || skill.name || skill.skill;
                 return (
-                  <View key={index} style={styles.skillChip}>
+                  <View key={skill._id || index} style={styles.skillChip}>
                     <Text style={styles.skillChipText}>{skillName}</Text>
                   </View>
                 );

@@ -9,6 +9,10 @@ import {
   RefreshControl,
   Linking,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +24,9 @@ const LearningScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedPath, setExpandedPath] = useState(null);
   const [error, setError] = useState(null);
+  const [generateModalVisible, setGenerateModalVisible] = useState(false);
+  const [targetSkill, setTargetSkill] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   const fetchPaths = useCallback(async () => {
     try {
@@ -44,13 +51,36 @@ const LearningScreen = ({ navigation }) => {
     fetchPaths();
   };
 
+  const handleGenerate = async () => {
+    const skill = targetSkill.trim();
+    if (skill.length < 2) {
+      Alert.alert('Invalid', 'Please enter a skill name (min 2 characters).');
+      return;
+    }
+    setGenerating(true);
+    try {
+      await learningAPI.generate(skill);
+      setTargetSkill('');
+      setGenerateModalVisible(false);
+      Alert.alert('Success', 'Learning path generated.');
+      fetchPaths();
+    } catch (err) {
+      const msg =
+        err?.response?.data?.error ||
+        'Failed to generate learning path. The service may be unavailable.';
+      Alert.alert('Error', msg);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const toggleExpand = (pathId) => {
     setExpandedPath((prev) => (prev === pathId ? null : pathId));
   };
 
-  const handleUpdateProgress = async (pathId, resourceId) => {
+  const handleUpdateProgress = async (pathId, resourceIndex) => {
     try {
-      await learningAPI.updateProgress(pathId, resourceId, 100);
+      await learningAPI.updateProgress(pathId, resourceIndex, true);
       Alert.alert('Progress Updated', 'Resource marked as completed!');
       fetchPaths();
     } catch (err) {
@@ -130,7 +160,7 @@ const LearningScreen = ({ navigation }) => {
         {isExpanded && resources.length > 0 && (
           <View style={styles.resourcesList}>
             {resources.map((resource, index) => {
-              const isCompleted = resource.completed || resource.progress === 100;
+              const isCompleted = resource.isCompleted || resource.completed;
               return (
                 <View key={resource._id || resource.id || index} style={styles.resourceItem}>
                   <View style={styles.resourceLeft}>
@@ -165,9 +195,7 @@ const LearningScreen = ({ navigation }) => {
                     )}
                     {!isCompleted && (
                       <TouchableOpacity
-                        onPress={() =>
-                          handleUpdateProgress(pathId, resource._id || resource.id)
-                        }
+                        onPress={() => handleUpdateProgress(pathId, index)}
                         style={styles.completeButton}
                       >
                         <Text style={styles.completeButtonText}>Done</Text>
@@ -213,7 +241,12 @@ const LearningScreen = ({ navigation }) => {
           <Ionicons name="arrow-back" size={22} color="#1F2937" />
         </TouchableOpacity>
         <Text style={styles.screenTitle}>Learning Paths</Text>
-        <View style={styles.backButton} />
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setGenerateModalVisible(true)}
+        >
+          <Ionicons name="add-circle-outline" size={24} color="#F97316" />
+        </TouchableOpacity>
       </View>
 
       {error && (
@@ -237,11 +270,82 @@ const LearningScreen = ({ navigation }) => {
             <Ionicons name="school-outline" size={48} color="#D1D5DB" />
             <Text style={styles.emptyTitle}>No Learning Paths</Text>
             <Text style={styles.emptyText}>
-              Learning paths will appear here when you start developing new skills.
+              Tap the + icon above to generate a personalised learning path for any skill.
             </Text>
+            <TouchableOpacity
+              style={styles.emptyCTA}
+              onPress={() => setGenerateModalVisible(true)}
+            >
+              <Ionicons name="sparkles-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.emptyCTAText}>Generate My First Path</Text>
+            </TouchableOpacity>
           </View>
         }
       />
+
+      <Modal
+        transparent
+        visible={generateModalVisible}
+        animationType="fade"
+        onRequestClose={() => !generating && setGenerateModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Generate Learning Path</Text>
+              <TouchableOpacity
+                onPress={() => !generating && setGenerateModalVisible(false)}
+                disabled={generating}
+              >
+                <Ionicons name="close" size={22} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSubtitle}>
+              Enter a skill you want to learn. We will recommend resources tailored to you.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. React Native, Carpentry, Digital Marketing"
+              placeholderTextColor="#9CA3AF"
+              value={targetSkill}
+              onChangeText={setTargetSkill}
+              editable={!generating}
+              autoFocus
+              maxLength={60}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setGenerateModalVisible(false)}
+                disabled={generating}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalGenerateBtn,
+                  (generating || targetSkill.trim().length < 2) &&
+                    styles.modalGenerateBtnDisabled,
+                ]}
+                onPress={handleGenerate}
+                disabled={generating || targetSkill.trim().length < 2}
+              >
+                {generating ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="sparkles-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.modalGenerateText}>Generate</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -448,6 +552,94 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     paddingHorizontal: 20,
+  },
+  emptyCTA: {
+    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F97316',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  emptyCTAText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#1F2937',
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalGenerateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F97316',
+  },
+  modalGenerateBtnDisabled: {
+    backgroundColor: '#FDBA74',
+  },
+  modalGenerateText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

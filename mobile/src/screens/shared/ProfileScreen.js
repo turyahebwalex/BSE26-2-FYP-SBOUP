@@ -16,6 +16,9 @@ import { profileAPI } from '../../services/api';
 const ProfileScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
   const [profile, setProfile] = useState(null);
+  const [skills, setSkills] = useState([]);
+  const [experiences, setExperiences] = useState([]);
+  const [education, setEducation] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -24,10 +27,16 @@ const ProfileScreen = ({ navigation }) => {
     try {
       setError(null);
       const { data } = await profileAPI.getMyProfile();
-      setProfile(data.profile || data);
+      setProfile(data.profile || null);
+      setSkills(data.skills || []);
+      setExperiences(data.experiences || []);
+      setEducation(data.education || []);
     } catch (err) {
       if (err.response?.status === 404) {
-        setProfile(null); // No profile yet
+        setProfile(null);
+        setSkills([]);
+        setExperiences([]);
+        setEducation([]);
       } else {
         setError('Failed to load profile.');
       }
@@ -116,21 +125,23 @@ const ProfileScreen = ({ navigation }) => {
             )}
 
             {/* Skills */}
-            {profile.skills && profile.skills.length > 0 && (
+            {skills.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Skills</Text>
                 <View style={styles.card}>
-                  {profile.skills.map((skill, index) => {
+                  {skills.map((ps, index) => {
                     const skillName =
-                      typeof skill === 'string'
-                        ? skill
-                        : skill.name || skill.skill || '';
-                    const proficiency = skill.proficiency || skill.level || '';
+                      ps.skillId?.name || ps.skillName || 'Skill';
+                    const proficiency = ps.proficiencyLevel || '';
+                    const years = ps.numberOfYears;
                     return (
-                      <View key={index} style={styles.skillRow}>
+                      <View key={ps._id || index} style={styles.skillRow}>
                         <View style={styles.skillInfo}>
                           <Ionicons name="checkmark-circle" size={16} color="#F97316" />
-                          <Text style={styles.skillName}>{skillName}</Text>
+                          <Text style={styles.skillName}>
+                            {skillName}
+                            {years ? ` • ${years}y` : ''}
+                          </Text>
                         </View>
                         {proficiency && (
                           <Text style={styles.proficiency}>{proficiency}</Text>
@@ -143,16 +154,16 @@ const ProfileScreen = ({ navigation }) => {
             )}
 
             {/* Experience */}
-            {profile.experience && profile.experience.length > 0 && (
+            {experiences.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Experience</Text>
-                {profile.experience.map((exp, index) => (
-                  <View key={index} style={styles.card}>
+                {experiences.map((exp, index) => (
+                  <View key={exp._id || index} style={styles.card}>
                     <Text style={styles.expTitle}>
-                      {exp.title || exp.position || 'Role'}
+                      {exp.jobTitle || exp.title || 'Role'}
                     </Text>
                     <Text style={styles.expCompany}>
-                      {exp.company || exp.organization || ''}
+                      {exp.organization || exp.company || ''}
                     </Text>
                     <Text style={styles.expDates}>
                       {exp.startDate
@@ -178,19 +189,22 @@ const ProfileScreen = ({ navigation }) => {
             )}
 
             {/* Education */}
-            {profile.education && profile.education.length > 0 && (
+            {education.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Education</Text>
-                {profile.education.map((edu, index) => (
-                  <View key={index} style={styles.card}>
+                {education.map((edu, index) => (
+                  <View key={edu._id || index} style={styles.card}>
                     <Text style={styles.expTitle}>
                       {edu.qualification || edu.degree || 'Qualification'}
                     </Text>
                     <Text style={styles.expCompany}>
                       {edu.institution || edu.school || ''}
                     </Text>
-                    {edu.year && (
-                      <Text style={styles.expDates}>{edu.year}</Text>
+                    {(edu.startYear || edu.endYear) && (
+                      <Text style={styles.expDates}>
+                        {edu.startYear || ''}
+                        {edu.endYear ? ` - ${edu.endYear}` : ''}
+                      </Text>
                     )}
                   </View>
                 ))}
@@ -199,7 +213,7 @@ const ProfileScreen = ({ navigation }) => {
 
             <TouchableOpacity
               style={styles.editButton}
-              onPress={() => navigation.navigate('EditProfile', { profile })}
+              onPress={() => navigation.navigate('EditProfile', { profile, skills, experiences, education })}
             >
               <Ionicons name="create-outline" size={18} color="#FFFFFF" />
               <Text style={styles.editButtonText}>Edit Profile</Text>

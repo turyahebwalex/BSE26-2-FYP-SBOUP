@@ -38,7 +38,7 @@ const DiscoverScreen = ({ navigation }) => {
         params.search = searchQuery.trim();
       }
       if (selectedCategory !== 'all') {
-        params.type = selectedCategory;
+        params.category = selectedCategory;
       }
       const { data } = await opportunityAPI.getAll(params);
       const list = data.opportunities || data.data || data || [];

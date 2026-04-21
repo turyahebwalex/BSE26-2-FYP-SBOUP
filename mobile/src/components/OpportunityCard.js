@@ -12,20 +12,19 @@ const typeBadgeColors = {
 const OpportunityCard = ({ opportunity, onPress }) => {
   const {
     title,
-    company,
-    employer,
+    companyId,
+    postedByUserId,
     location,
-    type,
-    skills,
+    category,
     requiredSkills,
-    compensation,
+    compensationRange,
     matchScore,
   } = opportunity;
 
-  const displayCompany = company || employer?.fullName || employer?.company || 'Company';
+  const displayCompany = companyId?.name || postedByUserId?.fullName || 'Company';
   const displayLocation = location || 'Uganda';
-  const displayType = type || 'formal';
-  const displaySkills = skills || requiredSkills || [];
+  const displayType = category || 'formal';
+  const displaySkills = requiredSkills || [];
   const badge = typeBadgeColors[displayType] || typeBadgeColors.formal;
 
   return (
@@ -51,15 +50,13 @@ const OpportunityCard = ({ opportunity, onPress }) => {
           <Ionicons name="location-outline" size={14} color="#6B7280" />
           <Text style={styles.metaText}>{displayLocation}</Text>
         </View>
-        {compensation && (
+        {compensationRange && (compensationRange.min || compensationRange.max) && (
           <View style={styles.metaItem}>
             <Ionicons name="cash-outline" size={14} color="#6B7280" />
             <Text style={styles.metaText}>
-              {compensation.min && compensation.max
-                ? `${compensation.min.toLocaleString()} - ${compensation.max.toLocaleString()} UGX`
-                : compensation.amount
-                ? `${compensation.amount.toLocaleString()} UGX`
-                : 'Negotiable'}
+              {`${compensationRange.currency || 'UGX'} ${
+                compensationRange.min ? compensationRange.min.toLocaleString() : '—'
+              }${compensationRange.max ? ` – ${compensationRange.max.toLocaleString()}` : ''}`}
             </Text>
           </View>
         )}
@@ -68,9 +65,12 @@ const OpportunityCard = ({ opportunity, onPress }) => {
       <View style={styles.footer}>
         <View style={styles.skillsRow}>
           {displaySkills.slice(0, 3).map((skill, index) => {
-            const skillName = typeof skill === 'string' ? skill : skill.name || skill.skill;
+            const skillName =
+              typeof skill === 'string'
+                ? skill
+                : skill.skillName || skill.name || skill.skill;
             return (
-              <View key={index} style={styles.skillChip}>
+              <View key={skill?._id || index} style={styles.skillChip}>
                 <Text style={styles.skillChipText}>{skillName}</Text>
               </View>
             );

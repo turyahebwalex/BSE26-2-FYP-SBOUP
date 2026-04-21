@@ -62,12 +62,9 @@ const ChatScreen = ({ route, navigation }) => {
 
     try {
       await messageAPI.send({
-        recipientId: userId,
-        recipient: userId,
+        receiverId: userId,
         content: text,
-        message: text,
       });
-      // Refresh to get the real message
       fetchMessages();
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m._id !== tempMsg._id));
@@ -123,7 +120,7 @@ const ChatScreen = ({ route, navigation }) => {
               sent ? styles.sentTime : styles.receivedTime,
             ]}
           >
-            {item.pending ? 'Sending...' : formatTime(item.createdAt)}
+            {item.pending ? 'Sending...' : formatTime(item.sentAt || item.createdAt)}
           </Text>
         </View>
       </View>

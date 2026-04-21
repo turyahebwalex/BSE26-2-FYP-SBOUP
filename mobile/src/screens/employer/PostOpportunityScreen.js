@@ -23,22 +23,32 @@ const TYPES = [
 ];
 
 const EXPERIENCE_LEVELS = [
+  { key: 'any', label: 'Any Level' },
   { key: 'entry', label: 'Entry Level' },
-  { key: 'intermediate', label: 'Intermediate' },
+  { key: 'mid', label: 'Mid Level' },
   { key: 'senior', label: 'Senior' },
-  { key: 'expert', label: 'Expert' },
+];
+
+const PERIODS = [
+  { key: 'hourly', label: 'Hourly' },
+  { key: 'daily', label: 'Daily' },
+  { key: 'weekly', label: 'Weekly' },
+  { key: 'monthly', label: 'Monthly' },
+  { key: 'project', label: 'Per Project' },
 ];
 
 const PostOpportunityScreen = ({ navigation }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [type, setType] = useState('formal');
+  const [category, setCategory] = useState('formal');
   const [location, setLocation] = useState('');
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [compensationMin, setCompensationMin] = useState('');
   const [compensationMax, setCompensationMax] = useState('');
-  const [experienceLevel, setExperienceLevel] = useState('entry');
+  const [period, setPeriod] = useState('monthly');
+  const [experienceLevel, setExperienceLevel] = useState('any');
   const [deadline, setDeadline] = useState('');
+  const [isRemote, setIsRemote] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Skill picker
@@ -69,23 +79,18 @@ const PostOpportunityScreen = ({ navigation }) => {
   };
 
   const toggleSkill = (skill) => {
-    const skillId = skill._id || skill.id || skill.name;
-    const exists = selectedSkills.find(
-      (s) => (s._id || s.id || s.name) === skillId
-    );
+    const skillId = skill._id || skill.id;
+    if (!skillId) return;
+    const exists = selectedSkills.find((s) => (s._id || s.id) === skillId);
     if (exists) {
-      setSelectedSkills((prev) =>
-        prev.filter((s) => (s._id || s.id || s.name) !== skillId)
-      );
+      setSelectedSkills((prev) => prev.filter((s) => (s._id || s.id) !== skillId));
     } else {
       setSelectedSkills((prev) => [...prev, skill]);
     }
   };
 
   const removeSkill = (skillId) => {
-    setSelectedSkills((prev) =>
-      prev.filter((s) => (s._id || s.id || s.name) !== skillId)
-    );
+    setSelectedSkills((prev) => prev.filter((s) => (s._id || s.id) !== skillId));
   };
 
   const filteredSkills = allSkills.filter((s) => {
@@ -98,8 +103,21 @@ const PostOpportunityScreen = ({ navigation }) => {
       Alert.alert('Error', 'Please enter a title.');
       return;
     }
-    if (!description.trim()) {
-      Alert.alert('Error', 'Please enter a description.');
+    if (description.trim().length < 20) {
+      Alert.alert('Error', 'Description must be at least 20 characters.');
+      return;
+    }
+    if (!location.trim()) {
+      Alert.alert('Error', 'Please enter a location.');
+      return;
+    }
+    if (!deadline.trim()) {
+      Alert.alert('Error', 'Please set an application deadline (YYYY-MM-DD).');
+      return;
+    }
+    const deadlineDate = new Date(deadline.trim());
+    if (Number.isNaN(deadlineDate.getTime()) || deadlineDate <= new Date()) {
+      Alert.alert('Error', 'Deadline must be a future date (YYYY-MM-DD).');
       return;
     }
 
@@ -108,43 +126,45 @@ const PostOpportunityScreen = ({ navigation }) => {
       const payload = {
         title: title.trim(),
         description: description.trim(),
-        type,
-        location: location.trim() || 'Uganda',
-        requiredSkills: selectedSkills.map((s) => s._id || s.id || s.name),
+        category,
+        location: location.trim(),
+        requiredSkills: selectedSkills.map((s) => s._id || s.id).filter(Boolean),
         experienceLevel,
+        deadline: deadlineDate.toISOString(),
+        isRemote,
+        applicationMethod: 'internal',
       };
 
       if (compensationMin || compensationMax) {
-        payload.compensation = {};
-        if (compensationMin) payload.compensation.min = parseInt(compensationMin, 10);
-        if (compensationMax) payload.compensation.max = parseInt(compensationMax, 10);
-      }
-
-      if (deadline.trim()) {
-        payload.deadline = deadline.trim();
+        payload.compensationRange = { currency: 'UGX', period };
+        if (compensationMin) payload.compensationRange.min = parseInt(compensationMin, 10);
+        if (compensationMax) payload.compensationRange.max = parseInt(compensationMax, 10);
       }
 
       await opportunityAPI.create(payload);
-      Alert.alert('Success', 'Opportunity posted successfully!', [
+      Alert.alert('Success', 'Opportunity submitted. It will be reviewed for risk.', [
         {
           text: 'OK',
           onPress: () => {
-            // Reset form
             setTitle('');
             setDescription('');
-            setType('formal');
+            setCategory('formal');
             setLocation('');
             setSelectedSkills([]);
             setCompensationMin('');
             setCompensationMax('');
-            setExperienceLevel('entry');
+            setPeriod('monthly');
+            setExperienceLevel('any');
             setDeadline('');
+            setIsRemote(false);
           },
         },
       ]);
     } catch (err) {
-      const msg =
-        err.response?.data?.message || err.response?.data?.error || 'Failed to post opportunity.';
+      const details = err.response?.data?.details;
+      const msg = details
+        ? details.map((d) => d.message).join('\n')
+        : err.response?.data?.error || err.response?.data?.message || 'Failed to post opportunity.';
       Alert.alert('Error', msg);
     } finally {
       setSubmitting(false);
@@ -190,15 +210,15 @@ const PostOpportunityScreen = ({ navigation }) => {
           />
         </View>
 
-        {/* Type Dropdown */}
+        {/* Category Dropdown */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Type</Text>
+          <Text style={styles.label}>Category</Text>
           <TouchableOpacity
             style={styles.dropdown}
             onPress={() => setShowTypeDropdown(!showTypeDropdown)}
           >
             <Text style={styles.dropdownText}>
-              {TYPES.find((t) => t.key === type)?.label || 'Select type'}
+              {TYPES.find((t) => t.key === category)?.label || 'Select category'}
             </Text>
             <Ionicons name="chevron-down" size={18} color="#6B7280" />
           </TouchableOpacity>
@@ -209,17 +229,17 @@ const PostOpportunityScreen = ({ navigation }) => {
                   key={t.key}
                   style={[
                     styles.dropdownItem,
-                    type === t.key && styles.dropdownItemActive,
+                    category === t.key && styles.dropdownItemActive,
                   ]}
                   onPress={() => {
-                    setType(t.key);
+                    setCategory(t.key);
                     setShowTypeDropdown(false);
                   }}
                 >
                   <Text
                     style={[
                       styles.dropdownItemText,
-                      type === t.key && styles.dropdownItemTextActive,
+                      category === t.key && styles.dropdownItemTextActive,
                     ]}
                   >
                     {t.label}
@@ -247,11 +267,10 @@ const PostOpportunityScreen = ({ navigation }) => {
           <Text style={styles.label}>Required Skills</Text>
           <View style={styles.selectedSkillsRow}>
             {selectedSkills.map((skill) => {
-              const skillId = skill._id || skill.id || skill.name;
-              const skillName = skill.name || skill.skill || skillId;
+              const skillId = skill._id || skill.id;
               return (
                 <View key={skillId} style={styles.selectedSkillChip}>
-                  <Text style={styles.selectedSkillText}>{skillName}</Text>
+                  <Text style={styles.selectedSkillText}>{skill.name}</Text>
                   <TouchableOpacity onPress={() => removeSkill(skillId)}>
                     <Ionicons name="close" size={14} color="#EA580C" />
                   </TouchableOpacity>
@@ -290,7 +309,42 @@ const PostOpportunityScreen = ({ navigation }) => {
               keyboardType="numeric"
             />
           </View>
+          <View style={styles.periodRow}>
+            {PERIODS.map((p) => (
+              <TouchableOpacity
+                key={p.key}
+                style={[styles.periodChip, period === p.key && styles.periodChipActive]}
+                onPress={() => setPeriod(p.key)}
+              >
+                <Text
+                  style={[
+                    styles.periodChipText,
+                    period === p.key && styles.periodChipTextActive,
+                  ]}
+                >
+                  {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
+
+        {/* Remote toggle */}
+        <TouchableOpacity
+          style={styles.toggleRow}
+          onPress={() => setIsRemote((prev) => !prev)}
+          activeOpacity={0.7}
+        >
+          <View>
+            <Text style={styles.label}>Remote work</Text>
+            <Text style={styles.toggleHint}>Can be done from anywhere</Text>
+          </View>
+          <Ionicons
+            name={isRemote ? 'toggle' : 'toggle-outline'}
+            size={32}
+            color={isRemote ? '#F97316' : '#D1D5DB'}
+          />
+        </TouchableOpacity>
 
         {/* Experience Level */}
         <View style={styles.inputGroup}>
@@ -392,20 +446,18 @@ const PostOpportunityScreen = ({ navigation }) => {
             ) : (
               <FlatList
                 data={filteredSkills}
-                keyExtractor={(item) => item._id || item.id || item.name || Math.random().toString()}
+                keyExtractor={(item) => item._id || item.id}
                 renderItem={({ item }) => {
-                  const skillId = item._id || item.id || item.name;
+                  const skillId = item._id || item.id;
                   const isSelected = selectedSkills.some(
-                    (s) => (s._id || s.id || s.name) === skillId
+                    (s) => (s._id || s.id) === skillId
                   );
                   return (
                     <TouchableOpacity
                       style={styles.modalSkillItem}
                       onPress={() => toggleSkill(item)}
                     >
-                      <Text style={styles.modalSkillText}>
-                        {item.name || item.skill || skillId}
-                      </Text>
+                      <Text style={styles.modalSkillText}>{item.name}</Text>
                       <Ionicons
                         name={isSelected ? 'checkbox' : 'square-outline'}
                         size={22}
@@ -560,6 +612,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  periodRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  periodChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  periodChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  periodChipText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  periodChipTextActive: {
+    color: '#F97316',
+    fontWeight: '600',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  toggleHint: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
   },
   halfInput: {
     flex: 1,

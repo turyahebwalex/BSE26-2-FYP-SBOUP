@@ -21,8 +21,9 @@ const SECTIONS = [
 ];
 
 const TEMPLATES = [
-  { key: 'professional', label: 'Professional', description: 'Clean, formal layout' },
-  { key: 'modern', label: 'Modern', description: 'Contemporary, stylish design' },
+  { key: 'chronological', label: 'Chronological', description: 'Timeline of experience' },
+  { key: 'skills_based', label: 'Skills-based', description: 'Highlights competencies' },
+  { key: 'portfolio_focused', label: 'Portfolio', description: 'Showcases your work' },
 ];
 
 const GenerateCVScreen = ({ navigation }) => {
@@ -32,7 +33,7 @@ const GenerateCVScreen = ({ navigation }) => {
     education: true,
     communityWork: false,
   });
-  const [selectedTemplate, setSelectedTemplate] = useState('professional');
+  const [selectedTemplate, setSelectedTemplate] = useState('chronological');
   const [generating, setGenerating] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [cvId, setCvId] = useState(null);
@@ -60,12 +61,13 @@ const GenerateCVScreen = ({ navigation }) => {
 
     try {
       const { data } = await cvAPI.generate({
-        sections: includeSections,
-        template: selectedTemplate,
+        templateType: selectedTemplate,
+        selectedData: { sections: includeSections },
       });
 
-      const url = data.downloadUrl || data.url || data.link;
-      const id = data.cvId || data.id || data._id;
+      const cv = data.cv || data;
+      const url = cv.fileUrl || data.downloadUrl || data.url;
+      const id = cv._id || data.cvId || data.id;
 
       if (url) {
         setDownloadUrl(url);

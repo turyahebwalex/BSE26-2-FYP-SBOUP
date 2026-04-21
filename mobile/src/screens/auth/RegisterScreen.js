@@ -28,7 +28,7 @@ const RegisterScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState('skilled_worker');
-  const [location, setLocation] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -41,16 +41,16 @@ const RegisterScreen = ({ navigation }) => {
       Alert.alert('Error', 'Please enter your email address.');
       return;
     }
-    if (!phone.trim()) {
-      Alert.alert('Error', 'Please enter your phone number.');
-      return;
-    }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters.');
+    if (password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters.');
       return;
     }
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match.');
+      return;
+    }
+    if (role === 'employer' && !companyName.trim()) {
+      Alert.alert('Error', 'Please provide your company name.');
       return;
     }
 
@@ -58,10 +58,10 @@ const RegisterScreen = ({ navigation }) => {
     const result = await register({
       fullName: fullName.trim(),
       email: email.trim().toLowerCase(),
-      phone: phone.trim(),
+      phoneNumber: phone.trim(),
       password,
       role,
-      location: location.trim(),
+      ...(role === 'employer' ? { companyName: companyName.trim() } : {}),
     });
     setLoading(false);
 
@@ -165,17 +165,19 @@ const RegisterScreen = ({ navigation }) => {
               />
             </View>
 
-            {/* Location */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Location</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Kampala, Uganda"
-                placeholderTextColor="#9CA3AF"
-                value={location}
-                onChangeText={setLocation}
-              />
-            </View>
+            {/* Company (employer only) */}
+            {role === 'employer' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Company Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Your company or business name"
+                  placeholderTextColor="#9CA3AF"
+                  value={companyName}
+                  onChangeText={setCompanyName}
+                />
+              </View>
+            )}
 
             {/* Password */}
             <View style={styles.inputGroup}>
@@ -183,7 +185,7 @@ const RegisterScreen = ({ navigation }) => {
               <View style={styles.passwordContainer}>
                 <TextInput
                   style={styles.passwordInput}
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   placeholderTextColor="#9CA3AF"
                   value={password}
                   onChangeText={setPassword}

@@ -53,7 +53,7 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await opportunityAPI.update(oppId, { status: 'archived' });
+              await opportunityAPI.archive(oppId);
               fetchOpportunities();
             } catch {
               Alert.alert('Error', 'Failed to archive opportunity.');
@@ -64,9 +64,18 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
     );
   };
 
+  const STATUS_STYLES = {
+    published: { bg: '#D1FAE5', text: '#059669', label: 'Published' },
+    draft: { bg: '#F3F4F6', text: '#6B7280', label: 'Draft' },
+    under_review: { bg: '#FEF3C7', text: '#D97706', label: 'Under Review' },
+    blocked: { bg: '#FEE2E2', text: '#DC2626', label: 'Blocked' },
+    archived: { bg: '#E5E7EB', text: '#6B7280', label: 'Archived' },
+  };
+
   const renderOpportunity = ({ item }) => {
     const oppId = item._id || item.id;
-    const isActive = item.status === 'active' || item.status === 'open' || !item.status;
+    const statusStyle = STATUS_STYLES[item.status] || STATUS_STYLES.draft;
+    const canArchive = item.status === 'published' || item.status === 'draft';
 
     return (
       <View style={styles.card}>
@@ -76,25 +85,13 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
               {item.title}
             </Text>
             <Text style={styles.cardType}>
-              {(item.type || 'formal').charAt(0).toUpperCase() +
-                (item.type || 'formal').slice(1)}
+              {(item.category || 'formal').charAt(0).toUpperCase() +
+                (item.category || 'formal').slice(1)}
             </Text>
           </View>
-          <View
-            style={[
-              styles.statusBadge,
-              {
-                backgroundColor: isActive ? '#D1FAE5' : '#F3F4F6',
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusText,
-                { color: isActive ? '#059669' : '#9CA3AF' },
-              ]}
-            >
-              {isActive ? 'Active' : item.status || 'Inactive'}
+          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+            <Text style={[styles.statusText, { color: statusStyle.text }]}>
+              {statusStyle.label}
             </Text>
           </View>
         </View>
@@ -103,7 +100,7 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
           <View style={styles.metaItem}>
             <Ionicons name="people-outline" size={14} color="#6B7280" />
             <Text style={styles.metaText}>
-              {item.applicationCount || item.applicants || 0} applicants
+              {item.applicationCount || 0} applicants
             </Text>
           </View>
           <View style={styles.metaItem}>
@@ -139,7 +136,7 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
             </Text>
           </TouchableOpacity>
 
-          {isActive && (
+          {canArchive && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => handleArchive(oppId, item.title)}

@@ -15,32 +15,46 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { profileAPI, skillAPI } from '../../services/api';
 
-const EditProfileScreen = ({ route, navigation }) => {
-  const existingProfile = route.params?.profile;
+const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced', 'expert'];
+const EXPERIENCE_CATEGORIES = ['formal', 'contract', 'freelance', 'apprenticeship', 'community'];
 
+const EditProfileScreen = ({ route, navigation }) => {
+  const existingProfile = route.params?.profile || null;
+  const existingSkills = route.params?.skills || [];
+  const existingExperiences = route.params?.experiences || [];
+  const existingEducation = route.params?.education || [];
+
+  const [title, setTitle] = useState(existingProfile?.title || '');
   const [bio, setBio] = useState(existingProfile?.bio || '');
-  const [skills, setSkills] = useState(existingProfile?.skills || []);
-  const [experience, setExperience] = useState(existingProfile?.experience || []);
-  const [education, setEducation] = useState(existingProfile?.education || []);
+  const [location, setLocation] = useState(existingProfile?.location || '');
+  const [skills, setSkills] = useState(existingSkills);
+  const [experiences, setExperiences] = useState(existingExperiences);
+  const [education, setEducation] = useState(existingEducation);
   const [saving, setSaving] = useState(false);
 
   // Skill picker modal
   const [allSkills, setAllSkills] = useState([]);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillSearch, setSkillSearch] = useState('');
+  const [pendingSkill, setPendingSkill] = useState(null);
+  const [pendingProficiency, setPendingProficiency] = useState('intermediate');
 
-  // Add experience form
+  // Experience form
   const [showExpForm, setShowExpForm] = useState(false);
-  const [expTitle, setExpTitle] = useState('');
+  const [expJobTitle, setExpJobTitle] = useState('');
   const [expCompany, setExpCompany] = useState('');
+  const [expCategory, setExpCategory] = useState('formal');
   const [expStartDate, setExpStartDate] = useState('');
   const [expEndDate, setExpEndDate] = useState('');
+  const [expDescription, setExpDescription] = useState('');
 
-  // Add education form
+  // Education form
   const [showEduForm, setShowEduForm] = useState(false);
   const [eduQualification, setEduQualification] = useState('');
   const [eduInstitution, setEduInstitution] = useState('');
-  const [eduYear, setEduYear] = useState('');
+  const [eduField, setEduField] = useState('');
+  const [eduStartYear, setEduStartYear] = useState('');
+  const [eduEndYear, setEduEndYear] = useState('');
 
   useEffect(() => {
     fetchSkills();
@@ -52,117 +66,175 @@ const EditProfileScreen = ({ route, navigation }) => {
       const list = data.skills || data.data || data || [];
       setAllSkills(Array.isArray(list) ? list : []);
     } catch {
-      // Skills can be typed manually
+      // Non-fatal
     }
   };
 
-  const toggleSkill = (skill) => {
-    const skillName = skill.name || skill.skill || skill;
-    const exists = skills.find((s) => {
-      const sName = typeof s === 'string' ? s : s.name || s.skill;
-      return sName === skillName;
+  const ensureProfile = async () => {
+    if (existingProfile?._id) return existingProfile;
+    if (!title.trim()) {
+      Alert.alert('Error', 'Please enter a professional title.');
+      return null;
+    }
+    const { data } = await profileAPI.createProfile({
+      title: title.trim(),
+      bio: bio.trim(),
+      location: location.trim(),
+      visibility: 'public',
     });
-    if (exists) {
-      setSkills((prev) =>
-        prev.filter((s) => {
-          const sName = typeof s === 'string' ? s : s.name || s.skill;
-          return sName !== skillName;
-        })
-      );
-    } else {
-      setSkills((prev) => [
-        ...prev,
-        { name: skillName, skill: skill._id || skill.id || skillName, proficiency: 'intermediate' },
-      ]);
-    }
+    return data.profile || data;
   };
 
-  const removeSkill = (index) => {
-    setSkills((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const addExperience = () => {
-    if (!expTitle.trim() || !expCompany.trim()) {
-      Alert.alert('Error', 'Please enter a title and company.');
+  const handleSaveProfile = async () => {
+    if (!title.trim()) {
+      Alert.alert('Error', 'Professional title is required.');
       return;
     }
-    setExperience((prev) => [
-      ...prev,
-      {
-        title: expTitle.trim(),
-        company: expCompany.trim(),
-        startDate: expStartDate.trim() || undefined,
-        endDate: expEndDate.trim() || undefined,
-      },
-    ]);
-    setExpTitle('');
-    setExpCompany('');
-    setExpStartDate('');
-    setExpEndDate('');
-    setShowExpForm(false);
-  };
-
-  const removeExperience = (index) => {
-    setExperience((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const addEducation = () => {
-    if (!eduQualification.trim() || !eduInstitution.trim()) {
-      Alert.alert('Error', 'Please enter a qualification and institution.');
-      return;
-    }
-    setEducation((prev) => [
-      ...prev,
-      {
-        qualification: eduQualification.trim(),
-        institution: eduInstitution.trim(),
-        year: eduYear.trim() || undefined,
-      },
-    ]);
-    setEduQualification('');
-    setEduInstitution('');
-    setEduYear('');
-    setShowEduForm(false);
-  };
-
-  const removeEducation = (index) => {
-    setEducation((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = {
-        bio: bio.trim(),
-        skills: skills.map((s) => {
-          if (typeof s === 'string') return { name: s };
-          return s;
-        }),
-        experience,
-        education,
-      };
-
-      if (existingProfile) {
-        await profileAPI.updateProfile(payload);
+      if (existingProfile?._id) {
+        await profileAPI.updateProfile({
+          title: title.trim(),
+          bio: bio.trim(),
+          location: location.trim(),
+        });
       } else {
-        await profileAPI.createProfile(payload);
+        await profileAPI.createProfile({
+          title: title.trim(),
+          bio: bio.trim(),
+          location: location.trim(),
+          visibility: 'public',
+        });
       }
-
-      Alert.alert('Success', 'Profile saved successfully!');
+      Alert.alert('Saved', 'Profile saved.');
       navigation.goBack();
     } catch (err) {
       const msg =
-        err.response?.data?.message || err.response?.data?.error || 'Failed to save profile.';
+        err.response?.data?.error || err.response?.data?.message || 'Failed to save profile.';
       Alert.alert('Error', msg);
     } finally {
       setSaving(false);
     }
   };
 
-  const filteredSkills = allSkills.filter((s) => {
-    const name = (s.name || s.skill || '').toLowerCase();
-    return name.includes(skillSearch.toLowerCase());
-  });
+  const openSkillPicker = (skill) => {
+    setPendingSkill(skill);
+    setPendingProficiency('intermediate');
+  };
+
+  const confirmAddSkill = async () => {
+    if (!pendingSkill) return;
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addSkill({
+        skillId: pendingSkill._id || pendingSkill.id,
+        proficiencyLevel: pendingProficiency,
+        classification: 'primary',
+      });
+      const added = data.profileSkill || data;
+      setSkills((prev) => [...prev, { ...added, skillId: pendingSkill }]);
+      setPendingSkill(null);
+      setShowSkillModal(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add skill.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removeSkill = async (profileSkill) => {
+    try {
+      await profileAPI.removeSkill(profileSkill._id);
+      setSkills((prev) => prev.filter((s) => s._id !== profileSkill._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove skill.');
+    }
+  };
+
+  const addExperience = async () => {
+    if (!expJobTitle.trim() || !expStartDate.trim()) {
+      Alert.alert('Error', 'Job title and start date are required.');
+      return;
+    }
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addExperience({
+        jobTitle: expJobTitle.trim(),
+        companyName: expCompany.trim(),
+        category: expCategory,
+        startDate: expStartDate.trim(),
+        endDate: expEndDate.trim() || null,
+        description: expDescription.trim(),
+      });
+      setExperiences((prev) => [...prev, data.experience || data]);
+      setExpJobTitle('');
+      setExpCompany('');
+      setExpStartDate('');
+      setExpEndDate('');
+      setExpDescription('');
+      setShowExpForm(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add experience.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removeExperience = async (exp) => {
+    try {
+      await profileAPI.deleteExperience(exp._id);
+      setExperiences((prev) => prev.filter((e) => e._id !== exp._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove experience.');
+    }
+  };
+
+  const addEducation = async () => {
+    if (!eduQualification.trim() || !eduInstitution.trim() || !eduStartYear.trim()) {
+      Alert.alert('Error', 'Qualification, institution and start year are required.');
+      return;
+    }
+    const startYear = parseInt(eduStartYear, 10);
+    const endYear = eduEndYear.trim() ? parseInt(eduEndYear, 10) : null;
+    if (Number.isNaN(startYear)) {
+      Alert.alert('Error', 'Start year must be a number.');
+      return;
+    }
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addEducation({
+        qualification: eduQualification.trim(),
+        institution: eduInstitution.trim(),
+        fieldOfStudy: eduField.trim(),
+        startYear,
+        endYear,
+      });
+      setEducation((prev) => [...prev, data.education || data]);
+      setEduQualification('');
+      setEduInstitution('');
+      setEduField('');
+      setEduStartYear('');
+      setEduEndYear('');
+      setShowEduForm(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add education.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removeEducation = async (edu) => {
+    try {
+      await profileAPI.deleteEducation(edu._id);
+      setEducation((prev) => prev.filter((e) => e._id !== edu._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove education.');
+    }
+  };
+
+  const filteredSkills = allSkills.filter((s) =>
+    (s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -182,7 +254,18 @@ const EditProfileScreen = ({ route, navigation }) => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Bio */}
+        {/* Basic Info */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Professional Title *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Carpenter, Web Developer"
+            placeholderTextColor="#9CA3AF"
+            value={title}
+            onChangeText={setTitle}
+          />
+        </View>
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Bio</Text>
           <TextInput
@@ -197,51 +280,62 @@ const EditProfileScreen = ({ route, navigation }) => {
           />
         </View>
 
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Location</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Kampala, Uganda"
+            placeholderTextColor="#9CA3AF"
+            value={location}
+            onChangeText={setLocation}
+          />
+        </View>
+
         {/* Skills */}
         <View style={styles.sectionHeader}>
           <Text style={styles.label}>Skills</Text>
           <TouchableOpacity onPress={() => setShowSkillModal(true)}>
-            <Text style={styles.addLink}>+ Add Skills</Text>
+            <Text style={styles.addLink}>+ Add Skill</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.skillsRow}>
-          {skills.map((skill, index) => {
-            const name =
-              typeof skill === 'string' ? skill : skill.name || skill.skill || '';
+          {skills.map((ps) => {
+            const name = ps.skillId?.name || ps.skillName || 'Skill';
             return (
-              <View key={index} style={styles.skillChip}>
-                <Text style={styles.skillChipText}>{name}</Text>
-                <TouchableOpacity onPress={() => removeSkill(index)}>
+              <View key={ps._id} style={styles.skillChip}>
+                <Text style={styles.skillChipText}>
+                  {name} · {ps.proficiencyLevel || 'intermediate'}
+                </Text>
+                <TouchableOpacity onPress={() => removeSkill(ps)}>
                   <Ionicons name="close" size={14} color="#EA580C" />
                 </TouchableOpacity>
               </View>
             );
           })}
-          {skills.length === 0 && (
-            <Text style={styles.emptyHint}>No skills added yet.</Text>
-          )}
+          {skills.length === 0 && <Text style={styles.emptyHint}>No skills added yet.</Text>}
         </View>
 
         {/* Experience */}
-        <View style={styles.sectionHeader}>
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
           <Text style={styles.label}>Experience</Text>
           <TouchableOpacity onPress={() => setShowExpForm(true)}>
             <Text style={styles.addLink}>+ Add</Text>
           </TouchableOpacity>
         </View>
 
-        {experience.map((exp, index) => (
-          <View key={index} style={styles.entryCard}>
+        {experiences.map((exp) => (
+          <View key={exp._id} style={styles.entryCard}>
             <View style={styles.entryInfo}>
-              <Text style={styles.entryTitle}>{exp.title}</Text>
-              <Text style={styles.entrySubtitle}>{exp.company}</Text>
+              <Text style={styles.entryTitle}>{exp.jobTitle}</Text>
+              <Text style={styles.entrySubtitle}>{exp.companyName}</Text>
               {(exp.startDate || exp.endDate) && (
                 <Text style={styles.entryDates}>
-                  {exp.startDate || ''} - {exp.endDate || 'Present'}
+                  {exp.startDate ? new Date(exp.startDate).toLocaleDateString() : ''} -{' '}
+                  {exp.endDate ? new Date(exp.endDate).toLocaleDateString() : 'Present'}
                 </Text>
               )}
             </View>
-            <TouchableOpacity onPress={() => removeExperience(index)}>
+            <TouchableOpacity onPress={() => removeExperience(exp)}>
               <Ionicons name="trash-outline" size={18} color="#EF4444" />
             </TouchableOpacity>
           </View>
@@ -251,10 +345,10 @@ const EditProfileScreen = ({ route, navigation }) => {
           <View style={styles.addForm}>
             <TextInput
               style={styles.input}
-              placeholder="Title / Position"
+              placeholder="Job Title"
               placeholderTextColor="#9CA3AF"
-              value={expTitle}
-              onChangeText={setExpTitle}
+              value={expJobTitle}
+              onChangeText={setExpJobTitle}
             />
             <TextInput
               style={[styles.input, { marginTop: 8 }]}
@@ -263,28 +357,53 @@ const EditProfileScreen = ({ route, navigation }) => {
               value={expCompany}
               onChangeText={setExpCompany}
             />
+            <View style={styles.chipRow}>
+              {EXPERIENCE_CATEGORIES.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.optionChip, expCategory === c && styles.optionChipActive]}
+                  onPress={() => setExpCategory(c)}
+                >
+                  <Text
+                    style={[styles.optionText, expCategory === c && styles.optionTextActive]}
+                  >
+                    {c}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <View style={styles.dateRow}>
               <TextInput
                 style={[styles.input, styles.halfInput]}
-                placeholder="Start (YYYY-MM)"
+                placeholder="Start (YYYY-MM-DD)"
                 placeholderTextColor="#9CA3AF"
                 value={expStartDate}
                 onChangeText={setExpStartDate}
               />
               <TextInput
                 style={[styles.input, styles.halfInput]}
-                placeholder="End (YYYY-MM)"
+                placeholder="End (YYYY-MM-DD)"
                 placeholderTextColor="#9CA3AF"
                 value={expEndDate}
                 onChangeText={setExpEndDate}
               />
             </View>
+            <TextInput
+              style={[styles.input, styles.textArea, { marginTop: 8 }]}
+              placeholder="Description"
+              placeholderTextColor="#9CA3AF"
+              value={expDescription}
+              onChangeText={setExpDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
             <View style={styles.formActions}>
               <TouchableOpacity onPress={() => setShowExpForm(false)}>
                 <Text style={styles.cancelLink}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addButton} onPress={addExperience}>
-                <Text style={styles.addButtonText}>Add Experience</Text>
+                <Text style={styles.addButtonText}>Add</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -298,14 +417,19 @@ const EditProfileScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {education.map((edu, index) => (
-          <View key={index} style={styles.entryCard}>
+        {education.map((edu) => (
+          <View key={edu._id} style={styles.entryCard}>
             <View style={styles.entryInfo}>
-              <Text style={styles.entryTitle}>{edu.qualification || edu.degree}</Text>
-              <Text style={styles.entrySubtitle}>{edu.institution || edu.school}</Text>
-              {edu.year && <Text style={styles.entryDates}>{edu.year}</Text>}
+              <Text style={styles.entryTitle}>{edu.qualification}</Text>
+              <Text style={styles.entrySubtitle}>{edu.institution}</Text>
+              {(edu.startYear || edu.endYear) && (
+                <Text style={styles.entryDates}>
+                  {edu.startYear}
+                  {edu.endYear ? ` - ${edu.endYear}` : ''}
+                </Text>
+              )}
             </View>
-            <TouchableOpacity onPress={() => removeEducation(index)}>
+            <TouchableOpacity onPress={() => removeEducation(edu)}>
               <Ionicons name="trash-outline" size={18} color="#EF4444" />
             </TouchableOpacity>
           </View>
@@ -329,27 +453,44 @@ const EditProfileScreen = ({ route, navigation }) => {
             />
             <TextInput
               style={[styles.input, { marginTop: 8 }]}
-              placeholder="Year (e.g. 2023)"
+              placeholder="Field of Study (optional)"
               placeholderTextColor="#9CA3AF"
-              value={eduYear}
-              onChangeText={setEduYear}
-              keyboardType="numeric"
+              value={eduField}
+              onChangeText={setEduField}
             />
+            <View style={styles.dateRow}>
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Start Year"
+                placeholderTextColor="#9CA3AF"
+                value={eduStartYear}
+                onChangeText={setEduStartYear}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="End Year (or blank)"
+                placeholderTextColor="#9CA3AF"
+                value={eduEndYear}
+                onChangeText={setEduEndYear}
+                keyboardType="numeric"
+              />
+            </View>
             <View style={styles.formActions}>
               <TouchableOpacity onPress={() => setShowEduForm(false)}>
                 <Text style={styles.cancelLink}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addButton} onPress={addEducation}>
-                <Text style={styles.addButtonText}>Add Education</Text>
+                <Text style={styles.addButtonText}>Add</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Save */}
+        {/* Save Profile (basic fields) */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.buttonDisabled]}
-          onPress={handleSave}
+          onPress={handleSaveProfile}
           disabled={saving}
         >
           {saving ? (
@@ -365,61 +506,105 @@ const EditProfileScreen = ({ route, navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Skills</Text>
-              <TouchableOpacity onPress={() => setShowSkillModal(false)}>
+              <Text style={styles.modalTitle}>
+                {pendingSkill ? `Proficiency: ${pendingSkill.name}` : 'Select Skill'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowSkillModal(false);
+                  setPendingSkill(null);
+                }}
+              >
                 <Ionicons name="close" size={24} color="#1F2937" />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalSearch}>
-              <Ionicons name="search-outline" size={16} color="#9CA3AF" />
-              <TextInput
-                style={styles.modalSearchInput}
-                placeholder="Search skills..."
-                placeholderTextColor="#9CA3AF"
-                value={skillSearch}
-                onChangeText={setSkillSearch}
-              />
-            </View>
+            {!pendingSkill ? (
+              <>
+                <View style={styles.modalSearch}>
+                  <Ionicons name="search-outline" size={16} color="#9CA3AF" />
+                  <TextInput
+                    style={styles.modalSearchInput}
+                    placeholder="Search skills..."
+                    placeholderTextColor="#9CA3AF"
+                    value={skillSearch}
+                    onChangeText={setSkillSearch}
+                  />
+                </View>
 
-            <FlatList
-              data={filteredSkills}
-              keyExtractor={(item) =>
-                item._id || item.id || item.name || Math.random().toString()
-              }
-              renderItem={({ item }) => {
-                const name = item.name || item.skill || '';
-                const isSelected = skills.some((s) => {
-                  const sName = typeof s === 'string' ? s : s.name || s.skill;
-                  return sName === name;
-                });
-                return (
-                  <TouchableOpacity
-                    style={styles.modalSkillItem}
-                    onPress={() => toggleSkill(item)}
-                  >
-                    <Text style={styles.modalSkillText}>{name}</Text>
-                    <Ionicons
-                      name={isSelected ? 'checkbox' : 'square-outline'}
-                      size={22}
-                      color={isSelected ? '#F97316' : '#D1D5DB'}
-                    />
-                  </TouchableOpacity>
-                );
-              }}
-              ListEmptyComponent={
-                <Text style={styles.modalEmpty}>No skills found.</Text>
-              }
-            />
-
-            <TouchableOpacity
-              style={styles.modalDoneButton}
-              onPress={() => setShowSkillModal(false)}
-            >
-              <Text style={styles.modalDoneText}>
-                Done ({skills.length} selected)
-              </Text>
-            </TouchableOpacity>
+                <FlatList
+                  data={filteredSkills}
+                  keyExtractor={(item) => item._id || item.id}
+                  renderItem={({ item }) => {
+                    const already = skills.some(
+                      (s) => (s.skillId?._id || s.skillId) === item._id
+                    );
+                    return (
+                      <TouchableOpacity
+                        style={styles.modalSkillItem}
+                        disabled={already}
+                        onPress={() => openSkillPicker(item)}
+                      >
+                        <Text
+                          style={[
+                            styles.modalSkillText,
+                            already && { color: '#9CA3AF' },
+                          ]}
+                        >
+                          {item.name}
+                          {already ? ' (added)' : ''}
+                        </Text>
+                        {!already && (
+                          <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <Text style={styles.modalEmpty}>No skills found.</Text>
+                  }
+                />
+              </>
+            ) : (
+              <View style={{ padding: 20 }}>
+                <Text style={[styles.label, { marginBottom: 12 }]}>
+                  Choose your proficiency level
+                </Text>
+                <View style={styles.chipRow}>
+                  {PROFICIENCY_LEVELS.map((level) => (
+                    <TouchableOpacity
+                      key={level}
+                      style={[
+                        styles.optionChip,
+                        pendingProficiency === level && styles.optionChipActive,
+                      ]}
+                      onPress={() => setPendingProficiency(level)}
+                    >
+                      <Text
+                        style={[
+                          styles.optionText,
+                          pendingProficiency === level && styles.optionTextActive,
+                        ]}
+                      >
+                        {level}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 20 }]}
+                  onPress={confirmAddSkill}
+                >
+                  <Text style={styles.saveButtonText}>Add Skill</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setPendingSkill(null)}
+                  style={{ marginTop: 10, alignItems: 'center' }}
+                >
+                  <Text style={styles.cancelLink}>Back</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -428,10 +613,7 @@ const EditProfileScreen = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -446,27 +628,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  screenTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 6,
-  },
+  screenTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 32 },
+  inputGroup: { marginBottom: 16 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
   input: {
     borderWidth: 1,
     borderColor: '#D1D5DB',
@@ -477,25 +643,19 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     backgroundColor: '#FFFFFF',
   },
-  textArea: {
-    minHeight: 100,
-  },
+  textArea: { minHeight: 90 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
   },
-  addLink: {
-    fontSize: 14,
-    color: '#F97316',
-    fontWeight: '600',
-  },
+  addLink: { fontSize: 14, color: '#F97316', fontWeight: '600' },
   skillsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   skillChip: {
     flexDirection: 'row',
@@ -508,16 +668,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FDBA74',
   },
-  skillChipText: {
-    fontSize: 13,
-    color: '#EA580C',
-    fontWeight: '500',
-  },
-  emptyHint: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    fontStyle: 'italic',
-  },
+  skillChipText: { fontSize: 13, color: '#EA580C', fontWeight: '500' },
+  emptyHint: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -531,24 +683,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  entryInfo: {
-    flex: 1,
-  },
-  entryTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  entrySubtitle: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  entryDates: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 2,
-  },
+  entryInfo: { flex: 1 },
+  entryTitle: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
+  entrySubtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  entryDates: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   addForm: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -557,14 +695,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-  dateRow: {
+  chipRow: {
     flexDirection: 'row',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
     marginTop: 8,
   },
-  halfInput: {
-    flex: 1,
+  optionChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
+  optionChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  optionText: { fontSize: 12, color: '#6B7280', textTransform: 'capitalize' },
+  optionTextActive: { color: '#F97316', fontWeight: '600' },
+  dateRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  halfInput: { flex: 1 },
   formActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -572,21 +724,14 @@ const styles = StyleSheet.create({
     gap: 16,
     marginTop: 12,
   },
-  cancelLink: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
+  cancelLink: { fontSize: 14, color: '#6B7280' },
   addButton: {
     backgroundColor: '#F97316',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  addButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   saveButton: {
     backgroundColor: '#F97316',
     borderRadius: 12,
@@ -594,15 +739,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Modal
+  buttonDisabled: { opacity: 0.7 },
+  saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -612,7 +750,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '70%',
+    maxHeight: '75%',
     paddingBottom: 24,
   },
   modalHeader: {
@@ -624,11 +762,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
+  modalTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
   modalSearch: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -655,28 +789,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F9FAFB',
   },
-  modalSkillText: {
-    fontSize: 15,
-    color: '#374151',
-  },
+  modalSkillText: { fontSize: 15, color: '#374151' },
   modalEmpty: {
     textAlign: 'center',
     color: '#9CA3AF',
     paddingVertical: 24,
     fontSize: 14,
-  },
-  modalDoneButton: {
-    backgroundColor: '#F97316',
-    marginHorizontal: 20,
-    marginTop: 12,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  modalDoneText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
   },
 });
 

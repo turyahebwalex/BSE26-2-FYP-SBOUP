@@ -15,6 +15,7 @@ import { applicationAPI } from '../../services/api';
 
 const STATUS_ACTIONS = [
   { key: 'under_review', label: 'Review', icon: 'eye-outline', color: '#3B82F6' },
+  { key: 'shortlisted', label: 'Shortlist', icon: 'star-outline', color: '#8B5CF6' },
   { key: 'interview_scheduled', label: 'Interview', icon: 'calendar-outline', color: '#D97706' },
   { key: 'offer_extended', label: 'Offer', icon: 'checkmark-circle-outline', color: '#059669' },
   { key: 'rejected', label: 'Reject', icon: 'close-circle-outline', color: '#EF4444' },
@@ -76,18 +77,22 @@ const ViewApplicationsScreen = ({ route, navigation }) => {
     const colors = {
       submitted: '#6B7280',
       under_review: '#3B82F6',
+      shortlisted: '#8B5CF6',
       interview_scheduled: '#D97706',
       rejected: '#EF4444',
       offer_extended: '#059669',
+      withdrawn: '#9CA3AF',
     };
     return colors[status] || '#6B7280';
   };
 
   const renderApplication = ({ item }) => {
     const appId = item._id || item.id;
-    const applicant = item.applicant || item.user || {};
-    const applicantName = applicant.fullName || applicant.name || applicant.email || 'Applicant';
+    const profile = item.profileId || {};
+    const applicant = profile.userId || {};
+    const applicantName = applicant.fullName || applicant.email || 'Applicant';
     const applicantEmail = applicant.email || '';
+    const profileTitle = profile.title || '';
     const status = item.status || 'submitted';
 
     return (
@@ -101,6 +106,9 @@ const ViewApplicationsScreen = ({ route, navigation }) => {
             </View>
             <View style={styles.applicantText}>
               <Text style={styles.applicantName}>{applicantName}</Text>
+              {profileTitle ? (
+                <Text style={styles.applicantTitle}>{profileTitle}</Text>
+              ) : null}
               {applicantEmail ? (
                 <Text style={styles.applicantEmail}>{applicantEmail}</Text>
               ) : null}
@@ -132,10 +140,10 @@ const ViewApplicationsScreen = ({ route, navigation }) => {
         )}
 
         {/* Applied Date */}
-        {item.createdAt && (
+        {item.submittedAt && (
           <Text style={styles.dateText}>
             Applied{' '}
-            {new Date(item.createdAt).toLocaleDateString('en-UG', {
+            {new Date(item.submittedAt).toLocaleDateString('en-UG', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
@@ -342,6 +350,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#1F2937',
+  },
+  applicantTitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 1,
   },
   applicantEmail: {
     fontSize: 12,

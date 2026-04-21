@@ -30,17 +30,13 @@ const EmployerDashboardScreen = ({ navigation }) => {
       const oppList = Array.isArray(list) ? list : [];
       setOpportunities(oppList);
 
-      const activeCount = oppList.filter(
-        (o) => o.status === 'active' || o.status === 'open' || !o.status
-      ).length;
+      const activeCount = oppList.filter((o) => o.status === 'published').length;
 
-      // Gather application counts
       let totalApps = 0;
       let pendingApps = 0;
       oppList.forEach((opp) => {
-        const appCount = opp.applicationCount || opp.applicants || 0;
-        totalApps += appCount;
-        pendingApps += opp.pendingCount || 0;
+        totalApps += opp.applicationCount || 0;
+        if (opp.status === 'under_review') pendingApps += 1;
       });
 
       setStats({
@@ -171,8 +167,12 @@ const EmployerDashboardScreen = ({ navigation }) => {
                       styles.statusDot,
                       {
                         backgroundColor:
-                          opp.status === 'active' || opp.status === 'open' || !opp.status
+                          opp.status === 'published'
                             ? '#10B981'
+                            : opp.status === 'under_review'
+                            ? '#F59E0B'
+                            : opp.status === 'blocked'
+                            ? '#EF4444'
                             : '#9CA3AF',
                       },
                     ]}
@@ -182,7 +182,7 @@ const EmployerDashboardScreen = ({ navigation }) => {
                   <View style={styles.metaItem}>
                     <Ionicons name="people-outline" size={14} color="#6B7280" />
                     <Text style={styles.metaText}>
-                      {opp.applicationCount || opp.applicants || 0} applicants
+                      {opp.applicationCount || 0} applicants
                     </Text>
                   </View>
                   <View style={styles.metaItem}>

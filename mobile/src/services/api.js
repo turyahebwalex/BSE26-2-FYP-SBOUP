@@ -6,39 +6,25 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor - attach access token
 api.interceptors.request.use(
   async (config) => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (err) {
-      // silently fail
-    }
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+    } catch (_) {}
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - refresh on 401
 let isRefreshing = false;
 let failedQueue = [];
 
 const processQueue = (error, token = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
+  failedQueue.forEach((p) => (error ? p.reject(error) : p.resolve(token)));
   failedQueue = [];
 };
 
@@ -46,7 +32,6 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
@@ -64,23 +49,15 @@ api.interceptors.response.use(
 
       try {
         const refreshToken = await AsyncStorage.getItem('refreshToken');
-        if (!refreshToken) {
-          throw new Error('No refresh token');
-        }
+        if (!refreshToken) throw new Error('No refresh token');
 
-        const { data } = await axios.post(`${BASE_URL}/auth/refresh-token`, {
-          refreshToken,
-        });
-
+        const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
         const newAccessToken = data.accessToken || data.token;
         await AsyncStorage.setItem('accessToken', newAccessToken);
-        if (data.refreshToken) {
-          await AsyncStorage.setItem('refreshToken', data.refreshToken);
-        }
+        if (data.refreshToken) await AsyncStorage.setItem('refreshToken', data.refreshToken);
 
         api.defaults.headers.common.Authorization = `Bearer ${newAccessToken}`;
         processQueue(null, newAccessToken);
-
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
@@ -91,99 +68,112 @@ api.interceptors.response.use(
         isRefreshing = false;
       }
     }
-
     return Promise.reject(error);
   }
 );
 
-// ── Auth API ──
+// ── Auth ──
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
   getMe: () => api.get('/auth/me'),
-  refreshToken: (refreshToken) =>
-    api.post('/auth/refresh-token', { refreshToken }),
+  refreshToken: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post(`/auth/reset-password/${token}`, { password }),
 };
 
-// ── Profile API ──
+// ── Profile ──
 export const profileAPI = {
-  getMyProfile: () => api.get('/profile/me'),
-  getProfile: (userId) => api.get(`/profile/${userId}`),
-  createProfile: (data) => api.post('/profile', data),
-  updateProfile: (data) => api.put('/profile', data),
+  getMyProfile: () => api.get('/profiles/me'),
+  getProfile: (id) => api.get(`/profiles/${id}`),
+  createProfile: (data) => api.post('/profiles', data),
+  updateProfile: (data) => api.put('/profiles/me', data),
+  addSkill: (data) => api.post('/profiles/skills', data),
+  removeSkill: (skillId) => api.delete(`/profiles/skills/${skillId}`),
+  addExperience: (data) => api.post('/profiles/experience', data),
+  updateExperience: (expId, data) => api.put(`/profiles/experience/${expId}`, data),
+  deleteExperience: (expId) => api.delete(`/profiles/experience/${expId}`),
+  addEducation: (data) => api.post('/profiles/education', data),
+  deleteEducation: (eduId) => api.delete(`/profiles/education/${eduId}`),
+  updatePreferences: (data) => api.put('/profiles/preferences', data),
 };
 
-// ── Opportunity API ──
+// ── Opportunity ──
 export const opportunityAPI = {
   getAll: (params) => api.get('/opportunities', { params }),
   getOne: (id) => api.get(`/opportunities/${id}`),
   create: (data) => api.post('/opportunities', data),
   update: (id, data) => api.put(`/opportunities/${id}`, data),
-  delete: (id) => api.delete(`/opportunities/${id}`),
-  getMyOpportunities: () => api.get('/opportunities/mine'),
-  search: (params) => api.get('/opportunities/search', { params }),
+  archive: (id) => api.delete(`/opportunities/${id}`),
+  getMyOpportunities: () => api.get('/opportunities/employer/mine'),
 };
 
-// ── Application API ──
+// ── Application ──
 export const applicationAPI = {
   apply: (data) => api.post('/applications', data),
-  getMyApplications: () => api.get('/applications/me'),
-  getForOpportunity: (opportunityId) =>
-    api.get(`/applications/opportunity/${opportunityId}`),
-  getOne: (id) => api.get(`/applications/${id}`),
-  updateStatus: (id, status) =>
-    api.put(`/applications/${id}/status`, { status }),
+  getMyApplications: () => api.get('/applications/mine'),
+  getForOpportunity: (opportunityId) => api.get(`/applications/opportunity/${opportunityId}`),
+  updateStatus: (id, status) => api.put(`/applications/${id}/status`, { status }),
   withdraw: (id) => api.put(`/applications/${id}/withdraw`),
 };
 
-// ── Matching API ──
+// ── Matching ──
 export const matchingAPI = {
   getRecommendations: () => api.get('/matching/recommendations'),
-  getMatchScore: (opportunityId) =>
-    api.get(`/matching/score/${opportunityId}`),
-  getTopCandidates: (opportunityId) =>
-    api.get(`/matching/candidates/${opportunityId}`),
+  getMatchScore: (profileId, opportunityId) =>
+    api.get('/matching/score', { params: { profileId, opportunityId } }),
 };
 
-// ── Learning API ──
+// ── Learning ──
 export const learningAPI = {
-  getMine: () => api.get('/learning/my-paths'),
-  getAll: () => api.get('/learning/paths'),
-  getOne: (id) => api.get(`/learning/paths/${id}`),
-  generate: (skillId) => api.post('/learning/generate', { skillId }),
-  updateProgress: (pathId, resourceId, progress) =>
-    api.put(`/learning/paths/${pathId}/progress`, { resourceId, progress }),
+  getMine: () => api.get('/learning/mine'),
+  generate: (targetSkill) => api.post('/learning/generate', { targetSkill }),
+  updateProgress: (pathId, resourceIndex, isCompleted) =>
+    api.put(`/learning/${pathId}/progress`, { resourceIndex, isCompleted }),
 };
 
-// ── CV API ──
+// ── CV ──
 export const cvAPI = {
   generate: (options) => api.post('/cv/generate', options),
-  getTemplates: () => api.get('/cv/templates'),
-  download: (id) => api.get(`/cv/download/${id}`, { responseType: 'blob' }),
+  getMine: () => api.get('/cv/mine'),
+  getOne: (id) => api.get(`/cv/${id}`),
+  delete: (id) => api.delete(`/cv/${id}`),
 };
 
-// ── Message API ──
+// ── Message ──
 export const messageAPI = {
   getInbox: () => api.get('/messages/inbox'),
   getConversation: (userId) => api.get(`/messages/conversation/${userId}`),
+  getUnreadCount: () => api.get('/messages/unread-count'),
   send: (data) => api.post('/messages', data),
-  markAsRead: (messageId) => api.put(`/messages/${messageId}/read`),
 };
 
-// ── Notification API ──
+// ── Notification ──
 export const notificationAPI = {
-  getAll: () => api.get('/notifications'),
+  getAll: (params) => api.get('/notifications', { params }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
   markAsRead: (id) => api.put(`/notifications/${id}/read`),
   markAllAsRead: () => api.put('/notifications/read-all'),
-  getUnreadCount: () => api.get('/notifications/unread-count'),
+  delete: (id) => api.delete(`/notifications/${id}`),
 };
 
-// ── Skill API ──
+// ── Skill ──
 export const skillAPI = {
-  getAll: () => api.get('/skills'),
+  getAll: (params) => api.get('/skills', { params }),
   getCategories: () => api.get('/skills/categories'),
-  search: (query) => api.get('/skills/search', { params: { q: query } }),
+};
+
+// ── Company ──
+export const companyAPI = {
+  getAll: (params) => api.get('/companies', { params }),
+  getOne: (id) => api.get(`/companies/${id}`),
+  create: (data) => api.post('/companies', data),
+  update: (id, data) => api.put(`/companies/${id}`, data),
+};
+
+// ── Report ──
+export const reportAPI = {
+  create: (data) => api.post('/reports', data),
 };
 
 export default api;
