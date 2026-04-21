@@ -21,14 +21,15 @@ const EmployerDashboard = () => {
   }, []);
 
   const published = opportunities.filter((o) => o.status === 'published').length;
-  const closed = opportunities.filter((o) => o.status === 'closed').length;
+  const archived = opportunities.filter((o) => o.status === 'archived').length;
+  const underReview = opportunities.filter((o) => o.status === 'under_review').length;
   const totalApps = opportunities.reduce((sum, o) => sum + (o.applicationCount || 0), 0);
 
   const statCards = [
     { label: 'Active Jobs', val: published, icon: FiBriefcase, color: 'text-green-600 bg-green-50' },
     { label: 'Total Applications', val: totalApps, icon: FiUsers, color: 'text-orange-600 bg-orange-50' },
-    { label: 'Closed Jobs', val: closed, icon: FiTrendingUp, color: 'text-gray-600 bg-gray-50' },
-    { label: 'Total Posted', val: opportunities.length, icon: FiEye, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Under Review', val: underReview, icon: FiTrendingUp, color: 'text-yellow-600 bg-yellow-50' },
+    { label: 'Archived', val: archived, icon: FiEye, color: 'text-gray-600 bg-gray-50' },
   ];
 
   return (
@@ -117,12 +118,14 @@ const EmployerDashboard = () => {
                       ? 'bg-green-100 text-green-700'
                       : opp.status === 'blocked'
                       ? 'bg-red-100 text-red-700'
-                      : opp.status === 'closed'
+                      : opp.status === 'archived'
                       ? 'bg-gray-100 text-gray-600'
+                      : opp.status === 'draft'
+                      ? 'bg-blue-100 text-blue-700'
                       : 'bg-yellow-100 text-yellow-700'
                   }`}
                 >
-                  {opp.status}
+                  {opp.status?.replace('_', ' ')}
                 </span>
               </div>
               <div className="flex gap-2 mt-3">

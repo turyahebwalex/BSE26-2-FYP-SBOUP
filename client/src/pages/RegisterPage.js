@@ -7,7 +7,7 @@ const RegisterPage = () => {
   const { register } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    fullName: '', email: '', phoneNumber: '', password: '', confirmPassword: '', role: 'skilled_worker', location: '',
+    fullName: '', email: '', phoneNumber: '', password: '', confirmPassword: '', role: 'skilled_worker', companyName: '',
   });
   const [loading, setLoading] = useState(false);
 
@@ -16,9 +16,20 @@ const RegisterPage = () => {
     if (form.password !== form.confirmPassword) {
       return toast.error('Passwords do not match');
     }
+    if (form.role === 'employer' && !form.companyName.trim()) {
+      return toast.error('Please provide your company name');
+    }
     setLoading(true);
     try {
-      await register(form);
+      const payload = {
+        fullName: form.fullName.trim(),
+        email: form.email.trim().toLowerCase(),
+        phoneNumber: form.phoneNumber.trim(),
+        password: form.password,
+        role: form.role,
+        ...(form.role === 'employer' ? { companyName: form.companyName.trim() } : {}),
+      };
+      await register(payload);
       toast.success('Registration successful! Please verify your email.');
       navigate('/login');
     } catch (error) {
@@ -79,10 +90,12 @@ const RegisterPage = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-              <input type="text" className="input-field" placeholder="e.g., Kampala, Uganda" value={form.location} onChange={update('location')} />
-            </div>
+            {form.role === 'employer' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                <input type="text" required className="input-field" placeholder="Your company or business name" value={form.companyName} onChange={update('companyName')} />
+              </div>
+            )}
 
             <p className="text-xs text-gray-500">By continuing, you agree to our <a href="#" className="text-primary">Terms and Conditions</a>.</p>
 

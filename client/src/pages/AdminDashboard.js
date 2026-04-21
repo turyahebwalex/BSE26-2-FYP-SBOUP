@@ -1,17 +1,44 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { adminAPI, reportAPI } from '../services/api';
 import { toast } from 'react-toastify';
-import { FiUsers, FiBriefcase, FiAlertTriangle, FiFlag, FiSearch, FiShield } from 'react-icons/fi';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement } from 'chart.js';
-import { Doughnut, Bar } from 'react-chartjs-2';
+import {
+  FiUsers,
+  FiBriefcase,
+  FiAlertTriangle,
+  FiFlag,
+  FiSearch,
+  FiShield,
+  FiMapPin,
+  FiActivity,
+  FiLock,
+  FiCheckSquare,
+  FiZap,
+} from 'react-icons/fi';
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  Filler,
+} from 'chart.js';
+import { Doughnut, Bar, Line } from 'react-chartjs-2';
 
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement);
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Filler);
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [flagged, setFlagged] = useState({ flaggedOpportunities: [], pendingReports: [] });
   const [users, setUsers] = useState([]);
   const [reports, setReports] = useState([]);
+  const [trends, setTrends] = useState([]);
+  const [alerts, setAlerts] = useState(null);
+  const [density, setDensity] = useState([]);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
@@ -20,14 +47,20 @@ const AdminDashboard = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [dashRes, flagRes, userRes] = await Promise.all([
+        const [dashRes, flagRes, userRes, trendRes, alertRes, densityRes] = await Promise.all([
           adminAPI.getDashboard(),
           adminAPI.getFlagged(),
           adminAPI.getUsers({ limit: 50 }),
+          adminAPI.getTrends({ range: '30d', granularity: 'day' }),
+          adminAPI.getAlerts(),
+          adminAPI.getUserDensity(),
         ]);
         setStats(dashRes.data);
         setFlagged(flagRes.data);
         setUsers(userRes.data.users || []);
+        setTrends(trendRes.data.trends || []);
+        setAlerts(alertRes.data.alerts || null);
+        setDensity(densityRes.data.density || []);
       } catch {}
       setLoading(false);
     };
@@ -112,6 +145,42 @@ const AdminDashboard = () => {
       ],
     };
   }, [users]);
+
+  const trendChart = useMemo(() => {
+    const labels = trends.map((t) => t._id);
+    const totals = trends.map((t) => t.total || 0);
+    const workers = trends.map((t) => t.byRole?.find((r) => r.role === 'skilled_worker')?.count || 0);
+    const employers = trends.map((t) => t.byRole?.find((r) => r.role === 'employer')?.count || 0);
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Total',
+          data: totals,
+          borderColor: '#F97316',
+          backgroundColor: 'rgba(249,115,22,0.15)',
+          fill: true,
+          tension: 0.3,
+        },
+        {
+          label: 'Workers',
+          data: workers,
+          borderColor: '#6366F1',
+          backgroundColor: 'rgba(99,102,241,0.1)',
+          fill: false,
+          tension: 0.3,
+        },
+        {
+          label: 'Employers',
+          data: employers,
+          borderColor: '#1F2937',
+          backgroundColor: 'rgba(31,41,55,0.1)',
+          fill: false,
+          tension: 0.3,
+        },
+      ],
+    };
+  }, [trends]);
 
   const statusDistribution = useMemo(() => {
     const counts = { active: 0, suspended: 0, deactivated: 0 };
@@ -224,6 +293,161 @@ const AdminDashboard = () => {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Registration Trends + Urgent Alerts */}
+          <div className="grid md:grid-cols-3 gap-6 mb-6">
+            <div className="card md:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <FiActivity className="text-primary" size={18} />
+                  <h2 className="font-semibold">Registration Trends (30d)</h2>
+                </div>
+                <span className="text-xs text-gray-400">
+                  {trends.length > 0 ? `${trends.length} period${trends.length > 1 ? 's' : ''}` : 'No data'}
+                </span>
+              </div>
+              <div className="h-64">
+                {trends.length > 0 ? (
+                  <Line
+                    data={trendChart}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+                      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                    }}
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                    No registrations in the last 30 days
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card border-l-4 border-l-red-400">
+              <div className="flex items-center gap-2 mb-4">
+                <FiZap className="text-red-500" size={18} />
+                <h2 className="font-semibold">Urgent Alerts</h2>
+              </div>
+              <div className="space-y-3">
+                {[
+                  {
+                    label: 'High-Risk Opportunities',
+                    val: alerts?.counts?.highRiskOpportunities ?? 0,
+                    icon: FiAlertTriangle,
+                    color: 'text-red-600 bg-red-50',
+                  },
+                  {
+                    label: 'Pending Reports',
+                    val: alerts?.counts?.pendingReports ?? 0,
+                    icon: FiFlag,
+                    color: 'text-orange-600 bg-orange-50',
+                  },
+                  {
+                    label: 'Locked Accounts',
+                    val: alerts?.counts?.lockedAccounts ?? 0,
+                    icon: FiLock,
+                    color: 'text-yellow-600 bg-yellow-50',
+                  },
+                  {
+                    label: 'Unverified Companies',
+                    val: alerts?.counts?.unverifiedCompanies ?? 0,
+                    icon: FiCheckSquare,
+                    color: 'text-blue-600 bg-blue-50',
+                  },
+                ].map((a) => (
+                  <div key={a.label} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${a.color}`}>
+                        <a.icon size={14} />
+                      </div>
+                      <span className="text-sm text-gray-600">{a.label}</span>
+                    </div>
+                    <span className="font-bold">{a.val}</span>
+                  </div>
+                ))}
+              </div>
+              {alerts?.highRiskOpportunities?.length > 0 && (
+                <div className="mt-4 pt-3 border-t">
+                  <p className="text-xs text-gray-500 mb-2">Top high-risk postings</p>
+                  <div className="space-y-1">
+                    {alerts.highRiskOpportunities.slice(0, 3).map((o) => (
+                      <div key={o._id} className="flex justify-between text-xs">
+                        <span className="truncate pr-2">{o.title}</span>
+                        <span className="font-bold text-red-600">{o.fraudRiskScore}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="card mb-6">
+            <h2 className="font-semibold mb-4">Quick Actions</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <button
+                onClick={() => setTab('moderation')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition text-sm font-medium"
+              >
+                <FiAlertTriangle size={16} />
+                Review Flagged
+              </button>
+              <button
+                onClick={() => setTab('reports')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 transition text-sm font-medium"
+              >
+                <FiFlag size={16} />
+                Handle Reports
+              </button>
+              <button
+                onClick={() => setTab('users')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 transition text-sm font-medium"
+              >
+                <FiUsers size={16} />
+                Manage Users
+              </button>
+              <Link
+                to="/opportunities"
+                className="flex items-center gap-2 p-3 rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 transition text-sm font-medium"
+              >
+                <FiBriefcase size={16} />
+                View Platform
+              </Link>
+            </div>
+          </div>
+
+          {/* User Density */}
+          <div className="card mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <FiMapPin className="text-primary" size={18} />
+                <h2 className="font-semibold">User Density by Location</h2>
+              </div>
+              <span className="text-xs text-gray-400">Top 10</span>
+            </div>
+            {density.length > 0 ? (
+              <div className="space-y-2">
+                {density.slice(0, 10).map((d, i) => {
+                  const max = density[0]?.count || 1;
+                  const pct = Math.round((d.count / max) * 100);
+                  return (
+                    <div key={d.location || i} className="flex items-center gap-3">
+                      <div className="w-32 text-sm text-gray-600 truncate">{d.location || 'Unknown'}</div>
+                      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="w-10 text-right text-xs font-semibold text-gray-600">{d.count}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-gray-400 text-sm text-center py-6">No location data available yet</p>
+            )}
           </div>
 
           {/* Recent Registrations */}

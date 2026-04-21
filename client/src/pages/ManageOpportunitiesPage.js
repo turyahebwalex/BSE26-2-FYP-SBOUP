@@ -4,10 +4,11 @@ import { FiSearch, FiEdit2, FiTrash2, FiEye, FiArchive, FiBriefcase, FiMapPin, F
 import { opportunityAPI } from '../services/api';
 
 const statusColors = {
-  open: 'bg-green-100 text-green-700',
-  closed: 'bg-red-100 text-red-700',
-  archived: 'bg-gray-100 text-gray-500',
+  published: 'bg-green-100 text-green-700',
+  draft: 'bg-blue-100 text-blue-700',
   under_review: 'bg-yellow-100 text-yellow-700',
+  blocked: 'bg-red-100 text-red-700',
+  archived: 'bg-gray-100 text-gray-500',
 };
 
 const ManageOpportunitiesPage = () => {
@@ -45,8 +46,8 @@ const ManageOpportunitiesPage = () => {
 
   const stats = useMemo(() => ({
     total: opportunities.length,
-    active: opportunities.filter((o) => o.status === 'open').length,
-    closed: opportunities.filter((o) => o.status === 'closed').length,
+    active: opportunities.filter((o) => o.status === 'published').length,
+    archived: opportunities.filter((o) => o.status === 'archived').length,
   }), [opportunities]);
 
   const handleArchive = async (id) => {
@@ -88,8 +89,8 @@ const ManageOpportunitiesPage = () => {
           <p className="text-xs text-gray-500 mt-1">Active</p>
         </div>
         <div className="card text-center">
-          <p className="text-2xl font-bold text-red-500">{stats.closed}</p>
-          <p className="text-xs text-gray-500 mt-1">Closed</p>
+          <p className="text-2xl font-bold text-gray-500">{stats.archived}</p>
+          <p className="text-xs text-gray-500 mt-1">Archived</p>
         </div>
       </div>
 
@@ -106,13 +107,13 @@ const ManageOpportunitiesPage = () => {
 
       {/* Status Filter */}
       <div className="flex gap-2 mb-6 overflow-x-auto">
-        {['', 'open', 'closed', 'archived'].map((s) => (
+        {['', 'published', 'draft', 'under_review', 'archived'].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
             className={`badge whitespace-nowrap ${statusFilter === s ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
           >
-            {s || 'All'}
+            {s ? s.replace('_', ' ') : 'All'}
           </button>
         ))}
       </div>

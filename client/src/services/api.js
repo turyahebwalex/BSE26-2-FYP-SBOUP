@@ -137,6 +137,10 @@ export const skillAPI = {
 // ─── Admin ───
 export const adminAPI = {
   getDashboard: () => api.get('/admin/dashboard'),
+  getTrends: (params) => api.get('/admin/dashboard/trends', { params }),
+  getUserDistribution: () => api.get('/admin/dashboard/user-distribution'),
+  getAlerts: () => api.get('/admin/dashboard/alerts'),
+  getUserDensity: () => api.get('/admin/dashboard/user-density'),
   getFlagged: () => api.get('/admin/flagged'),
   moderate: (data) => api.post('/admin/moderate', data),
   getUsers: (params) => api.get('/admin/users', { params }),
