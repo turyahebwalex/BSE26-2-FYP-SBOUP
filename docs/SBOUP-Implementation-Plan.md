@@ -1,4 +1,4 @@
-# SBOUP — Skills-Based Opportunity Unleashing Platform
+# SBOUP —  SKILL-BASED OPPORTUNITIES AND UPSKILLING PLATFORM
 ## Implementation Plan — 2-Week AI & Logic Sprint
 
 | Field | Value |
