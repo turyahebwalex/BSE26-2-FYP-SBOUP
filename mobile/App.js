@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AuthStack from './src/navigation/AuthStack';
 import WorkerTabs from './src/navigation/WorkerTabs';
@@ -29,12 +30,14 @@ const AppNavigator = () => {
 
 const App = () => {
   return (
-    <AuthProvider>
-      <NavigationContainer>
-        <StatusBar style="dark" />
-        <AppNavigator />
-      </NavigationContainer>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer>
+          <StatusBar style="dark" />
+          <AppNavigator />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 };
 

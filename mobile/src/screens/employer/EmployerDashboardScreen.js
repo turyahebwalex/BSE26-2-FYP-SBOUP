@@ -63,7 +63,7 @@ const EmployerDashboardScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F97316" />
           <Text style={styles.loadingText}>Loading dashboard...</Text>
@@ -73,7 +73,7 @@ const EmployerDashboardScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

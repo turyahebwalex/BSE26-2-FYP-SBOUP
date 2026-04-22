@@ -143,7 +143,7 @@ const DiscoverScreen = ({ navigation }) => {
 
   if (loading && !refreshing) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={styles.header}>
           <Text style={styles.screenTitle}>Discover</Text>
         </View>
@@ -156,7 +156,7 @@ const DiscoverScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Text style={styles.screenTitle}>Discover</Text>
       </View>

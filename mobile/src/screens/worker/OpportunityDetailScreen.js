@@ -84,7 +84,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F97316" />
         </View>
@@ -94,7 +94,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
 
   if (error || !opportunity) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
           <Text style={styles.errorTitle}>{error || 'Opportunity not found.'}</Text>
@@ -131,7 +131,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const badge = typeBadgeColors[category] || typeBadgeColors.formal;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
