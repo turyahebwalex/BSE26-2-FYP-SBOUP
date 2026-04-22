@@ -32,7 +32,10 @@ const LoginScreen = ({ navigation }) => {
     setLoading(false);
 
     if (!result.success) {
-      Alert.alert('Login Failed', result.error);
+      Alert.alert(
+        result.adminBlocked ? 'Admin Access Restricted' : 'Login Failed',
+        result.error
+      );
     }
   };
 
