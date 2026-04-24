@@ -25,7 +25,13 @@ export const AuthProvider = ({ children }) => {
       const token = await AsyncStorage.getItem('accessToken');
       if (token) {
         const { data } = await authAPI.getMe();
-        setUser(data.user || data);
+        const userData = data.user || data;
+        if (userData?.role === 'admin') {
+          await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+          setUser(null);
+        } else {
+          setUser(userData);
+        }
       }
     } catch (error) {
       console.log('Failed to load user:', error?.message);
@@ -41,13 +47,22 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.login({ email, password });
       const token = data.accessToken || data.token;
       const refresh = data.refreshToken;
+      const userData = data.user || data;
+
+      if (userData?.role === 'admin') {
+        return {
+          success: false,
+          adminBlocked: true,
+          error:
+            'System administrators must sign in from the web portal. Please open SkillBridge on your browser to continue.',
+        };
+      }
 
       await AsyncStorage.setItem('accessToken', token);
       if (refresh) {
         await AsyncStorage.setItem('refreshToken', refresh);
       }
 
-      const userData = data.user || data;
       setUser(userData);
       return { success: true, user: userData };
     } catch (error) {

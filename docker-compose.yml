@@ -167,8 +167,11 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - EXPO_PUBLIC_API_URL=http://localhost:5000/api
-      - EXPO_OFFLINE=1
+      # Phones on Expo Go CANNOT reach `localhost` — it points to the phone
+      # itself. Override this to your computer's LAN IP (same WiFi as phone)
+      # by exporting EXPO_PUBLIC_API_URL before `docker compose up`, or edit
+      # mobile/.env. See mobile/.env.example for details.
+      - EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-http://localhost:5000/api}
     depends_on:
       - server
 

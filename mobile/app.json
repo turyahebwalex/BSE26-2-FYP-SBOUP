@@ -5,15 +5,31 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/skillbridge_logo_square.png",
+    "splash": {
+      "image": "./assets/skillbridge_logo_transparent.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sboup.skillbridge"
     },
     "android": {
-      "package": "com.sboup.skillbridge"
+      "package": "com.sboup.skillbridge",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/skillbridge_logo_square.png",
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+    "web": {
+      "favicon": "./assets/skillbridge_logo_square.png"
     },
     "extra": {
       "apiUrl": "http://localhost:5000/api"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

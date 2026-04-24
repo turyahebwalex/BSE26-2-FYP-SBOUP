@@ -177,6 +177,35 @@ SBOUP is a multi-layer platform with **10 containerized services**:
 
 ## 5. Environment Configuration
 
+### Quick start (recommended for everyone)
+
+After your first clone or any fresh `git pull` where you don't yet have local `.env` files, run the bootstrap script **once** from the project root:
+
+```bash
+bash scripts/setup.sh
+```
+
+This does three things in order:
+
+1. Copies every `.env.example` to a matching `.env` where one doesn't exist (root, `client/`, `mobile/`, `ai-services/*`).
+2. Runs `npm install` for `server`, `client`, `mobile`.
+3. Runs `npm run seed` inside `server/` so the **shared demo users** below are created in your local Mongo.
+
+> If Node isn't installed on your host (i.e. you're a pure Docker user), the script only creates the `.env` files and exits cleanly. For seeding, run:
+> `docker compose up -d mongodb redis server && docker compose exec server npm run seed`
+
+### Shared demo credentials
+
+Every collaborator's `sboup_dev` database is seeded with **the same three accounts** so you can log in on both web and mobile without registering anything:
+
+| Role | Email | Password |
+|------|-------|----------|
+| **Admin** | `admin@skillbridge.ug` | `Admin@12345` |
+| **Employer** | `employer@demo.ug` | `Employer@12345` |
+| **Skilled Worker** | `worker@demo.ug` | `Worker@12345` |
+
+The seeder is idempotent — re-running it will not duplicate or reset these users. Source: [`server/src/utils/seeder.js`](../server/src/utils/seeder.js).
+
 ### For Docker users (recommended)
 
 Most environment variables are **already set inside `docker-compose.yml`**, so Docker users only need a `.env` file for secrets and optional API keys:
@@ -185,13 +214,7 @@ Most environment variables are **already set inside `docker-compose.yml`**, so D
 cp .env.example .env
 ```
 
-**Required** (edit in `.env`):
-
-```env
-JWT_SECRET=my-local-dev-secret-key-change-this
-```
-
-> **Note:** `docker-compose.yml` provides sensible defaults for all other variables (MongoDB URI, Redis host, service URLs, etc.). You only need to set `JWT_SECRET` for local development.
+The committed `.env.example` already contains a safe dev `JWT_SECRET`, so the server boots immediately. Replace it before any non-dev deployment.
 
 **Optional** (only if working on specific features):
 
@@ -694,6 +717,35 @@ Then rebuild: `docker compose build --no-cache client`
 1. Ensure your phone and computer are on the **same WiFi network**
 2. Check that `network_mode: host` is set for the mobile service
 3. If the QR code URL shows `127.0.0.1`, the container isn't using host networking correctly
+
+### Mobile: `Uncaught Error: java.io.IOException: Failed to download remote update`
+
+Expo Go shows this when it can't fetch the Metro JS bundle from your dev server. Causes and fixes, in order of likelihood:
+
+1. **Phone and laptop on different WiFi networks** (or the WiFi uses client isolation, common on university/hotel networks). Put both on the same SSID, or skip WiFi entirely by running Expo in tunnel mode:
+   ```bash
+   cd mobile
+   npm run start:tunnel
+   ```
+   The tunnel proxies the bundle via ngrok so the phone doesn't need your LAN.
+
+2. **`EXPO_PUBLIC_API_URL` points to `localhost`**. On a phone, `localhost` is the phone itself, so API calls go nowhere. Set it to your computer's LAN IP in `mobile/.env`:
+   ```env
+   EXPO_PUBLIC_API_URL=http://192.168.x.y:5000/api
+   ```
+   Find your IP with `ip -4 addr show` (Linux) or `ipconfig getifaddr en0` (macOS).
+
+3. **Firewall blocks port 8081** (Metro) on your computer. Allow it:
+   ```bash
+   sudo ufw allow 8081/tcp    # Linux
+   ```
+
+4. **Stale Metro cache.** Clear it:
+   ```bash
+   cd mobile && npx expo start --clear
+   ```
+
+5. **Expo Go SDK mismatch.** The app in `mobile/package.json` uses Expo SDK 54. Update Expo Go on your phone to the version that supports SDK 54 (Play Store / App Store).
 
 ### Mobile: `URL.protocol is not implemented`
 

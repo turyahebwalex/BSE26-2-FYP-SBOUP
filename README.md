@@ -69,8 +69,26 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 ---
 
 ## How to Run the Project
-*(Instructions to be added once deployment and setup are finalized)*
-Tentative Initial Instructions: https://github.com/turyahebwalex/BSE26-2-FYP-SBOUP/blob/main/docs/git-setup-and-contributor-guide.md
+
+Full guide: [docs/git-setup-and-contributor-guide.md](docs/git-setup-and-contributor-guide.md)
+
+**Quick start after any fresh clone or `git pull`:**
+
+```bash
+bash scripts/setup.sh
+```
+
+This creates every `.env` from its `.env.example`, installs Node deps for server/client/mobile, and seeds the database with the shared demo accounts below.
+
+### Shared demo credentials (seeded on every dev database)
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `admin@skillbridge.ug` | `Admin@12345` |
+| Employer | `employer@demo.ug` | `Employer@12345` |
+| Skilled Worker | `worker@demo.ug` | `Worker@12345` |
+
+Use these on both the web client and the Expo mobile app — no need to register a new user just to log in.
 
 ---
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Worker Screens
 import WorkerDashboardScreen from '../screens/worker/WorkerDashboardScreen';
@@ -62,6 +63,7 @@ const ProfileStackScreen = () => (
 );
 
 const WorkerTabs = () => {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -72,9 +74,9 @@ const WorkerTabs = () => {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#E5E7EB',
-          paddingBottom: 6,
+          paddingBottom: insets.bottom,
           paddingTop: 6,
-          height: 60,
+          height: 56 + insets.bottom,
         },
         tabBarLabelStyle: {
           fontSize: 11,

@@ -123,7 +123,7 @@ const MessagesScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={styles.header}>
           <Text style={styles.screenTitle}>Messages</Text>
         </View>
@@ -135,7 +135,7 @@ const MessagesScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Text style={styles.screenTitle}>Messages</Text>
       </View>
