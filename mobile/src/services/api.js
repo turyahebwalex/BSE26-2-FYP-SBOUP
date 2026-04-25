@@ -1,7 +1,32 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_PORT = 5000;
+
+// Auto-detect the backend host from Metro's dev-server address. When a phone
+// connects via LAN, hostUri looks like "10.70.1.222:8081" — using that same
+// IP for the backend means any collaborator on the same Wi-Fi as their phone
+// can run `docker compose up --build` without editing mobile/.env.
+// Set EXPO_PUBLIC_API_URL only to override (tunnels, deployed backend, etc).
+function resolveBaseUrl() {
+  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.expoGoConfig?.debuggerHost ||
+    Constants.manifest2?.extra?.expoGo?.debuggerHost ||
+    Constants.manifest?.debuggerHost;
+
+  const host = hostUri?.split(':')[0];
+  if (host && !host.endsWith('.exp.direct')) {
+    return `http://${host}:${API_PORT}/api`;
+  }
+
+  return `http://localhost:${API_PORT}/api`;
+}
+
+const BASE_URL = resolveBaseUrl();
 
 const api = axios.create({
   baseURL: BASE_URL,

@@ -167,11 +167,12 @@ services:
     stdin_open: true
     tty: true
     environment:
-      # Phones on Expo Go CANNOT reach `localhost` — it points to the phone
-      # itself. Override this to your computer's LAN IP (same WiFi as phone)
-      # by exporting EXPO_PUBLIC_API_URL before `docker compose up`, or edit
-      # mobile/.env. See mobile/.env.example for details.
-      - EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-http://localhost:5000/api}
+      # By default the app auto-detects the backend from Metro's host (see
+      # mobile/src/services/api.js), so any collaborator on the same Wi-Fi as
+      # their phone just runs `docker compose up --build` — no IP config
+      # needed. Set EXPO_PUBLIC_API_URL only to override (e.g. a public
+      # tunnel URL for remote collaborators on different networks).
+      - EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-}
     depends_on:
       - server
 
