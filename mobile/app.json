@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "icon": "./assets/skillbridge_logo_square.png",
+    "icon": "./assets/skillbridge_logo_transparent.png",
     "splash": {
       "image": "./assets/skillbridge_logo_transparent.png",
       "resizeMode": "contain",
@@ -18,12 +18,12 @@
     "android": {
       "package": "com.sboup.skillbridge",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/skillbridge_logo_square.png",
+        "foregroundImage": "./assets/skillbridge_logo_transparent.png",
         "backgroundColor": "#FFFFFF"
       }
     },
     "web": {
-      "favicon": "./assets/skillbridge_logo_square.png"
+      "favicon": "./assets/skillbridge_logo_transparent.png"
     },
     "extra": {
       "apiUrl": "http://localhost:5000/api"
