@@ -64,13 +64,35 @@ log "2/3  Installing Node dependencies (server, client, mobile)..."
 ( cd mobile && npm install --no-audit --no-fund )
 
 log "3/3  Seeding the database with demo users..."
+
+# Make sure MongoDB is reachable on localhost:27017 before seeding.
+# Try Docker first (zero-config for collaborators); fall back to a system
+# mongod the user may already be running.
+ensure_mongo() {
+  if ( exec 3<>/dev/tcp/127.0.0.1/27017 ) 2>/dev/null; then
+    exec 3>&-; exec 3<&-
+    return 0
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    log "  MongoDB not reachable on 27017 — starting via Docker..."
+    docker compose up -d mongodb redis >/dev/null
+    for _ in $(seq 1 30); do
+      if ( exec 3<>/dev/tcp/127.0.0.1/27017 ) 2>/dev/null; then
+        exec 3>&-; exec 3<&-
+        log "  MongoDB is up."
+        return 0
+      fi
+      sleep 1
+    done
+    fail "MongoDB container started but never accepted connections on 27017."
+  fi
+  fail "MongoDB not running and Docker not installed. Start mongod (sudo systemctl start mongod) or install Docker, then re-run."
+}
+
+ensure_mongo
+
 if ! ( cd server && npm run seed ); then
-  warn "Seed failed. Is MongoDB running? Either start it locally:"
-  warn "    sudo systemctl start mongod"
-  warn "  or use Docker:"
-  warn "    docker compose up -d mongodb redis"
-  warn "then re-run: cd server && npm run seed"
-  exit 1
+  fail "Seed failed even though MongoDB is reachable. Check the trace above."
 fi
 
 log "Done. Shared demo credentials:"
