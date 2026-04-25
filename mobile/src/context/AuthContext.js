@@ -66,10 +66,23 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       return { success: true, user: userData };
     } catch (error) {
-      const message =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        'Login failed. Please check your credentials.';
+      // Distinguish a server rejection (bad credentials, locked account, etc.)
+      // from a network failure (timeout, unreachable host) — the latter shows
+      // "check your credentials" otherwise, which sends people on a wild goose
+      // chase when the real cause is a Wi-Fi or backend-URL problem.
+      let message;
+      if (error.response) {
+        message =
+          error.response.data?.message ||
+          error.response.data?.error ||
+          `Login failed (HTTP ${error.response.status}).`;
+      } else if (error.request) {
+        message =
+          "Couldn't reach the server. Check that your phone and laptop are " +
+          'on the same Wi-Fi, or use your phone to hotspot the laptop.';
+      } else {
+        message = error.message || 'Login failed.';
+      }
       return { success: false, error: message };
     }
   };
