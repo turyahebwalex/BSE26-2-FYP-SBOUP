@@ -355,7 +355,7 @@ npm-debug.log
 
 Without this, `COPY . .` would overwrite the container's freshly installed (correct) packages with whatever version the contributor has locally — potentially causing version mismatches.
 
-> **Recommendation:** Add `.dockerignore` files to `server/` and `client/` as well (see below).
+> All three Node services (`server/`, `client/`, `mobile/`) ship with their own `.dockerignore`, so this protection is in place for every build.
 
 **Step 4 — `docker-compose.yml` sets all runtime configuration:**
 
@@ -381,19 +381,17 @@ environment:
 | **Local files leaking in** | `.dockerignore` blocks `node_modules/`, `__pycache__/`, etc. |
 | **"Works on my machine"** | Eliminated — containers are identical on every OS |
 
-### Best practice: Adding `.dockerignore` to all services
+### `.dockerignore` coverage
 
-Currently only `mobile/` has a `.dockerignore`. For maximum safety, add one to `server/` and `client/` as well:
+Each Node service has its own `.dockerignore` so that `COPY . .` in a Dockerfile never drags in the contributor's host `node_modules` (or other local junk) on top of the container's freshly installed packages:
 
-**`server/.dockerignore`** and **`client/.dockerignore`**:
-```
-node_modules
-npm-debug.log
-.env
-.env.*
-```
+| File | Excludes |
+|------|----------|
+| [`server/.dockerignore`](../server/.dockerignore) | `node_modules`, `logs`, `uploads`, `.env*`, `.git`, `npm-debug.log` |
+| [`client/.dockerignore`](../client/.dockerignore) | `node_modules`, `build`, `.env*`, `.git`, `npm-debug.log` |
+| [`mobile/.dockerignore`](../mobile/.dockerignore) | `node_modules`, `npm-debug.log`, `.expo` |
 
-This prevents local `node_modules` from overriding the container's installed packages in any service.
+If you add a new Node service in the future, copy this pattern.
 
 ### For CI/CD pipelines
 
