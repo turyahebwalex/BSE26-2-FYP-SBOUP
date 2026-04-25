@@ -173,6 +173,10 @@ services:
       # needed. Set EXPO_PUBLIC_API_URL only to override (e.g. a public
       # tunnel URL for remote collaborators on different networks).
       - EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-}
+      # Skip the api.expo.dev SDK version check at startup. On slow / flaky
+      # networks (campus Wi-Fi) it dumps a "TypeError: fetch failed" stack
+      # trace before Metro comes up; Metro itself works fine without it.
+      - EXPO_OFFLINE=1
     depends_on:
       - server
 
