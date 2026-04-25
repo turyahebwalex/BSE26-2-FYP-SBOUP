@@ -4,6 +4,26 @@ A complete guide for contributors to clone, set up, run, and contribute to the *
 
 ---
 
+## TL;DR — One Command
+
+After cloning the repo, this is everything you need to bring up the entire stack (web, mobile, backend, AI services, database):
+
+```bash
+bash scripts/setup.sh && docker compose up --build
+```
+
+`scripts/setup.sh` creates any missing `.env` files, installs Node deps, and seeds the database with the shared demo accounts. `docker compose up --build` then builds and starts all 10 services. Scan the QR code printed by the `sboup-mobile` container with Expo Go on your phone to launch the mobile app.
+
+Demo logins (same on every collaborator's machine):
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `admin@skillbridge.ug` | `Admin@12345` |
+| Employer | `employer@demo.ug` | `Employer@12345` |
+| Skilled Worker | `worker@demo.ug` | `Worker@12345` |
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#1-prerequisites)
@@ -235,18 +255,20 @@ See the full `.env.example` file for all available variables. You will need to c
 
 ## 6. Running with Docker (Recommended)
 
-### Start all services
+### Start everything in one command
+
+From the project root, after a fresh clone:
 
 ```bash
-# From the project root
-docker compose up --build
+bash scripts/setup.sh && docker compose up --build
 ```
 
-That's it. This single command:
-- Pulls MongoDB 7 and Redis 7 images
-- Builds containers for server, client, all 5 AI services, and mobile
-- Installs all Node.js and Python dependencies **inside containers**
-- Starts everything with correct environment variables and networking
+That's the full setup. The two halves do this:
+
+1. **`bash scripts/setup.sh`** — bootstraps the workspace (creates any missing `.env` files, installs Node deps for `server`/`client`/`mobile`, and seeds Mongo with the shared demo accounts). Idempotent — re-running it is safe.
+2. **`docker compose up --build`** — pulls MongoDB 7 and Redis 7, builds containers for server, client, all 5 AI services, and mobile, installs all Node and Python dependencies **inside the containers**, and starts every service with the correct environment variables and networking.
+
+On subsequent runs you usually only need `docker compose up` (no `--build`, no setup script) unless dependencies or Dockerfiles changed.
 
 ### Start specific services only
 
@@ -410,37 +432,31 @@ docker compose up --build mongodb redis server mobile
 ### What happens inside the container
 
 1. Docker builds a `node:20-alpine` container
-2. `npm install` installs Expo SDK 54, React Native 0.79, and all dependencies
-3. `npx expo start --lan` starts the Expo dev server in LAN mode
+2. `npm install` installs Expo SDK 54, React Native 0.79, `@expo/ngrok`, and all dependencies
+3. `npx expo start --tunnel` starts the Expo dev server with an ngrok tunnel so the phone reaches Metro even on networks with AP isolation
 4. The container runs with `network_mode: host`, sharing your computer's network interfaces
 5. A **QR code** appears in the terminal output
 
 ### Scan the QR code
 
 1. Open **Expo Go** on your phone
-2. Scan the QR code displayed in the terminal (e.g., `exp://192.168.x.x:8081`)
+2. Scan the QR code displayed in the terminal
 3. The app will download the JavaScript bundle and launch on your phone
 
-### Key environment variables for mobile
+### How the backend URL is resolved
+
+You normally don't set anything. [`mobile/src/services/api.js`](../mobile/src/services/api.js) auto-detects the backend host from Metro's address, so any collaborator on the same Wi-Fi as their phone just runs the one command and logs in.
+
+The override variable is only for special cases:
 
 | Variable | Set in | Purpose |
 |----------|--------|---------|
-| `EXPO_PUBLIC_API_URL` | `docker-compose.yml` | Backend API URL the mobile app connects to |
-| `EXPO_OFFLINE=1` | `docker-compose.yml` | Skips Expo API server checks (avoids DNS issues in Docker) |
+| `EXPO_PUBLIC_API_URL` | shell or `docker-compose.yml` | Forces a specific API URL — needed when the laptop and phone are **not** on the same network (e.g. you're tunnelling the backend over the internet for a remote teammate). Leave empty otherwise. |
 
-### Configuring the API URL for physical devices
-
-The default `EXPO_PUBLIC_API_URL=http://localhost:5000/api` works when the backend is also running in Docker with host networking. If your phone can't reach `localhost`, update it to your computer's LAN IP:
+Example for a remote collaborator using a public backend tunnel:
 
 ```bash
-# Find your computer's IP
-ip addr show | grep "inet " | grep -v 127.0.0.1
-```
-
-Then update in `docker-compose.yml`:
-```yaml
-environment:
-  - EXPO_PUBLIC_API_URL=http://<YOUR-COMPUTER-IP>:5000/api
+EXPO_PUBLIC_API_URL=https://my-backend.loca.lt/api docker compose up -d mobile
 ```
 
 ### Why `network_mode: host`?
@@ -729,11 +745,7 @@ Expo Go shows this when it can't fetch the Metro JS bundle from your dev server.
    ```
    The tunnel proxies the bundle via ngrok so the phone doesn't need your LAN.
 
-2. **`EXPO_PUBLIC_API_URL` points to `localhost`**. On a phone, `localhost` is the phone itself, so API calls go nowhere. Set it to your computer's LAN IP in `mobile/.env`:
-   ```env
-   EXPO_PUBLIC_API_URL=http://192.168.x.y:5000/api
-   ```
-   Find your IP with `ip -4 addr show` (Linux) or `ipconfig getifaddr en0` (macOS).
+2. **`EXPO_PUBLIC_API_URL` is set to a stale value**. The app normally auto-detects the backend from Metro's host (see [`mobile/src/services/api.js`](../mobile/src/services/api.js)), so leave `EXPO_PUBLIC_API_URL` empty unless you're deliberately using a tunnelled backend for a remote collaborator. If a `mobile/.env` exists with a hard-coded LAN IP, delete that line.
 
 3. **Firewall blocks port 8081** (Metro) on your computer. Allow it:
    ```bash
