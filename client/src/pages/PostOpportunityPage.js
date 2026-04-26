@@ -138,6 +138,27 @@ const PostOpportunityPage = () => {
     }
   };
 
+  // What's blocking the user from leaving the current step? Returns
+  // a human-readable reason or '' when the step is complete. The Next
+  // button is disabled while this returns non-empty so the wizard
+  // never advances with required fields blank.
+  const stepBlockReason = (s) => {
+    if (s === 0) {
+      if (!form.location.trim()) return 'Add a location to continue.';
+      return '';
+    }
+    if (s === 1) {
+      if (!form.title.trim()) return 'Add an opportunity title to continue.';
+      if (form.description.trim().length < 20) {
+        return `Description needs at least 20 characters (currently ${form.description.trim().length}).`;
+      }
+      return '';
+    }
+    // Step 2 (Required Skills) is optional; Step 3 is the final step
+    // and uses Post Now instead of Next, so no gating needed here.
+    return '';
+  };
+
   // Maps a validator field path back to the wizard step that owns it,
   // so we can jump the user to the right place when something fails.
   const stepForField = (field) => {
@@ -226,7 +247,7 @@ const PostOpportunityPage = () => {
       </div>
       <div>
         <label className="block text-sm font-medium mb-2 text-primary">4. DESCRIPTION</label>
-        <textarea className="input-field h-32" value={form.description} onChange={update('description')} placeholder="Describe the tasks, environment, and expectations (min. 20 characters for clarity & better skill matching)..." />
+        <textarea className="input-field h-32" value={form.description} onChange={update('description')} placeholder="Describe the tasks, environment, and expectations (minimum. 20 characters for clarity & better skill matching)..." />
         <div className="flex items-center justify-between mt-1">
           <span className="text-xs text-gray-500">Aim for at least 20 characters — clearer descriptions get better AI skill matches.</span>
           <span className={`text-xs font-medium ${form.description.trim().length >= 20 ? 'text-green-600' : 'text-gray-400'}`}>
@@ -383,19 +404,37 @@ const PostOpportunityPage = () => {
 
       {steps[step]}
 
-      <div className="flex gap-3 mt-6">
-        {step > 0 && <button onClick={() => setStep(step - 1)} className="btn-outline flex-1">Back</button>}
-        {step < steps.length - 1 ? (
-          <button onClick={() => setStep(step + 1)} className="btn-primary flex-1">Next →</button>
-        ) : (
-          <div className="flex gap-3 flex-1">
-            <button onClick={() => setPreviewOpen(true)} className="btn-outline flex-1">Preview</button>
-            <button onClick={handleSubmit} disabled={loading} className="btn-primary flex-1">
-              {loading ? 'Posting...' : 'Post Now'}
-            </button>
-          </div>
-        )}
-      </div>
+      {(() => {
+        const blockReason = stepBlockReason(step);
+        const isFinal = step >= steps.length - 1;
+        return (
+          <>
+            <div className="flex gap-3 mt-6">
+              {step > 0 && <button onClick={() => setStep(step - 1)} className="btn-outline flex-1">Back</button>}
+              {!isFinal ? (
+                <button
+                  onClick={() => setStep(step + 1)}
+                  disabled={!!blockReason}
+                  title={blockReason || ''}
+                  className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              ) : (
+                <div className="flex gap-3 flex-1">
+                  <button onClick={() => setPreviewOpen(true)} className="btn-outline flex-1">Preview</button>
+                  <button onClick={handleSubmit} disabled={loading} className="btn-primary flex-1">
+                    {loading ? 'Posting...' : 'Post Now'}
+                  </button>
+                </div>
+              )}
+            </div>
+            {!isFinal && blockReason && (
+              <p className="text-xs text-gray-500 mt-2 text-right">{blockReason}</p>
+            )}
+          </>
+        );
+      })()}
 
       {previewOpen && (
         <>
