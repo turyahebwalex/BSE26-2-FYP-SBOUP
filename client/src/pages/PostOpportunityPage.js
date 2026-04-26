@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opportunityAPI, skillAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +28,8 @@ const PostOpportunityPage = () => {
   const [customInput, setCustomInput] = useState('');
   const [customAdding, setCustomAdding] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const printableRef = useRef(null);
   const [form, setForm] = useState({
     title: '', description: '', category: 'formal', location: '', isRemote: false,
     requiredSkills: [], compensationRange: { min: '', max: '', currency: 'UGX', period: 'monthly' },
@@ -89,6 +91,29 @@ const PostOpportunityPage = () => {
       .filter((s) => s.skillName.toLowerCase().includes(q))
       .slice(0, 3);
   })();
+
+  // Uses the browser's native "Save as PDF" via window.print(). The
+  // pdf-printable / pdf-printing classes (defined in the inline <style>
+  // below) hide everything except the document area during printing.
+  const downloadPdf = () => {
+    if (pdfLoading) return;
+    setPdfLoading(true);
+    const cleanup = () => {
+      document.documentElement.classList.remove('pdf-printing');
+      window.removeEventListener('afterprint', cleanup);
+      setPdfLoading(false);
+    };
+    window.addEventListener('afterprint', cleanup);
+    document.documentElement.classList.add('pdf-printing');
+    setTimeout(() => {
+      try {
+        window.print();
+      } catch {
+        cleanup();
+        toast.error('Could not open print dialog');
+      }
+    }, 50);
+  };
 
   const addCustomSkill = async () => {
     const name = customInput.trim();
@@ -331,20 +356,42 @@ const PostOpportunityPage = () => {
       </div>
 
       {previewOpen && (
+        <>
+          {/* Print stylesheet: when html.pdf-printing is set, hide everything
+              except the .pdf-printable element so the browser's "Save as PDF"
+              produces a clean document with no modal chrome or page nav. */}
+          <style>{`
+            @media print {
+              html.pdf-printing body * { visibility: hidden !important; }
+              html.pdf-printing .pdf-printable,
+              html.pdf-printing .pdf-printable * { visibility: visible !important; }
+              html.pdf-printing .pdf-printable {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                max-width: none !important;
+                box-shadow: none !important;
+                border: none !important;
+                padding: 0 !important;
+              }
+            }
+          `}</style>
         <div
           className="fixed inset-0 bg-black/60 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto"
-          onClick={() => setPreviewOpen(false)}
+          onClick={() => !pdfLoading && setPreviewOpen(false)}
         >
           <div
             className="bg-gray-100 rounded-lg max-w-2xl w-full my-4"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal chrome */}
+            {/* Modal chrome (not captured in PDF) */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-white rounded-t-lg">
               <span className="text-sm font-semibold text-gray-700">Opportunity Preview</span>
               <button
                 onClick={() => setPreviewOpen(false)}
-                className="text-gray-400 hover:text-gray-700 text-2xl leading-none"
+                disabled={pdfLoading}
+                className="text-gray-400 hover:text-gray-700 text-2xl leading-none disabled:opacity-50"
                 aria-label="Close preview"
               >
                 ×
@@ -354,7 +401,8 @@ const PostOpportunityPage = () => {
             {/* Printable A4-style document */}
             <div className="p-4 sm:p-6">
               <div
-                className="bg-white shadow-sm border border-gray-200 mx-auto"
+                ref={printableRef}
+                className="pdf-printable bg-white shadow-sm border border-gray-200 mx-auto"
                 style={{ maxWidth: '720px', padding: '40px 48px' }}
               >
                 {/* Letterhead */}
@@ -470,24 +518,33 @@ const PostOpportunityPage = () => {
               </div>
             </div>
 
-            {/* Action bar */}
-            <div className="px-5 py-3 border-t border-gray-200 bg-white rounded-b-lg flex gap-2">
+            {/* Action bar (not captured in PDF) */}
+            <div className="px-5 py-3 border-t border-gray-200 bg-white rounded-b-lg flex flex-wrap gap-2">
+              <button
+                onClick={downloadPdf}
+                disabled={pdfLoading}
+                className="btn-outline flex-1 min-w-[120px] text-sm"
+              >
+                {pdfLoading ? 'Preparing PDF…' : '⬇ Download PDF'}
+              </button>
               <button
                 onClick={() => setPreviewOpen(false)}
-                className="btn-outline flex-1 text-sm"
+                disabled={pdfLoading}
+                className="btn-outline flex-1 min-w-[100px] text-sm"
               >
                 Edit
               </button>
               <button
                 onClick={() => { setPreviewOpen(false); handleSubmit(); }}
-                disabled={loading}
-                className="btn-primary flex-1 text-sm"
+                disabled={loading || pdfLoading}
+                className="btn-primary flex-1 min-w-[120px] text-sm"
               >
                 {loading ? 'Posting…' : 'Post Now'}
               </button>
             </div>
           </div>
         </div>
+        </>
       )}
     </div>
   );
