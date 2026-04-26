@@ -138,7 +138,36 @@ const PostOpportunityPage = () => {
     }
   };
 
+  // Maps a validator field path back to the wizard step that owns it,
+  // so we can jump the user to the right place when something fails.
+  const stepForField = (field) => {
+    if (['category', 'location'].some((f) => field.startsWith(f))) return 0;
+    if (['title', 'description'].some((f) => field.startsWith(f))) return 1;
+    if (field.startsWith('requiredSkills')) return 2;
+    return 3; // compensation, deadline, experienceLevel, applicationMethod, externalLink
+  };
+
+  const validateClient = () => {
+    const errs = [];
+    if (!form.title.trim()) errs.push({ field: 'title', message: 'Title is required.' });
+    if (form.description.trim().length < 20) errs.push({ field: 'description', message: 'Description must be at least 20 characters.' });
+    if (!form.location.trim()) errs.push({ field: 'location', message: 'Location is required.' });
+    if (!form.deadline) {
+      errs.push({ field: 'deadline', message: 'Deadline is required.' });
+    } else if (new Date(form.deadline).getTime() <= Date.now()) {
+      errs.push({ field: 'deadline', message: 'Deadline must be in the future.' });
+    }
+    return errs;
+  };
+
   const handleSubmit = async () => {
+    const clientErrors = validateClient();
+    if (clientErrors.length) {
+      const first = clientErrors[0];
+      toast.error(first.message);
+      setStep(stepForField(first.field));
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -153,7 +182,15 @@ const PostOpportunityPage = () => {
       toast.success('Opportunity posted! It will be reviewed shortly.');
       navigate('/employer/opportunities');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to post');
+      const data = err.response?.data;
+      const details = Array.isArray(data?.details) ? data.details : null;
+      if (details && details.length) {
+        const first = details[0];
+        toast.error(`${first.field}: ${first.message}`);
+        setStep(stepForField(first.field));
+      } else {
+        toast.error(data?.error || 'Failed to post');
+      }
     } finally {
       setLoading(false);
     }
