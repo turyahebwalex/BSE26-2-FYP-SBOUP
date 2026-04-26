@@ -226,7 +226,13 @@ const PostOpportunityPage = () => {
       </div>
       <div>
         <label className="block text-sm font-medium mb-2 text-primary">4. DESCRIPTION</label>
-        <textarea className="input-field h-32" value={form.description} onChange={update('description')} placeholder="Describe the tasks, environment, and expectations..." />
+        <textarea className="input-field h-32" value={form.description} onChange={update('description')} placeholder="Describe the tasks, environment, and expectations (min. 20 characters for clarity & better skill matching)..." />
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-xs text-gray-500">Aim for at least 20 characters — clearer descriptions get better AI skill matches.</span>
+          <span className={`text-xs font-medium ${form.description.trim().length >= 20 ? 'text-green-600' : 'text-gray-400'}`}>
+            {form.description.trim().length}/20
+          </span>
+        </div>
       </div>
     </div>,
     // Step 2: Required Skills
