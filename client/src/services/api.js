@@ -132,6 +132,8 @@ export const reportAPI = {
 // ─── Skills ───
 export const skillAPI = {
   getAll: (params) => api.get('/skills', { params }),
+  suggest: (data) => api.post('/skills/suggest', data),
+  addCustom: (name) => api.post('/skills/custom', { name }),
 };
 
 // ─── Admin ───
