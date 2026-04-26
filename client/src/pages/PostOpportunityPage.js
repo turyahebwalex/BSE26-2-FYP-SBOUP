@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opportunityAPI, skillAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -29,7 +29,6 @@ const PostOpportunityPage = () => {
   const [customAdding, setCustomAdding] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
-  const printableRef = useRef(null);
   const [form, setForm] = useState({
     title: '', description: '', category: 'formal', location: '', isRemote: false,
     requiredSkills: [], compensationRange: { min: '', max: '', currency: 'UGX', period: 'monthly' },
@@ -401,7 +400,6 @@ const PostOpportunityPage = () => {
             {/* Printable A4-style document */}
             <div className="p-4 sm:p-6">
               <div
-                ref={printableRef}
                 className="pdf-printable bg-white shadow-sm border border-gray-200 mx-auto"
                 style={{ maxWidth: '720px', padding: '40px 48px' }}
               >
