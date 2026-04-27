@@ -190,15 +190,17 @@ const WorkerDashboardScreen = ({ navigation }) => {
         {Array.isArray(recommendations) && recommendations.length > 0 ? (
           recommendations.slice(0, 5).map((item, index) => {
             const opp = item.opportunity || item;
+            const oppId = opp._id || opp.id || opp.opportunityId;
+            const score = item.matchScore ?? item.score ?? opp.matchScore ?? 0;
             return (
               <OpportunityCard
-                key={opp._id || opp.id || index}
-                opportunity={{ ...opp, matchScore: item.matchScore || item.score }}
+                key={oppId || index}
+                opportunity={{ ...opp, matchScore: score }}
                 onPress={() =>
                   navigation.navigate('OpportunityDetail', {
-                    opportunityId: opp._id || opp.id,
+                    opportunityId: oppId,
                     opportunity: opp,
-                    matchScore: item.matchScore || item.score,
+                    matchScore: score,
                   })
                 }
               />

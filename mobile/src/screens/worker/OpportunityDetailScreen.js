@@ -14,10 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI } from '../../services/api';
 
 const OpportunityDetailScreen = ({ route, navigation }) => {
-  const { opportunityId, opportunity: passedOpp, matchScore: passedScore } = route.params || {};
-  const [opportunity, setOpportunity] = useState(passedOpp || null);
+  const { opportunityId: routeOppId, opportunity: passedOpp, matchScore: passedScore } = route.params || {};
+  const resolvedId =
+    routeOppId || passedOpp?._id || passedOpp?.id || passedOpp?.opportunityId || null;
+  const passedHasFullDetails = !!(passedOpp && passedOpp._id && passedOpp.description !== undefined);
+  const [opportunity, setOpportunity] = useState(passedHasFullDetails ? passedOpp : null);
   const [matchScore, setMatchScore] = useState(passedScore || null);
-  const [loading, setLoading] = useState(!passedOpp);
+  const [loading, setLoading] = useState(!passedHasFullDetails);
   const [applying, setApplying] = useState(false);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
@@ -26,15 +29,15 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [profileId, setProfileId] = useState(null);
 
   useEffect(() => {
-    if (!passedOpp && opportunityId) {
+    if (!passedHasFullDetails && resolvedId) {
       fetchOpportunity();
     }
     fetchProfileAndScore();
-  }, [opportunityId]);
+  }, [resolvedId]);
 
   const fetchOpportunity = async () => {
     try {
-      const { data } = await opportunityAPI.getOne(opportunityId);
+      const { data } = await opportunityAPI.getOne(resolvedId);
       setOpportunity(data.opportunity || data);
     } catch (err) {
       setError('Failed to load opportunity details.');
@@ -49,9 +52,9 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       const pid = data.profile?._id || data._id;
       if (!pid) return;
       setProfileId(pid);
-      if (opportunityId && matchScore == null) {
+      if (resolvedId && matchScore == null) {
         try {
-          const scoreRes = await matchingAPI.getMatchScore(pid, opportunityId);
+          const scoreRes = await matchingAPI.getMatchScore(pid, resolvedId);
           setMatchScore(scoreRes.data.score || scoreRes.data.matchScore);
         } catch (_) {}
       }
@@ -63,10 +66,16 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       Alert.alert('Profile Required', 'Please create your profile before applying.');
       return;
     }
+    const submitOppId =
+      resolvedId || opportunity?._id || opportunity?.id || opportunity?.opportunityId;
+    if (!submitOppId) {
+      Alert.alert('Error', 'Missing opportunity reference. Please reopen this opportunity.');
+      return;
+    }
     setApplying(true);
     try {
       await applicationAPI.apply({
-        opportunityId: opportunityId || opportunity._id || opportunity.id,
+        opportunityId: submitOppId,
         profileId,
         coverLetter: coverLetter.trim(),
       });
@@ -74,8 +83,11 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       setShowApplyForm(false);
       Alert.alert('Success', 'Your application has been submitted!');
     } catch (err) {
-      const msg =
-        err.response?.data?.message || err.response?.data?.error || 'Failed to apply.';
+      const data = err.response?.data;
+      const detailMsg = Array.isArray(data?.details)
+        ? data.details.map((d) => `${d.field}: ${d.message}`).join('\n')
+        : null;
+      const msg = data?.message || detailMsg || data?.error || 'Failed to apply.';
       Alert.alert('Error', msg);
     } finally {
       setApplying(false);

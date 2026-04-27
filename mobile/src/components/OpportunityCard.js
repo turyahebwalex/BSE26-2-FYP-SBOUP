@@ -21,11 +21,12 @@ const OpportunityCard = ({ opportunity, onPress }) => {
     matchScore,
   } = opportunity;
 
-  const displayCompany = companyId?.name || postedByUserId?.fullName || 'Company';
+  const displayCompany = companyId?.name || postedByUserId?.fullName || null;
   const displayLocation = location || 'Uganda';
   const displayType = category || 'formal';
   const displaySkills = requiredSkills || [];
   const badge = typeBadgeColors[displayType] || typeBadgeColors.formal;
+  const displayScore = Math.round(typeof matchScore === 'number' ? matchScore : 0);
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
@@ -34,15 +35,15 @@ const OpportunityCard = ({ opportunity, onPress }) => {
           <Text style={styles.title} numberOfLines={2}>
             {title}
           </Text>
-          <Text style={styles.company} numberOfLines={1}>
-            {displayCompany}
-          </Text>
+          {displayCompany && (
+            <Text style={styles.company} numberOfLines={1}>
+              {displayCompany}
+            </Text>
+          )}
         </View>
-        {matchScore != null && (
-          <View style={styles.matchBadge}>
-            <Text style={styles.matchText}>{Math.round(matchScore)}%</Text>
-          </View>
-        )}
+        <View style={styles.matchBadge}>
+          <Text style={styles.matchText}>{displayScore}%</Text>
+        </View>
       </View>
 
       <View style={styles.metaRow}>
