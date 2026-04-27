@@ -163,6 +163,22 @@ const ManageOpportunitiesPage = () => {
                       <FiCalendar className="text-gray-400" /> {new Date(opp.createdAt).toLocaleDateString()}
                     </span>
                   </div>
+
+                  {/* Applicant match aggregates */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <span
+                      className="badge text-[11px] bg-orange-50 text-orange-700 border border-orange-200"
+                      title="Best match score among applicants"
+                    >
+                      Top match: {opp.bestMatchScore != null ? `${opp.bestMatchScore}%` : '—'}
+                    </span>
+                    <span
+                      className="badge text-[11px] bg-gray-50 text-gray-700 border border-gray-200"
+                      title="Average match score across applicants"
+                    >
+                      Avg match: {opp.avgMatchScore != null ? `${opp.avgMatchScore}%` : '—'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
