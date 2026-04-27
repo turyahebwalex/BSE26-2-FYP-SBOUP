@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { opportunityAPI, skillAPI } from '../services/api';
+import { opportunityAPI, skillAPI, companyAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -29,6 +29,7 @@ const PostOpportunityPage = () => {
   const [customAdding, setCustomAdding] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [company, setCompany] = useState(null);
   const [form, setForm] = useState({
     title: '', description: '', category: 'formal', location: '', isRemote: false,
     requiredSkills: [], compensationRange: { min: '', max: '', currency: 'UGX', period: 'monthly' },
@@ -38,6 +39,14 @@ const PostOpportunityPage = () => {
   useEffect(() => {
     skillAPI.getAll().then(({ data }) => setAllSkills(data.skills || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!user?.companyId) return;
+    companyAPI
+      .getById(user.companyId)
+      .then(({ data }) => setCompany(data.company || null))
+      .catch(() => setCompany(null));
+  }, [user?.companyId]);
 
   // Debounced AI suggestions: only fire when both title and description have meaningful content.
   useEffect(() => {
@@ -463,11 +472,11 @@ const PostOpportunityPage = () => {
           onClick={() => !pdfLoading && setPreviewOpen(false)}
         >
           <div
-            className="bg-gray-100 rounded-lg max-w-2xl w-full my-4"
+            className="bg-gray-100 rounded-lg max-w-2xl w-full my-8"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal chrome (not captured in PDF) */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-white rounded-t-lg">
+            {/* Modal chrome (not captured in PDF) — sticky so the close button stays reachable as the user scrolls a long preview. */}
+            <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-white rounded-t-lg shadow-sm">
               <span className="text-sm font-semibold text-gray-700">Opportunity Preview</span>
               <button
                 onClick={() => setPreviewOpen(false)}
@@ -483,7 +492,7 @@ const PostOpportunityPage = () => {
             <div className="p-4 sm:p-6">
               <div
                 className="pdf-printable bg-white shadow-sm border border-gray-200 mx-auto"
-                style={{ maxWidth: '720px', padding: '40px 48px' }}
+                style={{ maxWidth: '720px', padding: '64px 48px 48px' }}
               >
                 {/* Letterhead */}
                 <div className="flex items-center justify-between pb-4 border-b-2 border-primary">
@@ -505,9 +514,34 @@ const PostOpportunityPage = () => {
                   <h1 className="text-2xl font-bold text-gray-900 leading-tight">
                     {form.title || 'Untitled Opportunity'}
                   </h1>
-                  <div className="mt-2 text-sm text-gray-600">
-                    Posted by <span className="font-medium text-gray-800">{user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : (user?.email || 'Employer')}</span>
+                  {company?.name && (
+                    <div className="mt-2 text-base font-semibold text-gray-900">{company.name}</div>
+                  )}
+                  <div className="mt-1 text-sm text-gray-600">
+                    Posted by <span className="font-medium text-gray-800">{user?.fullName || user?.email || 'Employer'}</span>
                   </div>
+                  {company && (company.industry || company.location || company.website || company.contactEmail || company.contactPhone) && (
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-gray-700">
+                      {company.industry && (
+                        <div><span className="text-gray-500">Industry:</span> <span className="font-medium">{company.industry}</span></div>
+                      )}
+                      {company.location && (
+                        <div><span className="text-gray-500">HQ:</span> <span className="font-medium">{company.location}</span></div>
+                      )}
+                      {company.website && (
+                        <div className="col-span-2"><span className="text-gray-500">Website:</span> <span className="font-medium break-all">{company.website}</span></div>
+                      )}
+                      {company.contactEmail && (
+                        <div className="col-span-2"><span className="text-gray-500">Contact:</span> <span className="font-medium">{company.contactEmail}</span></div>
+                      )}
+                      {company.contactPhone && (
+                        <div><span className="text-gray-500">Phone:</span> <span className="font-medium">{company.contactPhone}</span></div>
+                      )}
+                      {company.verificationStatus && (
+                        <div><span className="text-gray-500">Verification:</span> <span className="font-medium capitalize">{company.verificationStatus}</span></div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Quick facts */}
