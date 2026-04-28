@@ -1,0 +1,23 @@
+[
+  "skill_overlap_count",
+  "skill_gap_count",
+  "skill_overlap_ratio",
+  "cosine_similarity",
+  "location_match",
+  "salary_fit",
+  "exp_fit",
+  "worker_n_skills",
+  "worker_total_exp_months",
+  "worker_profile_completeness",
+  "worker_n_past_applications",
+  "worker_n_shortlisted",
+  "opp_n_required_skills",
+  "opp_application_count",
+  "opp_view_count",
+  "opp_days_until_deadline",
+  "opp_is_remote",
+  "opp_category_formal",
+  "opp_category_contract",
+  "opp_category_freelance",
+  "opp_category_apprenticeship"
+]
