@@ -64,6 +64,42 @@ const skills = [
   { skillName: 'Driving', category: 'Other' },
   { skillName: 'Gardening', category: 'Other' },
   { skillName: 'Childcare', category: 'Other' },
+  // Healthcare
+  { skillName: 'Nursing', category: 'Other' },
+  { skillName: 'Patient Care', category: 'Other' },
+  { skillName: 'First Aid', category: 'Other' },
+  { skillName: 'Medication Administration', category: 'Other' },
+  { skillName: 'Pharmacy', category: 'Other' },
+  { skillName: 'Midwifery', category: 'Other' },
+  { skillName: 'Laboratory Testing', category: 'Other' },
+  // Hospitality
+  { skillName: 'Customer Service', category: 'Communication' },
+  { skillName: 'Food Service', category: 'Other' },
+  { skillName: 'Bartending', category: 'Other' },
+  { skillName: 'Housekeeping', category: 'Other' },
+  { skillName: 'Event Planning', category: 'Business' },
+  // Agriculture
+  { skillName: 'Farming', category: 'Trade' },
+  { skillName: 'Livestock Management', category: 'Trade' },
+  { skillName: 'Poultry Farming', category: 'Trade' },
+  { skillName: 'Crop Management', category: 'Trade' },
+  { skillName: 'Irrigation', category: 'Trade' },
+  // Education
+  { skillName: 'Curriculum Development', category: 'Communication' },
+  { skillName: 'Lesson Planning', category: 'Communication' },
+  // Beauty
+  { skillName: 'Hairdressing', category: 'Trade' },
+  { skillName: 'Makeup Artistry', category: 'Creative' },
+  // Logistics
+  { skillName: 'Inventory Management', category: 'Business' },
+  { skillName: 'Warehousing', category: 'Business' },
+  { skillName: 'Procurement', category: 'Business' },
+  // Extra technical
+  { skillName: 'TypeScript', category: 'Technical' },
+  { skillName: 'Docker', category: 'Technical' },
+  { skillName: 'Git', category: 'Technical' },
+  { skillName: 'Linux', category: 'Technical' },
+  { skillName: 'GraphQL', category: 'Technical' },
 ];
 
 const companies = [

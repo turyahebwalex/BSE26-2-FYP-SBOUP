@@ -12,7 +12,11 @@ const skillSchema = new mongoose.Schema({
     required: true,
     maxlength: 50,
     enum: ['Technical', 'Creative', 'Trade', 'Business', 'Communication', 'Other'],
+    default: 'Other',
   },
+  isCustom:   { type: Boolean, default: false },
+  isExternal: { type: Boolean, default: false },
+  source:     { type: String,  default: null },
 });
 
 skillSchema.index({ skillName: 1 });

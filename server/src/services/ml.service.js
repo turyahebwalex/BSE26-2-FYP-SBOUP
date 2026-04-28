@@ -39,6 +39,24 @@ const scoreMatch = ({ profileId, opportunityId }) =>
 const getRecommendations = (userId) =>
   tryGet(`${process.env.MATCHING_SERVICE_URL}/api/match/recommendations/${userId}`);
 
+/**
+ * Returns a Map<opportunityIdString, matchScore>. On any failure, returns
+ * an empty Map so callers can fall back to 0% rather than blowing up.
+ */
+const batchScore = async (profileId, opportunityIds) => {
+  const result = await tryPost(`${process.env.MATCHING_SERVICE_URL}/api/match/scores-batch`, {
+    profileId: String(profileId),
+    opportunityIds: (opportunityIds || []).map(String),
+  });
+  const scoreMap = new Map();
+  if (result.ok && result.data?.scores) {
+    for (const [k, v] of Object.entries(result.data.scores)) {
+      scoreMap.set(String(k), typeof v === 'number' ? v : 0);
+    }
+  }
+  return scoreMap;
+};
+
 const triggerOpportunityMatch = (opportunityId) =>
   tryPost(`${process.env.MATCHING_SERVICE_URL}/api/match/opportunity`, {
     opportunityId: String(opportunityId),
@@ -74,6 +92,7 @@ const generateLearningPath = ({ userId, targetSkill, opportunityId }) =>
 
 module.exports = {
   scoreMatch,
+  batchScore,
   getRecommendations,
   triggerOpportunityMatch,
   detectFraud,

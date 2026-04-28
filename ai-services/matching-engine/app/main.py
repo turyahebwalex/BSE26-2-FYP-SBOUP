@@ -352,6 +352,38 @@ def get_recommendations(user_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/match/scores-batch', methods=['POST'])
+def batch_match_scores():
+    """
+    Compute match scores for one worker profile against many opportunities.
+    Body: { profileId, opportunityIds: [..] }
+    Returns: { scores: { opportunityId: matchScore } }
+    """
+    try:
+        from bson import ObjectId
+        data = request.json or {}
+        profile_id = ObjectId(data['profileId'])
+        opp_ids = [ObjectId(x) for x in (data.get('opportunityIds') or []) if x]
+
+        worker_skills = get_profile_skill_vector(profile_id)
+        scores = {}
+        for opp_id in opp_ids:
+            opp = db.opportunities.find_one({'_id': opp_id})
+            if not opp:
+                scores[str(opp_id)] = 0
+                continue
+            opp_skills = get_opportunity_skill_vector(opp_id)
+            skill_score = compute_cosine_similarity(worker_skills, opp_skills) * 100
+            exp_score = compute_experience_score(profile_id, opp.get('category', ''))
+            match_score = round((0.5 * skill_score) + (0.25 * exp_score) + (0.25 * 0), 1)
+            scores[str(opp_id)] = match_score
+
+        return jsonify({'scores': scores})
+    except Exception as e:
+        logger.error(f"Batch score error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/match/opportunity', methods=['POST'])
 def match_for_opportunity():
     """Trigger matching for a newly posted opportunity."""

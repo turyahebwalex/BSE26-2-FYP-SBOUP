@@ -54,6 +54,12 @@ services:
       - /app/node_modules
     networks:
       - sboup-network
+    # Outbound DNS so calls to the ESCO taxonomy API resolve. Override via
+    # SERVER_DNS_PRIMARY / SERVER_DNS_SECONDARY if your network firewalls
+    # public resolvers (e.g. campus Wi-Fi may require the LAN gateway).
+    dns:
+      - ${SERVER_DNS_PRIMARY:-8.8.8.8}
+      - ${SERVER_DNS_SECONDARY:-9.9.9.9}
 
   # ─── Presentation Layer ───
   client:

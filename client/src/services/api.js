@@ -129,9 +129,16 @@ export const reportAPI = {
   updateStatus: (id, status) => api.put(`/reports/${id}/status`, { status }),
 };
 
+// ─── Companies ───
+export const companyAPI = {
+  getById: (id) => api.get(`/companies/${id}`),
+};
+
 // ─── Skills ───
 export const skillAPI = {
   getAll: (params) => api.get('/skills', { params }),
+  suggest: (data) => api.post('/skills/suggest', data),
+  addCustom: (name) => api.post('/skills/custom', { name }),
 };
 
 // ─── Admin ───

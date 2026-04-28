@@ -1,4 +1,9 @@
 const Skill = require('../models/Skill');
+const { suggestSkills } = require('../services/skillSuggester.service');
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 exports.getSkills = async (req, res) => {
   try {
@@ -53,6 +58,49 @@ exports.deleteSkill = async (req, res) => {
     res.json({ message: 'Skill deleted successfully.' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete skill.' });
+  }
+};
+
+exports.suggestSkills = async (req, res) => {
+  try {
+    const { title = '', description = '' } = req.body || {};
+    if (typeof title !== 'string' || typeof description !== 'string') {
+      return res.status(400).json({ error: 'title and description must be strings.' });
+    }
+    const suggestions = await suggestSkills({ title, description });
+    res.json({ suggestions });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to suggest skills.' });
+  }
+};
+
+exports.createCustomSkill = async (req, res) => {
+  try {
+    const raw = (req.body?.name || req.body?.skillName || '').trim();
+    if (!raw) return res.status(400).json({ error: 'Skill name is required.' });
+    if (raw.length > 100) return res.status(400).json({ error: 'Skill name too long.' });
+
+    const safe = new RegExp(`^${escapeRegex(raw)}$`, 'i');
+    let skill = await Skill.findOne({ skillName: safe });
+    if (!skill) {
+      try {
+        skill = await Skill.create({
+          skillName: raw,
+          category: 'Other',
+          isCustom: true,
+          source: 'employer',
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          skill = await Skill.findOne({ skillName: safe });
+        } else {
+          throw err;
+        }
+      }
+    }
+    res.status(201).json({ skill });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to add custom skill.' });
   }
 };
 

@@ -1,6 +1,8 @@
 const Opportunity = require('../models/Opportunity');
 const User = require('../models/User');
 const Company = require('../models/Company');
+const Profile = require('../models/Profile');
+const Application = require('../models/Application');
 const mlService = require('../services/ml.service');
 const notify = require('../services/notification.service');
 const logger = require('../utils/logger');
@@ -30,35 +32,29 @@ exports.createOpportunity = async (req, res) => {
       const { fraudScore, signals } = fraudResult.data;
       opportunity.fraudRiskScore = fraudScore || 0;
       opportunity.fraudSignals = signals || [];
+    }
 
-      if (opportunity.fraudRiskScore < FRAUD_LOW) {
-        opportunity.status = 'published';
-      } else if (opportunity.fraudRiskScore >= FRAUD_HIGH) {
-        opportunity.status = 'blocked';
-      } else {
-        opportunity.status = 'under_review';
-      }
-      await opportunity.save();
-
-      if (opportunity.status === 'published') {
-        mlService.triggerOpportunityMatch(opportunity._id);
-      } else if (opportunity.status === 'under_review') {
-        const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
-        await Promise.all(
-          admins.map((admin) =>
-            notify.create({
-              userId: admin._id,
-              type: 'fraud_alert',
-              content: `Opportunity "${opportunity.title}" needs review (risk ${opportunity.fraudRiskScore}).`,
-              metadata: { opportunityId: opportunity._id, fraudRiskScore: opportunity.fraudRiskScore },
-            })
-          )
-        );
-      }
+    // Every newly-posted opportunity must be admin-approved before going live.
+    // Only outright block postings whose fraud score crosses the high threshold.
+    if (opportunity.fraudRiskScore >= FRAUD_HIGH) {
+      opportunity.status = 'blocked';
     } else {
-      // Fraud service down: fail safe by holding for admin review.
       opportunity.status = 'under_review';
-      await opportunity.save();
+    }
+    await opportunity.save();
+
+    if (opportunity.status === 'under_review') {
+      const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
+      await Promise.all(
+        admins.map((admin) =>
+          notify.create({
+            userId: admin._id,
+            type: 'fraud_alert',
+            content: `New opportunity "${opportunity.title}" awaits review (risk ${opportunity.fraudRiskScore}).`,
+            metadata: { opportunityId: opportunity._id, fraudRiskScore: opportunity.fraudRiskScore },
+          })
+        )
+      );
     }
 
     res.status(201).json({ opportunity });
@@ -96,7 +92,7 @@ exports.getOpportunities = async (req, res) => {
     if (maxPay) filter['compensationRange.max'] = { $lte: Number(maxPay) };
 
     const skip = (Number(page) - 1) * Number(limit);
-    const [opportunities, total] = await Promise.all([
+    const [opportunitiesRaw, total] = await Promise.all([
       Opportunity.find(filter)
         .populate('requiredSkills', 'skillName category')
         .populate('postedByUserId', 'fullName email')
@@ -106,6 +102,22 @@ exports.getOpportunities = async (req, res) => {
         .limit(Number(limit)),
       Opportunity.countDocuments(filter),
     ]);
+
+    // For skilled workers, attach a real per-opportunity match score so every
+    // card the worker sees can render an accurate percentage (0% included).
+    let opportunities = opportunitiesRaw.map((o) => o.toObject());
+    if (req.user?.role === 'skilled_worker') {
+      const profile = await Profile.findOne({ userId: req.user._id }).select('_id');
+      if (profile) {
+        const scoreMap = await mlService.batchScore(profile._id, opportunities.map((o) => o._id));
+        opportunities = opportunities.map((o) => ({
+          ...o,
+          matchScore: scoreMap.get(String(o._id)) ?? 0,
+        }));
+      } else {
+        opportunities = opportunities.map((o) => ({ ...o, matchScore: 0 }));
+      }
+    }
 
     res.json({
       opportunities,
@@ -192,8 +204,38 @@ exports.getMyOpportunities = async (req, res) => {
       .populate('requiredSkills', 'skillName category')
       .populate('companyId', 'name logoUrl')
       .sort({ createdAt: -1 });
-    res.json({ opportunities });
+
+    // Enrich each posting with applicant match-score aggregates so the
+    // "My Opportunities" page can show real matching percentages.
+    const ids = opportunities.map((o) => o._id);
+    const aggregates = ids.length
+      ? await Application.aggregate([
+          { $match: { opportunityId: { $in: ids } } },
+          {
+            $group: {
+              _id: '$opportunityId',
+              avgMatchScore: { $avg: '$matchScore' },
+              bestMatchScore: { $max: '$matchScore' },
+              applicantCount: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+    const aggMap = new Map(aggregates.map((a) => [String(a._id), a]));
+
+    const enriched = opportunities.map((opp) => {
+      const agg = aggMap.get(String(opp._id));
+      return {
+        ...opp.toObject(),
+        avgMatchScore: agg ? Math.round(agg.avgMatchScore || 0) : null,
+        bestMatchScore: agg ? Math.round(agg.bestMatchScore || 0) : null,
+        applicantCount: agg ? agg.applicantCount : 0,
+      };
+    });
+
+    res.json({ opportunities: enriched });
   } catch (error) {
+    logger.error('Get my opportunities error:', error);
     res.status(500).json({ error: 'Failed to fetch opportunities.' });
   }
 };
