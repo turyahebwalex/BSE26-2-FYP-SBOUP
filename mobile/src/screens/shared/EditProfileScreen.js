@@ -17,12 +17,25 @@ import { profileAPI, skillAPI } from '../../services/api';
 
 const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced', 'expert'];
 const EXPERIENCE_CATEGORIES = ['formal', 'contract', 'freelance', 'apprenticeship', 'community'];
+const WORK_STYLES = ['collaborative', 'independent', 'flexible'];
+const REMOTE_PREFS = ['high', 'medium', 'low'];
+const LEARNING_PREFS = ['high', 'medium', 'low'];
+const TRAIT_LEVELS = ['low', 'medium', 'high'];
+const PERSONALITY_TRAITS = [
+  'creativity',
+  'openness',
+  'agreeableness',
+  'dependability',
+  'resilience',
+];
 
 const EditProfileScreen = ({ route, navigation }) => {
   const existingProfile = route.params?.profile || null;
   const existingSkills = route.params?.skills || [];
   const existingExperiences = route.params?.experiences || [];
   const existingEducation = route.params?.education || [];
+  const existingPreference = route.params?.preference || null;
+  const existingPortfolio = existingProfile?.portfolioItems || [];
 
   const [title, setTitle] = useState(existingProfile?.title || '');
   const [bio, setBio] = useState(existingProfile?.bio || '');
@@ -30,7 +43,21 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [skills, setSkills] = useState(existingSkills);
   const [experiences, setExperiences] = useState(existingExperiences);
   const [education, setEducation] = useState(existingEducation);
+  const [portfolio, setPortfolio] = useState(existingPortfolio);
   const [saving, setSaving] = useState(false);
+
+  // Preferences
+  const [workStyle, setWorkStyle] = useState(existingPreference?.workStyle || '');
+  const [remotePref, setRemotePref] = useState(existingPreference?.remotePreference || '');
+  const [learningPref, setLearningPref] = useState(existingPreference?.learningWillingness || '');
+
+  // Personality traits — stored as { trait: string, level: string }[]
+  const [traitLevels, setTraitLevels] = useState(() => {
+    const existing = existingPreference?.personalityTraits || [];
+    const map = {};
+    existing.forEach((t) => { map[t.trait] = t.level; });
+    return map; // e.g. { conscientiousness: 'high', openness: 'medium' }
+  });
 
   // Skill picker modal
   const [allSkills, setAllSkills] = useState([]);
@@ -55,6 +82,12 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [eduField, setEduField] = useState('');
   const [eduStartYear, setEduStartYear] = useState('');
   const [eduEndYear, setEduEndYear] = useState('');
+
+  // Portfolio form
+  const [showPortfolioForm, setShowPortfolioForm] = useState(false);
+  const [portTitle, setPortTitle] = useState('');
+  const [portDescription, setPortDescription] = useState('');
+  const [portUrl, setPortUrl] = useState('');
 
   useEffect(() => {
     fetchSkills();
@@ -104,6 +137,19 @@ const EditProfileScreen = ({ route, navigation }) => {
           bio: bio.trim(),
           location: location.trim(),
           visibility: 'public',
+        });
+      }
+      // Save preferences if any are set
+      if (workStyle || remotePref || learningPref) {
+        const personalityTraits = PERSONALITY_TRAITS
+          .filter((t) => traitLevels[t])
+          .map((t) => ({ trait: t, level: traitLevels[t] }));
+
+        await profileAPI.updatePreferences({
+          workStyle:           workStyle || undefined,
+          remotePreference:    remotePref || undefined,
+          learningWillingness: learningPref || undefined,
+          personalityTraits:   personalityTraits.length > 0 ? personalityTraits : undefined,
         });
       }
       Alert.alert('Saved', 'Profile saved.');
@@ -232,8 +278,42 @@ const EditProfileScreen = ({ route, navigation }) => {
     }
   };
 
+  const addPortfolioItem = async () => {
+    if (!portTitle.trim()) {
+      Alert.alert('Error', 'Project title is required.');
+      return;
+    }
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addPortfolioItem({
+        title: portTitle.trim(),
+        description: portDescription.trim(),
+        fileUrl: portUrl.trim(),
+        fileType: portUrl.trim() ? 'link' : '',
+      });
+      setPortfolio((prev) => [...prev, data.portfolioItem || data]);
+      setPortTitle('');
+      setPortDescription('');
+      setPortUrl('');
+      setShowPortfolioForm(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add portfolio item.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removePortfolioItem = async (item) => {
+    try {
+      await profileAPI.removePortfolioItem(item._id);
+      setPortfolio((prev) => prev.filter((p) => p._id !== item._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove portfolio item.');
+    }
+  };
+
   const filteredSkills = allSkills.filter((s) =>
-    (s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
+    (s.skillName || s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
   );
 
   return (
@@ -267,7 +347,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Bio</Text>
+          <Text style={styles.label}>Bio <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Tell us about yourself..."
@@ -281,7 +361,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>Location <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Kampala, Uganda"
@@ -300,7 +380,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
         <View style={styles.skillsRow}>
           {skills.map((ps) => {
-            const name = ps.skillId?.name || ps.skillName || 'Skill';
+            const name = ps.skillId?.skillName || ps.skillId?.name || ps.skillName || 'Skill';
             return (
               <View key={ps._id} style={styles.skillChip}>
                 <Text style={styles.skillChipText}>
@@ -487,6 +567,163 @@ const EditProfileScreen = ({ route, navigation }) => {
           </View>
         )}
 
+        {/* Portfolio */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>
+            Portfolio <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <TouchableOpacity onPress={() => setShowPortfolioForm(true)}>
+            <Text style={styles.addLink}>+ Add Project</Text>
+          </TouchableOpacity>
+        </View>
+
+        {portfolio.map((item, index) => (
+          <View key={item._id || index} style={styles.entryCard}>
+            <View style={styles.entryInfo}>
+              <Text style={styles.entryTitle}>{item.title}</Text>
+              {item.description ? (
+                <Text style={styles.entrySubtitle} numberOfLines={2}>{item.description}</Text>
+              ) : null}
+              {item.fileUrl ? (
+                <Text style={styles.entryDates} numberOfLines={1}>🔗 {item.fileUrl}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity onPress={() => removePortfolioItem(item)}>
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+
+        {showPortfolioForm && (
+          <View style={styles.addForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Project / Work Title *"
+              placeholderTextColor="#9CA3AF"
+              value={portTitle}
+              onChangeText={setPortTitle}
+            />
+            <TextInput
+              style={[styles.input, styles.textArea, { marginTop: 8 }]}
+              placeholder="Description (what you built, your role, outcome)"
+              placeholderTextColor="#9CA3AF"
+              value={portDescription}
+              onChangeText={setPortDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+            <TextInput
+              style={[styles.input, { marginTop: 8 }]}
+              placeholder="Link to work (URL, GitHub, Drive, etc.) — optional"
+              placeholderTextColor="#9CA3AF"
+              value={portUrl}
+              onChangeText={setPortUrl}
+              autoCapitalize="none"
+              keyboardType="url"
+            />
+            <View style={styles.formActions}>
+              <TouchableOpacity onPress={() => setShowPortfolioForm(false)}>
+                <Text style={styles.cancelLink}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addButton} onPress={addPortfolioItem}>
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Preferences */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>Work Preferences</Text>
+        </View>
+
+        <View style={styles.prefCard}>
+          <Text style={styles.prefLabel}>Work Style <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {WORK_STYLES.map((style) => (
+              <TouchableOpacity
+                key={style}
+                style={[styles.optionChip, workStyle === style && styles.optionChipActive]}
+                onPress={() => setWorkStyle(style)}
+              >
+                <Text style={[styles.optionText, workStyle === style && styles.optionTextActive]}>
+                  {style}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Remote Work Preference <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {REMOTE_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, remotePref === pref && styles.optionChipActive]}
+                onPress={() => setRemotePref(pref)}
+              >
+                <Text style={[styles.optionText, remotePref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Learning Willingness <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {LEARNING_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, learningPref === pref && styles.optionChipActive]}
+                onPress={() => setLearningPref(pref)}
+              >
+                <Text style={[styles.optionText, learningPref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Personality Traits */}
+          <Text style={[styles.prefLabel, { marginTop: 16 }]}>
+            Personality Traits <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <Text style={styles.prefHint}>
+            Select a level for each trait that describes you. Used for CV generation and opportunity matching.
+          </Text>
+          {PERSONALITY_TRAITS.map((trait) => (
+            <View key={trait} style={styles.traitRow}>
+              <Text style={styles.traitName}>{trait}</Text>
+              <View style={styles.traitChips}>
+                {TRAIT_LEVELS.map((level) => (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.traitChip,
+                      traitLevels[trait] === level && styles.traitChipActive,
+                    ]}
+                    onPress={() =>
+                      setTraitLevels((prev) => ({
+                        ...prev,
+                        [trait]: prev[trait] === level ? '' : level,
+                      }))
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.traitChipText,
+                        traitLevels[trait] === level && styles.traitChipTextActive,
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
+        </View>
+
         {/* Save Profile (basic fields) */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.buttonDisabled]}
@@ -507,7 +744,7 @@ const EditProfileScreen = ({ route, navigation }) => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {pendingSkill ? `Proficiency: ${pendingSkill.name}` : 'Select Skill'}
+                {pendingSkill ? `Proficiency: ${pendingSkill.skillName || pendingSkill.name}` : 'Select Skill'}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -551,7 +788,7 @@ const EditProfileScreen = ({ route, navigation }) => {
                             already && { color: '#9CA3AF' },
                           ]}
                         >
-                          {item.name}
+                          {item.skillName || item.name}
                           {already ? ' (added)' : ''}
                         </Text>
                         {!already && (
@@ -670,6 +907,49 @@ const styles = StyleSheet.create({
   },
   skillChipText: { fontSize: 13, color: '#EA580C', fontWeight: '500' },
   emptyHint: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+  prefCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  prefLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  prefHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 8, lineHeight: 16 },
+  optional: { fontSize: 12, fontWeight: '400', color: '#9CA3AF' },
+  traitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9FAFB',
+  },
+  traitName: {
+    fontSize: 13,
+    color: '#374151',
+    textTransform: 'capitalize',
+    flex: 1,
+  },
+  traitChips: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  traitChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  traitChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  traitChipText: { fontSize: 11, color: '#6B7280' },
+  traitChipTextActive: { color: '#F97316', fontWeight: '600' },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
