@@ -217,7 +217,7 @@ const ProfileScreen = ({ navigation }) => {
             )}
 
             {/* Preferences */}
-            {preference && (preference.workStyle || preference.remotePreference || preference.learningWillingness) && (
+            {preference && (preference.workStyle || preference.remotePreference || preference.learningWillingness || preference.personalityTraits?.length > 0) && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Work Preferences</Text>
                 <View style={styles.card}>
@@ -237,6 +237,20 @@ const ProfileScreen = ({ navigation }) => {
                     <View style={styles.prefRow}>
                       <Text style={styles.prefKey}>Learning Willingness</Text>
                       <Text style={styles.prefValue}>{preference.learningWillingness}</Text>
+                    </View>
+                  )}
+                  {preference.personalityTraits?.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={[styles.prefKey, { marginBottom: 6 }]}>Personality Traits</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        {preference.personalityTraits.map((t, i) => (
+                          <View key={i} style={styles.traitBadge}>
+                            <Text style={styles.traitBadgeText}>
+                              {t.trait} · {t.level}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   )}
                 </View>
@@ -446,6 +460,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#F97316',
+    textTransform: 'capitalize',
+  },
+  traitBadge: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  traitBadgeText: {
+    fontSize: 11,
+    color: '#6B7280',
     textTransform: 'capitalize',
   },
   editButton: {

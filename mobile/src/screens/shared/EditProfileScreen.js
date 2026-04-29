@@ -20,6 +20,14 @@ const EXPERIENCE_CATEGORIES = ['formal', 'contract', 'freelance', 'apprenticeshi
 const WORK_STYLES = ['collaborative', 'independent', 'flexible'];
 const REMOTE_PREFS = ['high', 'medium', 'low'];
 const LEARNING_PREFS = ['high', 'medium', 'low'];
+const TRAIT_LEVELS = ['low', 'medium', 'high'];
+const PERSONALITY_TRAITS = [
+  'conscientiousness',
+  'openness',
+  'agreeableness',
+  'extraversion',
+  'resilience',
+];
 
 const EditProfileScreen = ({ route, navigation }) => {
   const existingProfile = route.params?.profile || null;
@@ -40,6 +48,14 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [workStyle, setWorkStyle] = useState(existingPreference?.workStyle || '');
   const [remotePref, setRemotePref] = useState(existingPreference?.remotePreference || '');
   const [learningPref, setLearningPref] = useState(existingPreference?.learningWillingness || '');
+
+  // Personality traits — stored as { trait: string, level: string }[]
+  const [traitLevels, setTraitLevels] = useState(() => {
+    const existing = existingPreference?.personalityTraits || [];
+    const map = {};
+    existing.forEach((t) => { map[t.trait] = t.level; });
+    return map; // e.g. { conscientiousness: 'high', openness: 'medium' }
+  });
 
   // Skill picker modal
   const [allSkills, setAllSkills] = useState([]);
@@ -117,10 +133,15 @@ const EditProfileScreen = ({ route, navigation }) => {
       }
       // Save preferences if any are set
       if (workStyle || remotePref || learningPref) {
+        const personalityTraits = PERSONALITY_TRAITS
+          .filter((t) => traitLevels[t])
+          .map((t) => ({ trait: t, level: traitLevels[t] }));
+
         await profileAPI.updatePreferences({
           workStyle:           workStyle || undefined,
           remotePreference:    remotePref || undefined,
           learningWillingness: learningPref || undefined,
+          personalityTraits:   personalityTraits.length > 0 ? personalityTraits : undefined,
         });
       }
       Alert.alert('Saved', 'Profile saved.');
@@ -284,7 +305,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Bio</Text>
+          <Text style={styles.label}>Bio <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Tell us about yourself..."
@@ -298,7 +319,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>Location <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Kampala, Uganda"
@@ -510,7 +531,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.prefCard}>
-          <Text style={styles.prefLabel}>Work Style</Text>
+          <Text style={styles.prefLabel}>Work Style <Text style={styles.optional}>(optional)</Text></Text>
           <View style={styles.chipRow}>
             {WORK_STYLES.map((style) => (
               <TouchableOpacity
@@ -525,7 +546,7 @@ const EditProfileScreen = ({ route, navigation }) => {
             ))}
           </View>
 
-          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Remote Work Preference</Text>
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Remote Work Preference <Text style={styles.optional}>(optional)</Text></Text>
           <View style={styles.chipRow}>
             {REMOTE_PREFS.map((pref) => (
               <TouchableOpacity
@@ -540,7 +561,7 @@ const EditProfileScreen = ({ route, navigation }) => {
             ))}
           </View>
 
-          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Learning Willingness</Text>
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Learning Willingness <Text style={styles.optional}>(optional)</Text></Text>
           <View style={styles.chipRow}>
             {LEARNING_PREFS.map((pref) => (
               <TouchableOpacity
@@ -554,6 +575,45 @@ const EditProfileScreen = ({ route, navigation }) => {
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Personality Traits */}
+          <Text style={[styles.prefLabel, { marginTop: 16 }]}>
+            Personality Traits <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <Text style={styles.prefHint}>
+            Select a level for each trait that describes you. Used for CV generation and opportunity matching.
+          </Text>
+          {PERSONALITY_TRAITS.map((trait) => (
+            <View key={trait} style={styles.traitRow}>
+              <Text style={styles.traitName}>{trait}</Text>
+              <View style={styles.traitChips}>
+                {TRAIT_LEVELS.map((level) => (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.traitChip,
+                      traitLevels[trait] === level && styles.traitChipActive,
+                    ]}
+                    onPress={() =>
+                      setTraitLevels((prev) => ({
+                        ...prev,
+                        [trait]: prev[trait] === level ? '' : level,
+                      }))
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.traitChipText,
+                        traitLevels[trait] === level && styles.traitChipTextActive,
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
         </View>
 
         {/* Save Profile (basic fields) */}
@@ -748,6 +808,40 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   prefLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  prefHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 8, lineHeight: 16 },
+  optional: { fontSize: 12, fontWeight: '400', color: '#9CA3AF' },
+  traitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9FAFB',
+  },
+  traitName: {
+    fontSize: 13,
+    color: '#374151',
+    textTransform: 'capitalize',
+    flex: 1,
+  },
+  traitChips: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  traitChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  traitChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  traitChipText: { fontSize: 11, color: '#6B7280' },
+  traitChipTextActive: { color: '#F97316', fontWeight: '600' },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
