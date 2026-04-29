@@ -17,12 +17,16 @@ import { profileAPI, skillAPI } from '../../services/api';
 
 const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced', 'expert'];
 const EXPERIENCE_CATEGORIES = ['formal', 'contract', 'freelance', 'apprenticeship', 'community'];
+const WORK_STYLES = ['collaborative', 'independent', 'flexible'];
+const REMOTE_PREFS = ['high', 'medium', 'low'];
+const LEARNING_PREFS = ['high', 'medium', 'low'];
 
 const EditProfileScreen = ({ route, navigation }) => {
   const existingProfile = route.params?.profile || null;
   const existingSkills = route.params?.skills || [];
   const existingExperiences = route.params?.experiences || [];
   const existingEducation = route.params?.education || [];
+  const existingPreference = route.params?.preference || null;
 
   const [title, setTitle] = useState(existingProfile?.title || '');
   const [bio, setBio] = useState(existingProfile?.bio || '');
@@ -31,6 +35,11 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [experiences, setExperiences] = useState(existingExperiences);
   const [education, setEducation] = useState(existingEducation);
   const [saving, setSaving] = useState(false);
+
+  // Preferences
+  const [workStyle, setWorkStyle] = useState(existingPreference?.workStyle || '');
+  const [remotePref, setRemotePref] = useState(existingPreference?.remotePreference || '');
+  const [learningPref, setLearningPref] = useState(existingPreference?.learningWillingness || '');
 
   // Skill picker modal
   const [allSkills, setAllSkills] = useState([]);
@@ -104,6 +113,14 @@ const EditProfileScreen = ({ route, navigation }) => {
           bio: bio.trim(),
           location: location.trim(),
           visibility: 'public',
+        });
+      }
+      // Save preferences if any are set
+      if (workStyle || remotePref || learningPref) {
+        await profileAPI.updatePreferences({
+          workStyle:           workStyle || undefined,
+          remotePreference:    remotePref || undefined,
+          learningWillingness: learningPref || undefined,
         });
       }
       Alert.alert('Saved', 'Profile saved.');
@@ -233,7 +250,7 @@ const EditProfileScreen = ({ route, navigation }) => {
   };
 
   const filteredSkills = allSkills.filter((s) =>
-    (s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
+    (s.skillName || s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
   );
 
   return (
@@ -300,7 +317,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
         <View style={styles.skillsRow}>
           {skills.map((ps) => {
-            const name = ps.skillId?.name || ps.skillName || 'Skill';
+            const name = ps.skillId?.skillName || ps.skillId?.name || ps.skillName || 'Skill';
             return (
               <View key={ps._id} style={styles.skillChip}>
                 <Text style={styles.skillChipText}>
@@ -487,6 +504,58 @@ const EditProfileScreen = ({ route, navigation }) => {
           </View>
         )}
 
+        {/* Preferences */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>Work Preferences</Text>
+        </View>
+
+        <View style={styles.prefCard}>
+          <Text style={styles.prefLabel}>Work Style</Text>
+          <View style={styles.chipRow}>
+            {WORK_STYLES.map((style) => (
+              <TouchableOpacity
+                key={style}
+                style={[styles.optionChip, workStyle === style && styles.optionChipActive]}
+                onPress={() => setWorkStyle(style)}
+              >
+                <Text style={[styles.optionText, workStyle === style && styles.optionTextActive]}>
+                  {style}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Remote Work Preference</Text>
+          <View style={styles.chipRow}>
+            {REMOTE_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, remotePref === pref && styles.optionChipActive]}
+                onPress={() => setRemotePref(pref)}
+              >
+                <Text style={[styles.optionText, remotePref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Learning Willingness</Text>
+          <View style={styles.chipRow}>
+            {LEARNING_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, learningPref === pref && styles.optionChipActive]}
+                onPress={() => setLearningPref(pref)}
+              >
+                <Text style={[styles.optionText, learningPref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         {/* Save Profile (basic fields) */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.buttonDisabled]}
@@ -507,7 +576,7 @@ const EditProfileScreen = ({ route, navigation }) => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {pendingSkill ? `Proficiency: ${pendingSkill.name}` : 'Select Skill'}
+                {pendingSkill ? `Proficiency: ${pendingSkill.skillName || pendingSkill.name}` : 'Select Skill'}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -551,7 +620,7 @@ const EditProfileScreen = ({ route, navigation }) => {
                             already && { color: '#9CA3AF' },
                           ]}
                         >
-                          {item.name}
+                          {item.skillName || item.name}
                           {already ? ' (added)' : ''}
                         </Text>
                         {!already && (
@@ -670,6 +739,15 @@ const styles = StyleSheet.create({
   },
   skillChipText: { fontSize: 13, color: '#EA580C', fontWeight: '500' },
   emptyHint: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+  prefCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  prefLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
