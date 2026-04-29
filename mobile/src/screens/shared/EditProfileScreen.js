@@ -22,10 +22,10 @@ const REMOTE_PREFS = ['high', 'medium', 'low'];
 const LEARNING_PREFS = ['high', 'medium', 'low'];
 const TRAIT_LEVELS = ['low', 'medium', 'high'];
 const PERSONALITY_TRAITS = [
-  'conscientiousness',
+  'creativity',
   'openness',
   'agreeableness',
-  'extraversion',
+  'dependability',
   'resilience',
 ];
 
