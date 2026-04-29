@@ -35,6 +35,7 @@ const EditProfileScreen = ({ route, navigation }) => {
   const existingExperiences = route.params?.experiences || [];
   const existingEducation = route.params?.education || [];
   const existingPreference = route.params?.preference || null;
+  const existingPortfolio = existingProfile?.portfolioItems || [];
 
   const [title, setTitle] = useState(existingProfile?.title || '');
   const [bio, setBio] = useState(existingProfile?.bio || '');
@@ -42,6 +43,7 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [skills, setSkills] = useState(existingSkills);
   const [experiences, setExperiences] = useState(existingExperiences);
   const [education, setEducation] = useState(existingEducation);
+  const [portfolio, setPortfolio] = useState(existingPortfolio);
   const [saving, setSaving] = useState(false);
 
   // Preferences
@@ -80,6 +82,12 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [eduField, setEduField] = useState('');
   const [eduStartYear, setEduStartYear] = useState('');
   const [eduEndYear, setEduEndYear] = useState('');
+
+  // Portfolio form
+  const [showPortfolioForm, setShowPortfolioForm] = useState(false);
+  const [portTitle, setPortTitle] = useState('');
+  const [portDescription, setPortDescription] = useState('');
+  const [portUrl, setPortUrl] = useState('');
 
   useEffect(() => {
     fetchSkills();
@@ -267,6 +275,40 @@ const EditProfileScreen = ({ route, navigation }) => {
       setEducation((prev) => prev.filter((e) => e._id !== edu._id));
     } catch {
       Alert.alert('Error', 'Failed to remove education.');
+    }
+  };
+
+  const addPortfolioItem = async () => {
+    if (!portTitle.trim()) {
+      Alert.alert('Error', 'Project title is required.');
+      return;
+    }
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addPortfolioItem({
+        title: portTitle.trim(),
+        description: portDescription.trim(),
+        fileUrl: portUrl.trim(),
+        fileType: portUrl.trim() ? 'link' : '',
+      });
+      setPortfolio((prev) => [...prev, data.portfolioItem || data]);
+      setPortTitle('');
+      setPortDescription('');
+      setPortUrl('');
+      setShowPortfolioForm(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add portfolio item.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removePortfolioItem = async (item) => {
+    try {
+      await profileAPI.removePortfolioItem(item._id);
+      setPortfolio((prev) => prev.filter((p) => p._id !== item._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove portfolio item.');
     }
   };
 
@@ -519,6 +561,72 @@ const EditProfileScreen = ({ route, navigation }) => {
                 <Text style={styles.cancelLink}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addButton} onPress={addEducation}>
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Portfolio */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>
+            Portfolio <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <TouchableOpacity onPress={() => setShowPortfolioForm(true)}>
+            <Text style={styles.addLink}>+ Add Project</Text>
+          </TouchableOpacity>
+        </View>
+
+        {portfolio.map((item, index) => (
+          <View key={item._id || index} style={styles.entryCard}>
+            <View style={styles.entryInfo}>
+              <Text style={styles.entryTitle}>{item.title}</Text>
+              {item.description ? (
+                <Text style={styles.entrySubtitle} numberOfLines={2}>{item.description}</Text>
+              ) : null}
+              {item.fileUrl ? (
+                <Text style={styles.entryDates} numberOfLines={1}>🔗 {item.fileUrl}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity onPress={() => removePortfolioItem(item)}>
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+
+        {showPortfolioForm && (
+          <View style={styles.addForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Project / Work Title *"
+              placeholderTextColor="#9CA3AF"
+              value={portTitle}
+              onChangeText={setPortTitle}
+            />
+            <TextInput
+              style={[styles.input, styles.textArea, { marginTop: 8 }]}
+              placeholder="Description (what you built, your role, outcome)"
+              placeholderTextColor="#9CA3AF"
+              value={portDescription}
+              onChangeText={setPortDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+            <TextInput
+              style={[styles.input, { marginTop: 8 }]}
+              placeholder="Link to work (URL, GitHub, Drive, etc.) — optional"
+              placeholderTextColor="#9CA3AF"
+              value={portUrl}
+              onChangeText={setPortUrl}
+              autoCapitalize="none"
+              keyboardType="url"
+            />
+            <View style={styles.formActions}>
+              <TouchableOpacity onPress={() => setShowPortfolioForm(false)}>
+                <Text style={styles.cancelLink}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addButton} onPress={addPortfolioItem}>
                 <Text style={styles.addButtonText}>Add</Text>
               </TouchableOpacity>
             </View>

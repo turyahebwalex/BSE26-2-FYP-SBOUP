@@ -121,6 +121,8 @@ export const profileAPI = {
   addEducation: (data) => api.post('/profiles/education', data),
   deleteEducation: (eduId) => api.delete(`/profiles/education/${eduId}`),
   updatePreferences: (data) => api.put('/profiles/preferences', data),
+  addPortfolioItem: (data) => api.post('/profiles/portfolio', data),
+  removePortfolioItem: (itemId) => api.delete(`/profiles/portfolio/${itemId}`),
 };
 
 // ── Opportunity ──

@@ -161,3 +161,47 @@ exports.updatePreference = async (req, res) => {
     res.status(500).json({ error: 'Failed to update preferences.' });
   }
 };
+
+// ─── Portfolio ───
+exports.addPortfolioItem = async (req, res) => {
+  try {
+    const { title, description, fileUrl, fileType } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required.' });
+
+    const profile = await Profile.findOneAndUpdate(
+      { userId: req.user._id },
+      {
+        $push: {
+          portfolioItems: {
+            title,
+            description: description || '',
+            fileUrl: fileUrl || '',
+            fileType: fileType || 'link',
+            uploadedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!profile) return res.status(404).json({ error: 'Profile not found.' });
+
+    const added = profile.portfolioItems[profile.portfolioItems.length - 1];
+    res.status(201).json({ portfolioItem: added });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to add portfolio item.' });
+  }
+};
+
+exports.removePortfolioItem = async (req, res) => {
+  try {
+    const profile = await Profile.findOneAndUpdate(
+      { userId: req.user._id },
+      { $pull: { portfolioItems: { _id: req.params.itemId } } },
+      { new: true }
+    );
+    if (!profile) return res.status(404).json({ error: 'Profile not found.' });
+    res.json({ message: 'Portfolio item removed.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove portfolio item.' });
+  }
+};

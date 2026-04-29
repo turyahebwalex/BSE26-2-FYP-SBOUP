@@ -216,6 +216,26 @@ const ProfileScreen = ({ navigation }) => {
               </View>
             )}
 
+            {/* Portfolio */}
+            {profile.portfolioItems?.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Portfolio</Text>
+                {profile.portfolioItems.map((item, index) => (
+                  <View key={item._id || index} style={styles.card}>
+                    <Text style={styles.expTitle}>{item.title}</Text>
+                    {item.description ? (
+                      <Text style={styles.expDescription}>{item.description}</Text>
+                    ) : null}
+                    {item.fileUrl ? (
+                      <Text style={[styles.expDates, { color: '#F97316' }]} numberOfLines={1}>
+                        🔗 {item.fileUrl}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* Preferences */}
             {preference && (preference.workStyle || preference.remotePreference || preference.learningWillingness || preference.personalityTraits?.length > 0) && (
               <View style={styles.section}>
@@ -259,8 +279,7 @@ const ProfileScreen = ({ navigation }) => {
 
             <TouchableOpacity
               style={styles.editButton}
-              onPress={() => navigation.navigate('EditProfile', { profile, skills, experiences, education, preference })}
-            >
+              onPress={() => navigation.navigate('EditProfile', { profile, skills, experiences, education, preference })}            >
               <Ionicons name="create-outline" size={18} color="#FFFFFF" />
               <Text style={styles.editButtonText}>Edit Profile</Text>
             </TouchableOpacity>
