@@ -162,6 +162,16 @@ def _get_worker_context(profile_id, profile_doc=None):
     }
 
 
+def _get_skill_categories(skill_names: list) -> set:
+    """Return the set of categories for a list of skill names."""
+    categories = set()
+    for name in skill_names:
+        skill_doc = db.skills.find_one({'skillName': name})
+        if skill_doc and skill_doc.get('category'):
+            categories.add(skill_doc['category'])
+    return categories
+
+
 def _build_feature_row(worker_skills, opp_skills, worker_ctx, opp_doc):
     """
     Build the complete feature dict that the ML model expects.
@@ -174,6 +184,13 @@ def _build_feature_row(worker_skills, opp_skills, worker_ctx, opp_doc):
     overlap_count = len(worker_skill_set & opp_skill_set)
     gap_count     = len(opp_skill_set - worker_skill_set)
     cosine_sim    = _cosine(worker_skills, opp_skills)
+
+    # Skill category overlap
+    worker_categories = _get_skill_categories(list(worker_skill_set))
+    opp_categories    = _get_skill_categories(list(opp_skill_set))
+    n_opp_cats        = len(opp_categories) or 1
+    skill_category_overlap      = len(worker_categories & opp_categories)
+    worker_category_match_ratio = round(skill_category_overlap / n_opp_cats, 4)
 
     # Location match: same city OR remote opportunity
     location_match = int(
@@ -214,6 +231,8 @@ def _build_feature_row(worker_skills, opp_skills, worker_ctx, opp_doc):
         'location_match':               location_match,
         'salary_fit':                   salary_fit,
         'exp_fit':                      exp_fit,
+        'skill_category_overlap':       skill_category_overlap,
+        'worker_category_match_ratio':  worker_category_match_ratio,
         'worker_n_skills':              worker_ctx['n_skills'],
         'worker_total_exp_months':      worker_ctx['total_exp_months'],
         'worker_profile_completeness':  worker_ctx['profile_completeness'],
