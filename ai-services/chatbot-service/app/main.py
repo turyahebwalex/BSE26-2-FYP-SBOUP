@@ -1,130 +1,479 @@
 """
-SBOUP Chatbot Microservice
-NLP-based conversational assistant for user guidance.
+SBOUP Chatbot Microservice — Kazi (RAG + Gemini)
+Replaces the previous pattern-matching chatbot with an intelligent,
+context-aware assistant powered by RAG and Google Gemini.
+
+Pipeline per request:
+  1. Retrieve relevant knowledge chunks from ChromaDB (RAG)
+  2. Fetch user's real profile data from MongoDB (personalisation)
+  3. Load conversation history from MongoDB (memory)
+  4. Build system prompt with all context injected
+  5. Call Gemini 2.0 Flash for a natural language response
+  6. Save the turn to conversation history
+  7. Return response + suggested actions to the client
 """
+
+import os
+import sys
+import logging
+import time
+from datetime import datetime, timezone, timedelta
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import re
-import os
-import logging
+from dotenv import load_dotenv
 
+# ── Load environment ──────────────────────────────────────────────────────────
+load_dotenv()
+
+# ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Knowledge base - FAQ responses
-KNOWLEDGE_BASE = {
-    'greeting': {
-        'patterns': [r'\b(hello|hi|hey|good morning|good afternoon)\b'],
-        'response': "Hello! I'm your SkillBridge assistant. I can help you with navigating the platform, finding opportunities, building your profile, generating CVs, and more. What would you like to do?",
-    },
-    'register': {
-        'patterns': [r'\b(register|sign up|create account|join)\b'],
-        'response': "To register, tap 'Create Account', fill in your name, email, and phone number, select your role (Skilled Worker or Employer), add your location, and tap 'Next'. You'll receive a verification email to activate your account.",
-    },
-    'profile': {
-        'patterns': [r'\b(profile|edit profile|update profile|add skills)\b'],
-        'response': "To build your profile, go to the Profile tab and tap 'Edit about me'. Add your professional title, bio, skills (primary and secondary), work experience, education, and personality traits. A complete profile improves your match scores!",
-    },
-    'opportunities': {
-        'patterns': [r'\b(find job|search job|discover|opportunities|browse)\b'],
-        'response': "Go to the 'Discover Jobs' tab to browse opportunities. Use the search bar to find specific roles, and apply filters like location, category, or personality traits. Each opportunity shows your match percentage. Tap 'Quick Apply' to apply instantly!",
-    },
-    'apply': {
-        'patterns': [r'\b(apply|application|submit|quick apply)\b'],
-        'response': "To apply for an opportunity: open the job details, review your match score, tap 'Quick Apply' or the apply button, attach your CV and cover letter, then submit. You can track your applications from your dashboard.",
-    },
-    'cv': {
-        'patterns': [r'\b(cv|resume|generate cv|tailored cv)\b'],
-        'response': "Generate a tailored CV by going to 'Generate CV' from your dashboard. Select which profile data to include (experience, skills, personality traits), choose a template (Professional or Modern), then tap 'Generate Preview'. Your CV will be optimized for the opportunities you're targeting!",
-    },
-    'learning': {
-        'patterns': [r'\b(learn|upskill|course|skill gap|training)\b'],
-        'response': "The Upskill section identifies your skill gaps and recommends free or affordable learning resources. When you see a 'Bridge' button next to a missing skill, tap it to start a personalized learning path. Completing courses improves your match scores!",
-    },
-    'matching': {
-        'patterns': [r'\b(match score|compatibility|recommendation)\b'],
-        'response': "Your Match Score shows how well your skills and experience align with an opportunity. It's based on skill similarity (50%), experience relevance (25%), and patterns from similar workers (25%). Building your profile and completing learning paths will improve your scores.",
-    },
-    'messaging': {
-        'patterns': [r'\b(message|chat|contact employer|inbox)\b'],
-        'response': "You can message employers through the Messaging Hub. Open your inbox to see conversations, or go to an application to message the employer directly. You can attach documents up to 10MB.",
-    },
-    'fraud': {
-        'patterns': [r'\b(fraud|scam|suspicious|report|fake)\b'],
-        'response': "If you encounter a suspicious posting, tap the 'Report' button and select a reason. Our AI system automatically screens postings, and community reports help us remove harmful content quickly. Never share personal banking details with anyone on the platform.",
-    },
-    'help': {
-        'patterns': [r'\b(help|support|assist|how to)\b'],
-        'response': "I can help with: profile setup, finding opportunities, generating CVs, learning new skills, messaging, and understanding match scores. What would you like to know more about?",
-    },
+# ── Config ────────────────────────────────────────────────────────────────────
+BASE_DIR         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHROMA_DIR       = os.path.join(BASE_DIR, "chroma_db")
+KNOWLEDGE_DIR    = os.path.join(BASE_DIR, "knowledge")
+COLLECTION_NAME  = "sboup_knowledge"
+EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
+GEMINI_MODEL     = "gemini-2.0-flash"
+MONGODB_URI      = os.getenv("MONGODB_URI", "mongodb://localhost:27017/sboup_dev")
+GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
+DB_NAME          = MONGODB_URI.split("/")[-1].split("?")[0]
+
+# Proficiency weights (mirrors matching engine)
+PROFICIENCY_WEIGHT = {
+    "beginner": 0.25, "intermediate": 0.50,
+    "advanced": 0.75, "expert": 1.00,
 }
 
+# ── Lazy-loaded singletons ────────────────────────────────────────────────────
+_embed_model   = None
+_chroma_col    = None
+_mongo_db      = None
+_gemini_model  = None
+_components_loaded = False
 
-def identify_intent(query):
-    """NLP-based intent identification using pattern matching."""
-    query_lower = query.lower()
-    best_match = None
-    best_score = 0
 
-    for intent, data in KNOWLEDGE_BASE.items():
-        for pattern in data['patterns']:
-            if re.search(pattern, query_lower):
-                match_score = len(pattern)
-                if match_score > best_score:
-                    best_score = match_score
-                    best_match = intent
+def _load_components():
+    """Load all components once on first request."""
+    global _embed_model, _chroma_col, _mongo_db, _gemini_model, _components_loaded
+    if _components_loaded:
+        return
 
-    return best_match
+    # 1. Embedding model + ChromaDB
+    try:
+        from sentence_transformers import SentenceTransformer
+        import chromadb
+        _embed_model = SentenceTransformer(EMBED_MODEL_NAME)
+        client       = chromadb.PersistentClient(path=CHROMA_DIR)
+        _chroma_col  = client.get_collection(COLLECTION_NAME)
+        logger.info(f"RAG ready — {_chroma_col.count()} chunks indexed")
+    except Exception as e:
+        logger.warning(f"RAG unavailable: {e}")
+
+    # 2. MongoDB
+    try:
+        from pymongo import MongoClient
+        mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        mongo_client.admin.command("ping")
+        _mongo_db = mongo_client[DB_NAME]
+        logger.info(f"MongoDB connected: {DB_NAME}")
+    except Exception as e:
+        logger.warning(f"MongoDB unavailable: {e}")
+
+    # 3. Gemini
+    if GEMINI_API_KEY and GEMINI_API_KEY not in ("your-gemini-api-key-here", ""):
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            _gemini_model = genai.GenerativeModel(
+                model_name=GEMINI_MODEL,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=600,
+                    temperature=0.4,
+                    top_p=0.9,
+                ),
+            )
+            logger.info(f"Gemini ready: {GEMINI_MODEL}")
+        except Exception as e:
+            logger.warning(f"Gemini unavailable: {e}")
+    else:
+        logger.warning("GEMINI_API_KEY not set — running in fallback mode")
+
+    _components_loaded = True
+
+
+# ── RAG retrieval ─────────────────────────────────────────────────────────────
+
+def _retrieve_knowledge(query: str, n: int = 3) -> str:
+    if _embed_model is None or _chroma_col is None:
+        return ""
+    try:
+        embedding = _embed_model.encode(query).tolist()
+        results   = _chroma_col.query(
+            query_embeddings=[embedding],
+            n_results=n,
+            include=["documents", "metadatas", "distances"],
+        )
+        docs      = results["documents"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
+        chunks = []
+        for doc, meta, dist in zip(docs, metadatas, distances):
+            source    = meta.get("source", "").replace(".md", "")
+            relevance = round((1 - dist) * 100, 1)
+            chunks.append(f"[Source: {source} | Relevance: {relevance}%]\n{doc.strip()}")
+        return "\n\n---\n\n".join(chunks)
+    except Exception as e:
+        logger.error(f"RAG error: {e}")
+        return ""
+
+
+# ── User context ──────────────────────────────────────────────────────────────
+
+def _get_user_context(user_id: str, role: str) -> str:
+    if _mongo_db is None or not user_id:
+        return "Guest user — no profile data available."
+    try:
+        from bson import ObjectId
+        from bson.errors import InvalidId
+        uid = ObjectId(user_id)
+    except Exception:
+        return "Guest user — no profile data available."
+
+    try:
+        db = _mongo_db
+        if role == "skilled_worker":
+            profile = db.profiles.find_one({"userId": uid})
+            if not profile:
+                return "Worker has not created a profile yet."
+
+            pid    = profile["_id"]
+            skills = list(db.profileskills.find({"profileId": pid}))
+            skill_names = []
+            for ps in skills:
+                sk = db.skills.find_one({"_id": ps["skillId"]})
+                if sk:
+                    skill_names.append(
+                        f"{sk['skillName']} ({ps.get('proficiencyLevel','beginner')})"
+                    )
+
+            exps      = list(db.experiences.find({"profileId": pid}))
+            total_exp = sum(e.get("durationMonths", 0) or 0 for e in exps)
+
+            apps       = list(db.applications.find({"profileId": pid})
+                              .sort("submittedAt", -1).limit(5))
+            total_apps = db.applications.count_documents({"profileId": pid})
+            shortlisted = db.applications.count_documents({
+                "profileId": pid,
+                "status": {"$in": ["shortlisted", "offer_extended"]}
+            })
+
+            app_lines = []
+            for a in apps:
+                opp = db.opportunities.find_one({"_id": a["opportunityId"]},
+                                                {"title": 1})
+                title = opp.get("title", "Unknown") if opp else "Unknown"
+                app_lines.append(
+                    f"  - {title} | {a.get('status','submitted')} | "
+                    f"match: {a.get('matchScore',0)}%"
+                )
+
+            # Completeness
+            weights = {
+                "title":      (0.15, bool(profile.get("title"))),
+                "bio":        (0.10, bool(profile.get("bio"))),
+                "location":   (0.10, bool(profile.get("location"))),
+                "skills":     (0.25, len(skills) > 0),
+                "experience": (0.25, len(exps) > 0),
+                "portfolio":  (0.15, len(profile.get("portfolioItems", [])) > 0),
+            }
+            completeness = sum(w for w, present in weights.values() if present)
+            missing = [s for s, (_, present) in weights.items() if not present]
+
+            lps = list(db.learningpaths.find({"userId": uid, "status": "active"}).limit(3))
+            lp_lines = [f"  - {lp['targetSkill']} ({lp.get('progress',0)}%)" for lp in lps]
+
+            return f"""=== Worker Profile ===
+Name          : {profile.get('title','Not set')}
+Location      : {profile.get('location','Not set')}
+Bio           : {(profile.get('bio') or 'Not set')[:150]}
+Completeness  : {int(completeness*100)}%
+Missing       : {', '.join(missing) if missing else 'None'}
+Skills        : {', '.join(skill_names) if skill_names else 'None added yet'}
+Experience    : {total_exp} months across {len(exps)} entries
+Applications  : {total_apps} total, {shortlisted} shortlisted
+Recent apps   :
+{chr(10).join(app_lines) if app_lines else '  None yet'}
+Learning paths:
+{chr(10).join(lp_lines) if lp_lines else '  None active'}
+"""
+
+        elif role == "employer":
+            postings = list(db.opportunities.find(
+                {"postedByUserId": uid, "status": "published"},
+                {"title": 1, "category": 1, "applicationCount": 1, "location": 1}
+            ).sort("createdAt", -1).limit(5))
+            total_apps = sum(p.get("applicationCount", 0) for p in postings)
+            posting_lines = "\n".join(
+                f"  - {p.get('title','')} ({p.get('category','')}) | "
+                f"{p.get('applicationCount',0)} apps"
+                for p in postings
+            ) or "  None"
+            return f"""=== Employer Profile ===
+Active postings    : {len(postings)}
+Total applications : {total_apps}
+Recent postings:
+{posting_lines}
+"""
+    except Exception as e:
+        logger.error(f"User context error: {e}")
+        return "Could not load user context."
+
+    return "Unknown role."
+
+
+# ── Conversation memory ───────────────────────────────────────────────────────
+
+def _get_history(user_id: str, limit: int = 10) -> list:
+    if _mongo_db is None or not user_id:
+        return []
+    try:
+        from bson import ObjectId
+        uid = ObjectId(user_id)
+        doc = _mongo_db.chatconversations.find_one({"userId": uid}, {"messages": 1})
+        if not doc:
+            return []
+        recent = doc.get("messages", [])[-limit:]
+        return [{"role": m["role"], "content": m["content"]} for m in recent]
+    except Exception:
+        return []
+
+
+def _save_turn(user_id: str, user_msg: str, asst_msg: str):
+    if _mongo_db is None or not user_id:
+        return
+    try:
+        from bson import ObjectId
+        uid = ObjectId(user_id)
+        now = datetime.now(timezone.utc)
+        _mongo_db.chatconversations.update_one(
+            {"userId": uid},
+            {
+                "$push": {"messages": {"$each": [
+                    {"role": "user",      "content": user_msg,  "timestamp": now},
+                    {"role": "assistant", "content": asst_msg,  "timestamp": now},
+                ]}},
+                "$set":         {"updatedAt": now},
+                "$setOnInsert": {"userId": uid, "createdAt": now},
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.error(f"Memory save error: {e}")
+
+
+# ── System prompt ─────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are Kazi, the intelligent assistant for SBOUP \
+(Skills-Based Opportunity Unleashing Platform) — a job marketplace connecting \
+skilled workers with employers in Uganda and East Africa.
+
+Your role:
+- Help WORKERS find opportunities, improve their profiles, understand their \
+match scores, generate CVs, and upskill.
+- Help EMPLOYERS post opportunities, review applications, and find top candidates.
+- Answer questions about the platform clearly and concisely.
+- Give personalised advice based on the user's actual profile data provided below.
+
+Rules:
+- Always be warm, encouraging, and professional.
+- If you don't know something, say so honestly — never make up facts.
+- Keep responses concise: 2–4 sentences for simple questions, more for complex ones.
+- When a worker has a low match score, explain why and suggest specific improvements.
+- When a worker's profile is incomplete, tell them exactly what section to add.
+- Never make up job opportunities, salary figures, or skill recommendations \
+that are not grounded in the user's actual data.
+- Respond in the same language the user writes in.
+- Do not answer questions unrelated to work, jobs, skills, or the SBOUP platform.
+
+Platform context:
+- Compensation is in UGX (Ugandan Shillings).
+- Job categories: formal, contract, freelance, apprenticeship.
+- Profile completeness: title (15%), bio (10%), location (10%), \
+skills (25%), experience (25%), portfolio (15%).
+
+--- USER CONTEXT ---
+{user_context}
+
+--- RELEVANT PLATFORM KNOWLEDGE ---
+{knowledge_context}
+"""
+
+
+# ── LLM call ──────────────────────────────────────────────────────────────────
+
+def _call_gemini(system_prompt: str, history: list, message: str) -> str:
+    if _gemini_model is None:
+        return _fallback(message)
+    try:
+        contents = [
+            {"role": "user",  "parts": [system_prompt]},
+            {"role": "model", "parts": ["Understood. I'm Kazi, ready to help."]},
+        ]
+        for msg in history:
+            contents.append({
+                "role":  "model" if msg["role"] == "assistant" else "user",
+                "parts": [msg["content"]],
+            })
+        contents.append({"role": "user", "parts": [message]})
+        response = _gemini_model.generate_content(contents)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Gemini error: {e}")
+        return _fallback(message)
+
+
+def _fallback(message: str) -> str:
+    msg = message.lower()
+    if any(w in msg for w in ["hello", "hi", "hey"]):
+        return ("Hello! I'm Kazi, your SBOUP assistant. I can help you find "
+                "opportunities, improve your profile, generate CVs, and more. "
+                "What would you like to do?")
+    if any(w in msg for w in ["match", "score"]):
+        return ("Your match score shows how well your skills fit a job. "
+                "Skill overlap is the most important factor — add more skills "
+                "to your profile to improve your scores.")
+    if any(w in msg for w in ["profile", "complete"]):
+        return ("A complete profile gets better match scores. Make sure you "
+                "have a title, bio, location, skills, experience, and portfolio.")
+    if any(w in msg for w in ["cv", "resume"]):
+        return ("Go to Dashboard → Generate CV to create a tailored CV from "
+                "your profile data. Choose Professional or Modern template.")
+    if any(w in msg for w in ["skill", "learn", "upskill"]):
+        return ("Visit the Upskill section to see your skill gaps and get "
+                "recommended free learning resources to close them.")
+    if any(w in msg for w in ["apply", "application", "job"]):
+        return ("Browse opportunities in the Discover Jobs tab. Each job shows "
+                "your match %. Tap Quick Apply to submit instantly.")
+    if any(w in msg for w in ["fraud", "scam", "suspicious", "report"]):
+        return ("Tap the Report button on any suspicious posting. Our AI screens "
+                "all postings automatically and community reports are reviewed "
+                "within 24 hours.")
+    return ("I'm having a small issue right now. Please try again in a moment, "
+            "or visit the Help section for support.")
+
+
+def _suggested_actions(message: str, role: str) -> list:
+    msg = message.lower()
+    if role == "employer":
+        return ["Post Opportunity", "View Applications", "Find Candidates"]
+    if any(w in msg for w in ["cv", "resume"]):
+        return ["Generate CV", "View My CVs", "Edit Profile"]
+    if any(w in msg for w in ["skill", "learn", "upskill", "gap"]):
+        return ["View Skill Gaps", "Browse Courses", "Edit Skills"]
+    if any(w in msg for w in ["match", "score", "opportunit", "job"]):
+        return ["Browse Jobs", "My Applications", "Improve Profile"]
+    if any(w in msg for w in ["profile", "complete", "bio"]):
+        return ["Edit Profile", "Add Skills", "Add Experience"]
+    return ["Find Opportunities", "Build Profile", "Generate CV"]
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.before_request
+def _startup():
+    if not _components_loaded:
+        _load_components()
 
 
 @app.route('/api/chatbot/query', methods=['POST'])
 def process_query():
-    """Process user query and return response."""
+    """Main chat endpoint — replaces the old pattern-matching handler."""
     try:
-        data = request.json
-        query = data.get('query', '')
-        user_id = data.get('userId', '')
+        data      = request.get_json(force=True, silent=True) or {}
+        query     = (data.get('query') or '').strip()
+        user_id   = (data.get('userId') or '').strip()
+        user_role = (data.get('userRole') or 'skilled_worker').strip()
 
         if not query:
-            return jsonify({'response': "Please type a question and I'll help you!", 'intent': None})
+            return jsonify({
+                'response':         "Please type a question and I'll help you!",
+                'intent':           None,
+                'suggestedActions': ['Find Opportunities', 'Build Profile', 'Generate CV'],
+                'fallback':         True,
+            })
 
-        intent = identify_intent(query)
+        t0 = time.time()
 
-        if intent:
-            response = KNOWLEDGE_BASE[intent]['response']
-        else:
-            response = "I'm not sure I understand that question. I can help you with: registering, building your profile, finding opportunities, generating CVs, learning new skills, or understanding match scores. Could you rephrase your question?"
+        # Pipeline
+        knowledge_context = _retrieve_knowledge(query)
+        user_context      = _get_user_context(user_id, user_role)
+        history           = _get_history(user_id)
+
+        system_prompt = SYSTEM_PROMPT.format(
+            user_context=user_context or "No profile data available.",
+            knowledge_context=knowledge_context or "No relevant knowledge found.",
+        )
+
+        response_text = _call_gemini(system_prompt, history, query)
+
+        if user_id and response_text:
+            _save_turn(user_id, query, response_text)
+
+        latency_ms = int((time.time() - t0) * 1000)
+        logger.info(f"Query: '{query[:60]}' | {latency_ms}ms | user={user_id or 'guest'}")
 
         return jsonify({
-            'response': response,
-            'intent': intent,
-            'suggestedActions': get_suggested_actions(intent),
+            'response':         response_text,
+            'intent':           None,
+            'suggestedActions': _suggested_actions(query, user_role),
+            'fallback':         (_gemini_model is None),
+            'latency_ms':       latency_ms,
         })
+
     except Exception as e:
-        logger.error(f"Chatbot error: {e}")
+        logger.error(f"Chatbot error: {e}", exc_info=True)
         return jsonify({
-            'response': "I'm having a small issue right now. Please try again or submit a support ticket.",
-            'fallback': True,
+            'response':         "I'm having a small issue right now. Please try again!",
+            'intent':           None,
+            'suggestedActions': ['Find Opportunities', 'Build Profile', 'Help'],
+            'fallback':         True,
         }), 500
 
 
-def get_suggested_actions(intent):
-    """Return quick-action buttons based on detected intent."""
-    actions = {
-        'greeting': ['Find Opportunities', 'Build Profile', 'Generate CV'],
-        'profile': ['Edit Profile', 'Add Skills', 'View Dashboard'],
-        'opportunities': ['Browse Jobs', 'My Applications', 'Recommended for Me'],
-        'cv': ['Generate CV', 'View My CVs', 'Edit Profile'],
-        'learning': ['View Skill Gaps', 'Browse Courses', 'My Learning Paths'],
-    }
-    return actions.get(intent, ['Find Opportunities', 'Build Profile', 'Help'])
+@app.route('/api/chatbot/history', methods=['DELETE'])
+def clear_history():
+    """Clear a user's conversation history (called on logout or chat reset)."""
+    try:
+        data    = request.get_json(force=True, silent=True) or {}
+        user_id = (data.get('userId') or '').strip()
+        if not user_id:
+            return jsonify({'success': False, 'message': 'userId is required'}), 400
+        if _mongo_db is None:
+            return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+        from bson import ObjectId
+        _mongo_db.chatconversations.delete_one({'userId': ObjectId(user_id)})
+        return jsonify({'success': True, 'message': 'History cleared'})
+    except Exception as e:
+        logger.error(f"Clear history error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'service': 'chatbot-service'})
+    return jsonify({
+        'status':  'ok',
+        'service': 'chatbot-service',
+        'components': {
+            'rag':          'ready' if _chroma_col else 'not loaded',
+            'llm':          'ready' if _gemini_model else 'fallback mode',
+            'mongodb':      'connected' if _mongo_db else 'offline',
+        },
+    })
 
 
 if __name__ == '__main__':
