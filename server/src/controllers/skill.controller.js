@@ -63,11 +63,27 @@ exports.deleteSkill = async (req, res) => {
 
 exports.suggestSkills = async (req, res) => {
   try {
-    const { title = '', description = '' } = req.body || {};
+    const {
+      title = '',
+      description = '',
+      location = '',
+      existingSkills = [],
+      experiences = [],
+      education = [],
+    } = req.body || {};
+
     if (typeof title !== 'string' || typeof description !== 'string') {
       return res.status(400).json({ error: 'title and description must be strings.' });
     }
-    const suggestions = await suggestSkills({ title, description });
+
+    const suggestions = await suggestSkills({
+      title,
+      description,
+      location: typeof location === 'string' ? location : '',
+      existingSkills: Array.isArray(existingSkills) ? existingSkills : [],
+      experiences: Array.isArray(experiences) ? experiences : [],
+      education: Array.isArray(education) ? education : [],
+    });
     res.json({ suggestions });
   } catch (error) {
     res.status(500).json({ error: 'Failed to suggest skills.' });
