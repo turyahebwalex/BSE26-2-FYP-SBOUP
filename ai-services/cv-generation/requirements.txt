@@ -1,9 +1,24 @@
-flask==3.0.0
-flask-cors==4.0.0
-pymongo==4.6.1
-numpy==1.26.3
-scikit-learn==1.4.0
-nltk==3.8.1
-gunicorn==21.2.0
-python-dotenv==1.0.0
-pytest==8.0.0
+# CPU-only PyTorch wheels are ~190MB vs ~800MB for the CUDA-bundled default
+# wheel on PyPI. The service runs on CPU regardless (see ai_model_manager
+# logs: "Use pytorch device_name: cpu"), and the smaller wheel reliably
+# completes on throttled campus / MikroTik links where the 800MB wheel
+# times out mid-download.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+motor>=3.4.0
+pymongo>=4.7.0
+pydantic>=2.7.0
+python-dotenv>=1.0.0
+sentence-transformers>=2.7.0,<5.0
+transformers>=4.41.0,<5.0
+huggingface_hub>=0.23.0,<1.0
+torch==2.4.1+cpu
+reportlab>=4.2.0
+boto3>=1.34.0
+slowapi>=0.1.9
+httpx>=0.27.0
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+moto>=5.0.0
