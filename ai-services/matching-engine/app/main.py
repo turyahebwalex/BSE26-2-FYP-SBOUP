@@ -366,7 +366,10 @@ def get_recommendations(user_id):
             results.append(entry)
 
         results.sort(key=lambda x: x['matchScore'], reverse=True)
-        return jsonify({'recommendations': results[:20]})
+        # Only return opportunities with a meaningful match score (≥ 5%)
+        # Zero-relevance pairs score ≤ 2% from the model — exclude them
+        meaningful = [r for r in results if r['matchScore'] >= 5]
+        return jsonify({'recommendations': meaningful[:20]})
 
     except Exception as e:
         logger.error("Recommendations error: %s", e)

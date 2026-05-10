@@ -24,4 +24,7 @@ router.delete('/education/:eduId', authenticate, ctrl.deleteEducation);
 // Preferences
 router.put('/preferences', authenticate, ctrl.updatePreference);
 
+// Avatar
+router.put('/avatar', authenticate, ctrl.updateAvatar);
+
 module.exports = router;

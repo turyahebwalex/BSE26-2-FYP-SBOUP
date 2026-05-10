@@ -145,6 +145,30 @@ exports.deleteEducation = async (req, res) => {
   }
 };
 
+// ─── Avatar ───
+exports.updateAvatar = async (req, res) => {
+  try {
+    const { avatarBase64 } = req.body;
+    if (!avatarBase64) {
+      return res.status(400).json({ error: 'avatarBase64 is required.' });
+    }
+    // Validate it looks like a base64 image (data URI or raw base64)
+    const isValid = typeof avatarBase64 === 'string' && avatarBase64.length > 0;
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid image data.' });
+    }
+    const profile = await Profile.findOneAndUpdate(
+      { userId: req.user._id },
+      { avatarBase64 },
+      { new: true }
+    );
+    if (!profile) return res.status(404).json({ error: 'Profile not found.' });
+    res.json({ avatarBase64: profile.avatarBase64 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update avatar.' });
+  }
+};
+
 // ─── Preference ───
 exports.updatePreference = async (req, res) => {
   try {

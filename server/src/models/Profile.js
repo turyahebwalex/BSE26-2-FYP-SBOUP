@@ -35,6 +35,10 @@ const profileSchema = new mongoose.Schema(
       enum: ['public', 'private'],
       default: 'public',
     },
+    avatarBase64: {
+      type: String,   // base64-encoded image, stored directly in MongoDB
+      default: null,
+    },
   },
   {
     timestamps: { updatedAt: 'updatedAt', createdAt: 'createdAt' },

@@ -113,6 +113,7 @@ export const profileAPI = {
   getProfile: (id) => api.get(`/profiles/${id}`),
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
+  updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 }),
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (skillId) => api.delete(`/profiles/skills/${skillId}`),
   addExperience: (data) => api.post('/profiles/experience', data),
