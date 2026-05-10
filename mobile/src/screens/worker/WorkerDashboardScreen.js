@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -10,9 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { matchingAPI, applicationAPI, notificationAPI } from '../../services/api';
 import OpportunityCard from '../../components/OpportunityCard';
+
+const AVATAR_KEY = (userId) => `user_avatar_uri_${userId}`;
 
 const WorkerDashboardScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -22,6 +27,32 @@ const WorkerDashboardScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [avatarUri, setAvatarUri] = useState(null);
+
+  // Reload avatar every time this screen comes into focus
+  // so changes made on the Profile tab are reflected immediately
+  useFocusEffect(
+    useCallback(() => {
+      const userId = user?._id || user?.id || 'guest';
+      const key = AVATAR_KEY(userId);
+      AsyncStorage.getItem(key).then(async (cached) => {
+        if (cached) {
+          setAvatarUri(cached);
+        } else {
+          // Not cached — fetch from DB
+          try {
+            const { data } = await (await import('../../services/api')).profileAPI.getMyProfile();
+            const b64 = data.profile?.avatarBase64;
+            if (b64) {
+              const uri = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+              setAvatarUri(uri);
+              await AsyncStorage.setItem(key, uri);
+            }
+          } catch (_) {}
+        }
+      });
+    }, [user])
+  );
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -34,7 +65,16 @@ const WorkerDashboardScreen = ({ navigation }) => {
 
       if (recsRes.status === 'fulfilled') {
         const data = recsRes.value.data;
-        setRecommendations(data.recommendations || data.matches || data || []);
+        const all = data.recommendations || data.matches || data || [];
+        // Only show opportunities with a meaningful match score (≥ 5%)
+        // Scores below 5% mean zero skill relevance — not worth showing
+        const matched = Array.isArray(all)
+          ? all.filter((r) => {
+              const score = r.matchScore ?? r.score ?? (r.opportunity || r).matchScore ?? 0;
+              return score >= 5;
+            })
+          : [];
+        setRecommendations(matched);
       }
       if (appsRes.status === 'fulfilled') {
         const data = appsRes.value.data;
@@ -122,9 +162,13 @@ const WorkerDashboardScreen = ({ navigation }) => {
             style={styles.profileAvatar}
             onPress={() => navigation.navigate('ProfileTab', { screen: 'Profile' })}
           >
-            <Text style={styles.avatarText}>
-              {(user?.fullName || user?.name || 'U').charAt(0).toUpperCase()}
-            </Text>
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.profileAvatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>
+                {(user?.fullName || user?.name || 'U').charAt(0).toUpperCase()}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -271,6 +315,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F97316',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  profileAvatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   avatarText: {
     fontSize: 20,

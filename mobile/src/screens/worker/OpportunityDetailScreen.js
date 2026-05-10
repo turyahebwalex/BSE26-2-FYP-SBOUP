@@ -13,6 +13,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI } from '../../services/api';
 
+// ── Signal row helper ─────────────────────────────────────────────────────────
+const SignalRow = ({ icon, label, value, pass }) => (
+  <View style={styles.signalRow}>
+    <View style={styles.signalLeft}>
+      <Ionicons name={icon} size={16} color={pass ? '#10B981' : '#EF4444'} />
+      <Text style={styles.signalLabel}>{label}</Text>
+    </View>
+    <View style={[styles.signalBadge, { backgroundColor: pass ? '#D1FAE5' : '#FEE2E2' }]}>
+      <Text style={[styles.signalValue, { color: pass ? '#059669' : '#DC2626' }]}>{value}</Text>
+    </View>
+  </View>
+);
+
 const OpportunityDetailScreen = ({ route, navigation }) => {
   const { opportunityId: routeOppId, opportunity: passedOpp, matchScore: passedScore } = route.params || {};
   const resolvedId =
@@ -20,6 +33,8 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const passedHasFullDetails = !!(passedOpp && passedOpp._id && passedOpp.description !== undefined);
   const [opportunity, setOpportunity] = useState(passedHasFullDetails ? passedOpp : null);
   const [matchScore, setMatchScore] = useState(passedScore || null);
+  const [matchBreakdown, setMatchBreakdown] = useState(null);
+  const [missingSkills, setMissingSkills]   = useState([]);
   const [loading, setLoading] = useState(!passedHasFullDetails);
   const [applying, setApplying] = useState(false);
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -52,10 +67,13 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       const pid = data.profile?._id || data._id;
       if (!pid) return;
       setProfileId(pid);
-      if (resolvedId && matchScore == null) {
+      if (resolvedId) {
         try {
           const scoreRes = await matchingAPI.getMatchScore(pid, resolvedId);
-          setMatchScore(scoreRes.data.score || scoreRes.data.matchScore);
+          const d = scoreRes.data;
+          setMatchScore(d.score ?? d.matchScore ?? null);
+          if (d.breakdown)     setMatchBreakdown(d.breakdown);
+          if (d.missingSkills) setMissingSkills(d.missingSkills);
         } catch (_) {}
       }
     } catch (_) {}
@@ -248,6 +266,90 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                   </View>
                 );
               })}
+            </View>
+          </View>
+        )}
+
+        {/* Match Breakdown */}
+        {matchScore != null && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Match Breakdown</Text>
+            <View style={styles.breakdownCard}>
+
+              {/* Score bar */}
+              <View style={styles.scoreBarRow}>
+                <Text style={styles.scoreBarLabel}>Overall Match</Text>
+                <Text style={styles.scoreBarValue}>{Math.round(matchScore)}%</Text>
+              </View>
+              <View style={styles.scoreBarTrack}>
+                <View style={[
+                  styles.scoreBarFill,
+                  {
+                    flex: Math.min(Math.round(matchScore), 100),
+                    backgroundColor: matchScore >= 60 ? '#10B981'
+                                   : matchScore >= 30 ? '#F97316'
+                                   : '#EF4444',
+                  }
+                ]} />
+                <View style={{ flex: 100 - Math.min(Math.round(matchScore), 100) }} />
+              </View>
+
+              {/* Signal rows */}
+              {matchBreakdown && (
+                <View style={styles.signalList}>
+                  <SignalRow
+                    icon="code-slash-outline"
+                    label="Skill match"
+                    value={`${matchBreakdown.cosineScore ?? 0}%`}
+                    pass={(matchBreakdown.cosineScore ?? 0) > 0}
+                  />
+                  <SignalRow
+                    icon="location-outline"
+                    label="Location"
+                    value={matchBreakdown.locationMatch ? 'Match' : 'No match'}
+                    pass={matchBreakdown.locationMatch}
+                  />
+                  <SignalRow
+                    icon="cash-outline"
+                    label="Salary fit"
+                    value={matchBreakdown.salaryFit ? 'Within range' : 'Outside range'}
+                    pass={matchBreakdown.salaryFit}
+                  />
+                  <SignalRow
+                    icon="trophy-outline"
+                    label="Experience level"
+                    value={matchBreakdown.expFit ? 'Meets requirement' : 'Below requirement'}
+                    pass={matchBreakdown.expFit}
+                  />
+                  <SignalRow
+                    icon="checkmark-circle-outline"
+                    label="Skills you have"
+                    value={`${matchBreakdown.skillOverlap ?? 0} of ${(matchBreakdown.skillOverlap ?? 0) + (matchBreakdown.skillGap ?? 0)}`}
+                    pass={(matchBreakdown.skillOverlap ?? 0) > 0}
+                  />
+                </View>
+              )}
+
+              {/* Missing skills */}
+              {missingSkills.length > 0 && (
+                <View style={styles.missingSection}>
+                  <View style={styles.missingTitleRow}>
+                    <Ionicons name="alert-circle-outline" size={14} color="#EF4444" />
+                    <Text style={styles.missingTitle}>Skills you are missing</Text>
+                  </View>
+                  <View style={styles.missingChips}>
+                    {missingSkills.map((skill) => (
+                      <View key={skill} style={styles.missingChip}>
+                        <Text style={styles.missingChipText}>{skill}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={styles.missingHint}>
+                    Add these skills to your profile or complete a learning path to improve your score.
+                  </Text>
+                </View>
+              )}
+
             </View>
           </View>
         )}
@@ -573,6 +675,112 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  // ── Match Breakdown ──
+  breakdownCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  scoreBarRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  scoreBarLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  scoreBarValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  scoreBarTrack: {
+    height: 8,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 4,
+    marginBottom: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  scoreBarFill: {
+    borderRadius: 4,
+  },
+  signalList: {
+    gap: 10,
+  },
+  signalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  signalLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  signalLabel: {
+    fontSize: 14,
+    color: '#374151',
+  },
+  signalBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  signalValue: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  missingSection: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  missingTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  missingTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  missingChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  missingChip: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  missingChipText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '500',
+  },
+  missingHint: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    lineHeight: 17,
   },
 });
 

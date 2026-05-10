@@ -30,7 +30,7 @@ const BASE_URL = resolveBaseUrl();
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000,
+  timeout: 300000,  // 5 minutes — needed for local Ollama on CPU
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -125,6 +125,7 @@ export const profileAPI = {
   getProfile: (id) => api.get(`/profiles/${id}`),
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
+  updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 }),
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (skillId) => api.delete(`/profiles/skills/${skillId}`),
   addExperience: (data) => api.post('/profiles/experience', data),
@@ -215,6 +216,11 @@ export const companyAPI = {
 // ── Report ──
 export const reportAPI = {
   create: (data) => api.post('/reports', data),
+};
+
+// ── Chatbot ──
+export const chatbotAPI = {
+  query: (data) => api.post('/chatbot/query', data),
 };
 
 export default api;
