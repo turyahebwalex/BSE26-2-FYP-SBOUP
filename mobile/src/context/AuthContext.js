@@ -72,10 +72,18 @@ export const AuthProvider = ({ children }) => {
       // chase when the real cause is a Wi-Fi or backend-URL problem.
       let message;
       if (error.response) {
-        message =
-          error.response.data?.message ||
-          error.response.data?.error ||
-          `Login failed (HTTP ${error.response.status}).`;
+        const status = error.response.status;
+        if (status === 401) {
+          // Backends sometimes leak technical detail here ("user not found",
+          // "bcrypt mismatch", etc). Override with a single friendly message
+          // so users aren't told which half of the credential pair is wrong.
+          message = 'Invalid email or password. Please try again.';
+        } else {
+          message =
+            error.response.data?.message ||
+            error.response.data?.error ||
+            `Login failed (HTTP ${status}).`;
+        }
       } else if (error.request) {
         message =
           "Couldn't reach the server. Check that your phone and laptop are " +

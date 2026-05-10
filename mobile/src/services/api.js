@@ -53,11 +53,23 @@ const processQueue = (error, token = null) => {
   failedQueue = [];
 };
 
+// Endpoints where a 401 means "bad credentials", not "expired session".
+// Trying to refresh in those cases swallows the real error with a confusing
+// "No refresh token" message.
+const AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh'];
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const isAuthEndpoint = AUTH_ENDPOINTS.some((path) =>
+      originalRequest?.url?.endsWith(path)
+    );
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !isAuthEndpoint
+    ) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -188,6 +200,8 @@ export const notificationAPI = {
 export const skillAPI = {
   getAll: (params) => api.get('/skills', { params }),
   getCategories: () => api.get('/skills/categories'),
+  suggest: (data) => api.post('/skills/suggest', data),
+  addCustom: (name) => api.post('/skills/custom', { name }),
 };
 
 // ── Company ──
