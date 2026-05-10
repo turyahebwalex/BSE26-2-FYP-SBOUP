@@ -10,8 +10,12 @@ const API_PORT = 5000;
 // can run `docker compose up --build` without editing mobile/.env.
 // Set EXPO_PUBLIC_API_URL only to override (tunnels, deployed backend, etc).
 function resolveBaseUrl() {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  // 1. Use explicit env variable if provided (from .env file)
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
 
+  // 2. Auto-detect from Metro's dev-server address (LAN development)
   const hostUri =
     Constants.expoConfig?.hostUri ||
     Constants.expoGoConfig?.debuggerHost ||
@@ -23,10 +27,12 @@ function resolveBaseUrl() {
     return `http://${host}:${API_PORT}/api`;
   }
 
+  // 3. Fallback to localhost
   return `http://localhost:${API_PORT}/api`;
 }
 
 const BASE_URL = resolveBaseUrl();
+console.log('🔍 [API] BASE_URL =', BASE_URL);
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -57,7 +63,9 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const isAuthRequest = originalRequest?.url?.includes('/auth/') && !originalRequest?.url?.includes('/auth/me');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -204,3 +212,4 @@ export const reportAPI = {
 };
 
 export default api;
+export { BASE_URL };

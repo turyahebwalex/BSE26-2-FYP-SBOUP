@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,12 @@ import ChatScreen from '../screens/shared/ChatScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
 import EditProfileScreen from '../screens/shared/EditProfileScreen';
 import NotificationsScreen from '../screens/shared/NotificationsScreen';
+
+import CompanyProfileScreen from '../screens/worker/CompanyProfileScreen';   
+import PeopleByLocationScreen from '../screens/worker/PeopleByLocationScreen';
+
+// Import AuthContext to get unread count
+import { useAuth } from '../context/AuthContext';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -51,6 +58,9 @@ const MessagesStackScreen = () => (
   <MessagesStack.Navigator screenOptions={screenOptions}>
     <MessagesStack.Screen name="MessagesMain" component={MessagesScreen} />
     <MessagesStack.Screen name="Chat" component={ChatScreen} />
+    <MessagesStack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
+    <MessagesStack.Screen name="PeopleByLocation" component={PeopleByLocationScreen} />
+    <MessagesStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
   </MessagesStack.Navigator>
 );
 
@@ -64,6 +74,8 @@ const ProfileStackScreen = () => (
 
 const WorkerTabs = () => {
   const insets = useSafeAreaInsets();
+  const { unreadMessageCount } = useAuth();   // get unread count from context
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -82,7 +94,7 @@ const WorkerTabs = () => {
           fontSize: 11,
           fontWeight: '500',
         },
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarIcon: ({ focused, color }) => {
           let iconName;
           if (route.name === 'HomeTab') {
             iconName = focused ? 'home' : 'home-outline';
@@ -93,6 +105,23 @@ const WorkerTabs = () => {
           } else if (route.name === 'ProfileTab') {
             iconName = focused ? 'person' : 'person-outline';
           }
+
+          // For Messages tab, add badge with unread message count
+          if (route.name === 'MessagesTab') {
+            return (
+              <View>
+                <Ionicons name={iconName} size={22} color={color} />
+                {unreadMessageCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {unreadMessageCount > 99 ? '99+' : unreadMessageCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          }
+
           return <Ionicons name={iconName} size={22} color={color} />;
         },
       })}
@@ -120,5 +149,25 @@ const WorkerTabs = () => {
     </Tab.Navigator>
   );
 };
+
+const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: '#F97316',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+});
 
 export default WorkerTabs;

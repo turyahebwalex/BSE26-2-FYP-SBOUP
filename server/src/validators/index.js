@@ -1,11 +1,5 @@
 const Joi = require('joi');
 
-/**
- * Central validator registry. Each entry exports a Joi schema. The
- * validate() middleware at the bottom picks the right schema by
- * (location, name) and rejects invalid payloads with a 422.
- */
-
 // ─── Auth ─────────────────────────────────────────────────────────
 const register = Joi.object({
   email: Joi.string().email().required(),
@@ -39,9 +33,7 @@ const createProfile = Joi.object({
 
 const addProfileSkill = Joi.object({
   skillId: Joi.string().hex().length(24).required(),
-  proficiencyLevel: Joi.string()
-    .valid('beginner', 'intermediate', 'advanced', 'expert')
-    .required(),
+  proficiencyLevel: Joi.string().valid('beginner', 'intermediate', 'advanced', 'expert').required(),
   classification: Joi.string().valid('primary', 'secondary').default('primary'),
 });
 
@@ -100,18 +92,67 @@ const applyForOpportunity = Joi.object({
   ).default([]),
 });
 
-// ─── Messaging ────────────────────────────────────────────────────
+// ─── Messaging (UPDATED) ─────────────────────────────────────────
 const sendMessage = Joi.object({
   receiverId: Joi.string().hex().length(24).required(),
-  content: Joi.string().min(1).max(5000).required(),
+  content: Joi.string().max(5000).allow(''),
   applicationRef: Joi.string().hex().length(24).allow(null, ''),
+  tempId: Joi.string().allow(null, ''),
   attachments: Joi.array().items(
     Joi.object({
       fileName: Joi.string().required(),
       fileUrl: Joi.string().uri().required(),
       fileSize: Joi.number().max(10 * 1024 * 1024),
+      fileType: Joi.string().optional(),
+      mimeType: Joi.string().optional(),
     })
   ).default([]),
+}).custom((value, helpers) => {
+  if (!value.content && (!value.attachments || value.attachments.length === 0)) {
+    return helpers.error('any.invalid', { 
+      message: 'Message must have either content or at least one attachment' 
+    });
+  }
+  return value;
+}, 'Message Content or Attachment Validation');
+
+const markMessages = Joi.object({
+  messageIds: Joi.array().items(Joi.string().hex().length(24)).min(1).required(),
+});
+
+const typingIndicator = Joi.object({
+  receiverId: Joi.string().hex().length(24).required(),
+  isTyping: Joi.boolean().required(),
+  conversationId: Joi.string().hex().length(24).optional(),
+});
+
+const getConversation = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(50),
+});
+
+const deleteMessages = Joi.object({
+  messageIds: Joi.array().items(Joi.string().hex().length(24)).min(1).required(),
+});
+
+const updateOnlineStatus = Joi.object({
+  isOnline: Joi.boolean().required(),
+  socketId: Joi.string().optional(),
+});
+
+const updateMessagingPreferences = Joi.object({
+  emailNotifications: Joi.boolean(),
+  pushNotifications: Joi.boolean(),
+  soundEnabled: Joi.boolean(),
+  readReceipts: Joi.boolean(),
+});
+
+const searchUsers = Joi.object({
+  query: Joi.string().min(2).max(100).required(),
+});
+
+const blockUser = Joi.object({
+  userId: Joi.string().hex().length(24).required(),
 });
 
 // ─── Report ──────────────────────────────────────────────────────
@@ -158,6 +199,7 @@ const generateLearningPath = Joi.object({
   opportunityId: Joi.string().hex().length(24).allow(null, ''),
 });
 
+// Combine all schemas into an object
 const schemas = {
   register,
   login,
@@ -170,6 +212,14 @@ const schemas = {
   createOpportunity,
   applyForOpportunity,
   sendMessage,
+  markMessages,
+  typingIndicator,
+  getConversation,
+  deleteMessages,
+  updateOnlineStatus,
+  updateMessagingPreferences,
+  searchUsers,
+  blockUser,
   createReport,
   createCompany,
   generateCV,
@@ -178,12 +228,13 @@ const schemas = {
 
 /**
  * Middleware: validate(schemaName)
- * Runs req.body through the named Joi schema. On success, req.body
- * is replaced with the stripped + coerced value.
+ * Runs req.body through the named Joi schema.
  */
 const validate = (schemaName) => (req, res, next) => {
   const schema = schemas[schemaName];
-  if (!schema) return next();
+  if (!schema) {
+    return next();
+  }
   const { error, value } = schema.validate(req.body, {
     stripUnknown: true,
     abortEarly: false,
@@ -198,4 +249,27 @@ const validate = (schemaName) => (req, res, next) => {
   next();
 };
 
-module.exports = { schemas, validate };
+/**
+ * Middleware: validateQuery(schemaName)
+ * Validates query parameters (for GET requests)
+ */
+const validateQuery = (schemaName) => (req, res, next) => {
+  const schema = schemas[schemaName];
+  if (!schema) {
+    return next();
+  }
+  const { error, value } = schema.validate(req.query, {
+    stripUnknown: true,
+    abortEarly: false,
+  });
+  if (error) {
+    return res.status(422).json({
+      error: 'Invalid query parameters',
+      details: error.details.map((d) => ({ field: d.path.join('.'), message: d.message })),
+    });
+  }
+  req.query = value;
+  next();
+};
+
+module.exports = { schemas, validate, validateQuery };

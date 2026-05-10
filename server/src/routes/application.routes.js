@@ -8,5 +8,7 @@ router.get('/mine', authenticate, authorize('skilled_worker'), ctrl.getMyApplica
 router.get('/opportunity/:opportunityId', authenticate, authorize('employer'), ctrl.getApplicationsForOpportunity);
 router.put('/:id/status', authenticate, authorize('employer'), ctrl.updateApplicationStatus);
 router.put('/:id/withdraw', authenticate, authorize('skilled_worker'), ctrl.withdrawApplication);
+// 🆕 Pin / unpin an application (only the worker who owns it can toggle)
+router.put('/:id/pin', authenticate, authorize('skilled_worker'), ctrl.togglePinApplication);
 
 module.exports = router;

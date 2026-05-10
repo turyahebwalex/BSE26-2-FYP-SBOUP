@@ -124,20 +124,141 @@ const companies = [
     verificationStatus: 'verified',
     trustScore: 78,
   },
+  // --- NEW COMPANIES ---
+  {
+    name: 'Nile Media Group',
+    registrationNumber: 'UG-2016-MEDIA-0047',
+    industry: 'Media & Creative',
+    description: 'Full-service media production and digital marketing agency.',
+    website: 'https://nilemedia.example.ug',
+    location: 'Kampala, Uganda',
+    contactEmail: 'talent@nilemedia.example.ug',
+    verificationStatus: 'verified',
+    trustScore: 82,
+  },
+  {
+    name: 'Equator Health Services',
+    registrationNumber: 'UG-2010-HLTH-0031',
+    industry: 'Healthcare',
+    description: 'Private hospital network operating across Central and Eastern Uganda.',
+    website: 'https://equatorhealth.example.ug',
+    location: 'Jinja, Uganda',
+    contactEmail: 'recruitment@equatorhealth.example.ug',
+    verificationStatus: 'verified',
+    trustScore: 91,
+  },
+  {
+    name: 'Savannah Agribusiness Ltd',
+    registrationNumber: 'UG-2014-AGRI-0058',
+    industry: 'Agriculture',
+    description: 'Large-scale crop production, processing, and agri-logistics company.',
+    location: 'Gulu, Uganda',
+    contactEmail: 'hr@savannahagri.example.ug',
+    verificationStatus: 'pending',
+    trustScore: 65,
+  },
 ];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Seed a single skilled worker: user + profile + skills + experience + education + preference */
+async function seedWorker({
+  email,
+  fullName,
+  title,
+  bio,
+  location,
+  skillNames,          // [{ name, level, classification, years }]
+  experiences,         // [{ jobTitle, companyName, category, startDate, endDate, description }]
+  educations,          // [{ institution, qualification, fieldOfStudy, startYear, endYear }]
+  preference,          // { workStyle, remotePreference, learningWillingness, personalityTraits }
+}) {
+  let user = await User.findOne({ email });
+  if (!user) {
+    user = await User.create({
+      email,
+      passwordHash: 'Worker@12345',
+      fullName,
+      role: 'skilled_worker',
+      isEmailVerified: true,
+      accountStatus: 'active',
+    });
+    console.log(`  Worker created: ${email}`);
+  }
+
+  const existingProfile = await Profile.findOne({ userId: user._id });
+  if (existingProfile) return user;
+
+  const profile = await Profile.create({
+    userId: user._id,
+    title,
+    bio,
+    location,
+    visibility: 'public',
+  });
+
+  for (const s of skillNames) {
+    const skillDoc = await Skill.findOne({ skillName: s.name });
+    if (!skillDoc) continue;
+    await ProfileSkill.create({
+      profileId: profile._id,
+      skillId: skillDoc._id,
+      proficiencyLevel: s.level,
+      classification: s.classification,
+      numberOfYears: s.years,
+    });
+  }
+
+  for (const exp of experiences) {
+    await Experience.create({ profileId: profile._id, ...exp });
+  }
+
+  for (const edu of educations) {
+    await Education.create({ profileId: profile._id, ...edu });
+  }
+
+  await Preference.create({ profileId: profile._id, ...preference });
+
+  console.log(`  Profile seeded for ${email}`);
+  return user;
+}
+
+/** Seed a single employer user linked to a company */
+async function seedEmployer({ email, fullName, companyName, companyDocs }) {
+  let employer = await User.findOne({ email });
+  if (!employer) {
+    employer = await User.create({
+      email,
+      passwordHash: 'Employer@12345',
+      fullName,
+      role: 'employer',
+      isEmailVerified: true,
+      accountStatus: 'active',
+      companyId: companyDocs[companyName]._id,
+    });
+    console.log(`  Employer created: ${email}`);
+  }
+  return employer;
+}
+
+// ---------------------------------------------------------------------------
+// Main seed
+// ---------------------------------------------------------------------------
 
 const seed = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/sboup_dev');
     console.log('Connected to MongoDB');
 
-    // Seed skills (upsert)
+    // ---- Skills ----
     for (const s of skills) {
       await Skill.updateOne({ skillName: s.skillName }, { $setOnInsert: s }, { upsert: true });
     }
     console.log(`Seeded ${skills.length} skills (upserted)`);
 
-    // Seed companies
+    // ---- Companies ----
     const companyDocs = {};
     for (const c of companies) {
       const doc = await Company.findOneAndUpdate(
@@ -149,7 +270,7 @@ const seed = async () => {
     }
     console.log(`Seeded ${companies.length} companies`);
 
-    // Seed admin user
+    // ---- Admin ----
     const adminExists = await User.findOne({ role: 'admin' });
     if (!adminExists) {
       await User.create({
@@ -163,7 +284,12 @@ const seed = async () => {
       console.log('Admin user created: admin@skillbridge.ug / Admin@12345');
     }
 
-    // Seed demo employer linked to Kampala Tech Hub
+    // ====================================================================
+    // EMPLOYERS
+    // ====================================================================
+    console.log('\n--- Seeding employers ---');
+
+    // Original demo employer
     const employerEmail = 'employer@demo.ug';
     let employer = await User.findOne({ email: employerEmail });
     if (!employer) {
@@ -176,10 +302,47 @@ const seed = async () => {
         accountStatus: 'active',
         companyId: companyDocs['Kampala Tech Hub']._id,
       });
-      console.log(`Demo employer created: ${employerEmail} / Employer@12345`);
+      console.log(`  Demo employer created: ${employerEmail}`);
     }
 
-    // Seed demo skilled worker
+    // Pearl Construction employer
+    const pearlEmployer = await seedEmployer({
+      email: 'employer@pearlconstruction.ug',
+      fullName: 'Robert Ssali',
+      companyName: 'Pearl Construction Ltd',
+      companyDocs,
+    });
+
+    // Nile Media employer
+    const nileEmployer = await seedEmployer({
+      email: 'employer@nilemedia.ug',
+      fullName: 'Amara Nakato',
+      companyName: 'Nile Media Group',
+      companyDocs,
+    });
+
+    // Equator Health employer
+    const healthEmployer = await seedEmployer({
+      email: 'employer@equatorhealth.ug',
+      fullName: 'Dr. Samuel Opio',
+      companyName: 'Equator Health Services',
+      companyDocs,
+    });
+
+    // Savannah Agri employer
+    const agriEmployer = await seedEmployer({
+      email: 'employer@savannahagri.ug',
+      fullName: 'Grace Atim',
+      companyName: 'Savannah Agribusiness Ltd',
+      companyDocs,
+    });
+
+    // ====================================================================
+    // WORKERS
+    // ====================================================================
+    console.log('\n--- Seeding workers ---');
+
+    // Original demo worker
     const workerEmail = 'worker@demo.ug';
     let worker = await User.findOne({ email: workerEmail });
     if (!worker) {
@@ -191,10 +354,9 @@ const seed = async () => {
         isEmailVerified: true,
         accountStatus: 'active',
       });
-      console.log(`Demo skilled worker created: ${workerEmail} / Worker@12345`);
+      console.log(`  Demo skilled worker created: ${workerEmail}`);
     }
 
-    // Worker profile + related documents
     let profile = await Profile.findOne({ userId: worker._id });
     if (!profile) {
       profile = await Profile.create({
@@ -208,20 +370,8 @@ const seed = async () => {
       const jsSkill = await Skill.findOne({ skillName: 'JavaScript' });
       const reactSkill = await Skill.findOne({ skillName: 'React' });
       await ProfileSkill.insertMany([
-        {
-          profileId: profile._id,
-          skillId: jsSkill._id,
-          proficiencyLevel: 'advanced',
-          classification: 'primary',
-          numberOfYears: 3,
-        },
-        {
-          profileId: profile._id,
-          skillId: reactSkill._id,
-          proficiencyLevel: 'advanced',
-          classification: 'primary',
-          numberOfYears: 2,
-        },
+        { profileId: profile._id, skillId: jsSkill._id, proficiencyLevel: 'advanced', classification: 'primary', numberOfYears: 3 },
+        { profileId: profile._id, skillId: reactSkill._id, proficiencyLevel: 'advanced', classification: 'primary', numberOfYears: 2 },
       ]);
 
       await Experience.create({
@@ -254,15 +404,293 @@ const seed = async () => {
         learningWillingness: 'high',
       });
 
-      console.log('Demo profile, skills, experience, education and preference seeded');
+      console.log('  Original demo profile seeded');
     }
 
-    // Seed a sample published Opportunity for the demo employer
-    const existingOpp = await Opportunity.findOne({ postedByUserId: employer._id });
-    if (!existingOpp) {
-      const jsSkill = await Skill.findOne({ skillName: 'JavaScript' });
-      const reactSkill = await Skill.findOne({ skillName: 'React' });
-      await Opportunity.create({
+    // ---- Worker 2: Backend / Python developer ----
+    await seedWorker({
+      email: 'essah@demo.ug',
+      fullName: 'Essah Kato',
+      title: 'Backend Engineer',
+      bio: 'Python and Node.js developer focused on scalable APIs and data pipelines. Open to remote and hybrid roles across East Africa.',
+      location: 'Kampala, Uganda',
+      skillNames: [
+        { name: 'Python', level: 'advanced', classification: 'primary', years: 4 },
+        { name: 'Node.js', level: 'intermediate', classification: 'primary', years: 2 },
+        { name: 'MongoDB', level: 'intermediate', classification: 'secondary', years: 2 },
+        { name: 'SQL', level: 'advanced', classification: 'secondary', years: 4 },
+        { name: 'Docker', level: 'beginner', classification: 'secondary', years: 1 },
+      ],
+      experiences: [
+        {
+          jobTitle: 'Software Developer',
+          companyName: 'DataBridge Uganda',
+          category: 'Technology',
+          startDate: new Date('2021-03-01'),
+          endDate: new Date('2024-11-30'),
+          description: 'Developed REST APIs in Python/Flask serving 50k+ daily requests. Built ETL pipelines feeding dashboards for telecom clients.',
+        },
+      ],
+      educations: [
+        {
+          institution: 'Kyambogo University',
+          qualification: 'BSc Information Technology',
+          fieldOfStudy: 'Information Technology',
+          startYear: 2017,
+          endYear: 2021,
+        },
+      ],
+      preference: {
+        personalityTraits: [
+          { trait: 'conscientiousness', level: 'high' },
+          { trait: 'agreeableness', level: 'medium' },
+        ],
+        workStyle: 'independent',
+        remotePreference: 'high',
+        learningWillingness: 'high',
+      },
+    });
+
+    // ---- Worker 3: Graphic designer / video editor ----
+    await seedWorker({
+      email: 'brian@demo.ug',
+      fullName: 'Brian Tendo',
+      title: 'Graphic Designer & Video Editor',
+      bio: 'Creative professional with a strong eye for brand identity, social-media content, and short-form video. 5 years producing for NGOs and SMEs.',
+      location: 'Kampala, Uganda',
+      skillNames: [
+        { name: 'Graphic Design', level: 'expert', classification: 'primary', years: 5 },
+        { name: 'Video Editing', level: 'advanced', classification: 'primary', years: 4 },
+        { name: 'Photography', level: 'intermediate', classification: 'secondary', years: 3 },
+        { name: 'Content Writing', level: 'beginner', classification: 'secondary', years: 1 },
+        { name: 'Animation', level: 'beginner', classification: 'secondary', years: 1 },
+      ],
+      experiences: [
+        {
+          jobTitle: 'Lead Designer',
+          companyName: 'Crater Creative Studio',
+          category: 'Creative',
+          startDate: new Date('2020-06-01'),
+          endDate: null,
+          description: 'Lead visual identity projects for 20+ brands. Direct a team of two junior designers and manage client delivery.',
+        },
+        {
+          jobTitle: 'Junior Graphic Designer',
+          companyName: 'Nile Ad Agency',
+          category: 'Creative',
+          startDate: new Date('2019-01-01'),
+          endDate: new Date('2020-05-31'),
+          description: 'Created print and digital assets for advertising campaigns targeting East African markets.',
+        },
+      ],
+      educations: [
+        {
+          institution: 'Makerere University Business School',
+          qualification: 'Diploma in Visual Communication',
+          fieldOfStudy: 'Visual Communication',
+          startYear: 2016,
+          endYear: 2018,
+        },
+      ],
+      preference: {
+        personalityTraits: [
+          { trait: 'openness', level: 'high' },
+          { trait: 'extraversion', level: 'medium' },
+        ],
+        workStyle: 'collaborative',
+        remotePreference: 'medium',
+        learningWillingness: 'high',
+      },
+    });
+
+    // ---- Worker 4: Registered nurse ----
+    await seedWorker({
+      email: 'grace.akello@demo.ug',
+      fullName: 'Grace Akello',
+      title: 'Registered Nurse',
+      bio: 'Dedicated nurse with 6 years of clinical experience in busy public and private hospitals. Proficient in patient triage, medication administration, and post-operative care.',
+      location: 'Jinja, Uganda',
+      skillNames: [
+        { name: 'Nursing', level: 'advanced', classification: 'primary', years: 6 },
+        { name: 'Patient Care', level: 'advanced', classification: 'primary', years: 6 },
+        { name: 'Medication Administration', level: 'advanced', classification: 'primary', years: 5 },
+        { name: 'First Aid', level: 'expert', classification: 'secondary', years: 6 },
+        { name: 'Laboratory Testing', level: 'beginner', classification: 'secondary', years: 1 },
+      ],
+      experiences: [
+        {
+          jobTitle: 'Staff Nurse — Medical Ward',
+          companyName: 'Jinja Regional Referral Hospital',
+          category: 'Healthcare',
+          startDate: new Date('2019-08-01'),
+          endDate: new Date('2024-07-31'),
+          description: 'Managed care for 20-bed medical ward. Led shift handovers, administered IV medications, and mentored student nurses.',
+        },
+        {
+          jobTitle: 'Volunteer Nurse',
+          companyName: 'Médecins Sans Frontières — Uganda',
+          category: 'Healthcare',
+          startDate: new Date('2018-03-01'),
+          endDate: new Date('2019-06-30'),
+          description: 'Provided emergency nursing support in mobile health clinics serving displaced communities in northern Uganda.',
+        },
+      ],
+      educations: [
+        {
+          institution: 'Uganda Christian University',
+          qualification: 'Bachelor of Nursing Science',
+          fieldOfStudy: 'Nursing',
+          startYear: 2014,
+          endYear: 2018,
+        },
+      ],
+      preference: {
+        personalityTraits: [
+          { trait: 'agreeableness', level: 'high' },
+          { trait: 'conscientiousness', level: 'high' },
+        ],
+        workStyle: 'collaborative',
+        remotePreference: 'low',
+        learningWillingness: 'medium',
+      },
+    });
+
+    // ---- Worker 5: Electrician (trade) ----
+    await seedWorker({
+      email: 'moses@demo.ug',
+      fullName: 'Moses Waiswa',
+      title: 'Certified Electrician',
+      bio: 'Grade-1 licensed electrician with 8 years of hands-on experience in residential, commercial, and industrial installations across Kampala and Wakiso districts.',
+      location: 'Wakiso, Uganda',
+      skillNames: [
+        { name: 'Electrical Wiring', level: 'expert', classification: 'primary', years: 8 },
+        { name: 'HVAC', level: 'intermediate', classification: 'secondary', years: 3 },
+        { name: 'Plumbing', level: 'beginner', classification: 'secondary', years: 2 },
+        { name: 'Project Management', level: 'beginner', classification: 'secondary', years: 2 },
+      ],
+      experiences: [
+        {
+          jobTitle: 'Senior Electrician',
+          companyName: 'Volt Masters Uganda',
+          category: 'Trade',
+          startDate: new Date('2020-01-01'),
+          endDate: null,
+          description: 'Supervise electrical installations for commercial fit-outs and industrial facilities. Ensure compliance with Uganda National Bureau of Standards (UNBS) wiring codes.',
+        },
+        {
+          jobTitle: 'Electrician Apprentice → Journeyman',
+          companyName: 'PowerLink Contractors',
+          category: 'Trade',
+          startDate: new Date('2016-04-01'),
+          endDate: new Date('2019-12-31'),
+          description: 'Progressed from apprentice to journeyman. Carried out low-voltage wiring, panel installations, and fault diagnosis on residential estates.',
+        },
+      ],
+      educations: [
+        {
+          institution: 'Uganda Technical College — Kyema',
+          qualification: 'National Certificate in Electrical Engineering',
+          fieldOfStudy: 'Electrical Engineering',
+          startYear: 2014,
+          endYear: 2016,
+        },
+      ],
+      preference: {
+        personalityTraits: [
+          { trait: 'conscientiousness', level: 'high' },
+          { trait: 'neuroticism', level: 'low' },
+        ],
+        workStyle: 'independent',
+        remotePreference: 'low',
+        learningWillingness: 'medium',
+      },
+    });
+
+    // ---- Worker 6: Agronomy / crop management ----
+    await seedWorker({
+      email: 'immaculate.aber@demo.ug',
+      fullName: 'Immaculate Aber',
+      title: 'Agricultural Extension Officer',
+      bio: 'Experienced agronomist specialising in smallholder crop advisory, irrigation system design, and post-harvest management. Worked extensively with maize and sesame value chains in northern Uganda.',
+      location: 'Wakiso, Uganda',
+      skillNames: [
+        { name: 'Crop Management', level: 'advanced', classification: 'primary', years: 5 },
+        { name: 'Irrigation', level: 'intermediate', classification: 'primary', years: 3 },
+        { name: 'Farming', level: 'advanced', classification: 'primary', years: 5 },
+        { name: 'Livestock Management', level: 'beginner', classification: 'secondary', years: 1 },
+        { name: 'Teaching', level: 'intermediate', classification: 'secondary', years: 4 },
+      ],
+      experiences: [
+        {
+          jobTitle: 'Field Extension Officer',
+          companyName: 'Agroways Foundation Uganda',
+          category: 'Agriculture',
+          startDate: new Date('2020-02-01'),
+          endDate: null,
+          description: 'Provide technical advisory to 300+ smallholder farmers on input use, pest management, and market linkages. Lead seasonal farmer field schools for Acholi sub-region.',
+        },
+        {
+          jobTitle: 'Junior Agronomist',
+          companyName: 'National Agricultural Research Organisation (NARO)',
+          category: 'Agriculture',
+          startDate: new Date('2018-06-01'),
+          endDate: new Date('2020-01-31'),
+          description: 'Assisted in on-station and on-farm trials for drought-tolerant maize varieties. Compiled data for bi-annual research reports.',
+        },
+      ],
+      educations: [
+        {
+          institution: 'Gulu University',
+          qualification: 'BSc Agriculture',
+          fieldOfStudy: 'Agronomy',
+          startYear: 2014,
+          endYear: 2018,
+        },
+      ],
+      preference: {
+        personalityTraits: [
+          { trait: 'openness', level: 'high' },
+          { trait: 'agreeableness', level: 'high' },
+        ],
+        workStyle: 'collaborative',
+        remotePreference: 'low',
+        learningWillingness: 'high',
+      },
+    });
+
+    // ====================================================================
+    // OPPORTUNITIES
+    // ====================================================================
+    console.log('\n--- Seeding opportunities ---');
+
+    // Helper to avoid duplicate opportunities per employer
+    const ensureOpportunity = async (filter, data) => {
+      const exists = await Opportunity.findOne(filter);
+      if (!exists) {
+        await Opportunity.create(data);
+        console.log(`  Opportunity created: "${data.title}"`);
+      }
+    };
+
+    const [jsSkill, reactSkill, pySkill, nodeSkill, gfxSkill, vidSkill,
+           nurseSkill, patientSkill, elecSkill, cropSkill, irrigSkill] = await Promise.all([
+      Skill.findOne({ skillName: 'JavaScript' }),
+      Skill.findOne({ skillName: 'React' }),
+      Skill.findOne({ skillName: 'Python' }),
+      Skill.findOne({ skillName: 'Node.js' }),
+      Skill.findOne({ skillName: 'Graphic Design' }),
+      Skill.findOne({ skillName: 'Video Editing' }),
+      Skill.findOne({ skillName: 'Nursing' }),
+      Skill.findOne({ skillName: 'Patient Care' }),
+      Skill.findOne({ skillName: 'Electrical Wiring' }),
+      Skill.findOne({ skillName: 'Crop Management' }),
+      Skill.findOne({ skillName: 'Irrigation' }),
+    ]);
+
+    // Kampala Tech Hub — original opportunity
+    await ensureOpportunity(
+      { postedByUserId: employer._id },
+      {
         companyId: companyDocs['Kampala Tech Hub']._id,
         postedByUserId: employer._id,
         title: 'React Frontend Engineer',
@@ -277,11 +705,115 @@ const seed = async () => {
         experienceLevel: 'mid',
         isRemote: false,
         applicationMethod: 'internal',
-      });
-      console.log('Demo opportunity seeded');
-    }
+      }
+    );
 
-    console.log('Seeding complete!');
+    // Kampala Tech Hub — second opportunity (Python / backend)
+    await ensureOpportunity(
+      { title: 'Python Backend Developer', postedByUserId: employer._id },
+      {
+        companyId: companyDocs['Kampala Tech Hub']._id,
+        postedByUserId: employer._id,
+        title: 'Python Backend Developer',
+        category: 'formal',
+        requiredSkills: [pySkill._id, nodeSkill._id],
+        description: 'Design and maintain microservices powering our EdTech platform. Strong SQL and API design skills required.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 2000000, max: 3500000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 8,
+        status: 'published',
+        experienceLevel: 'senior',
+        isRemote: true,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // Pearl Construction — site electrician
+    await ensureOpportunity(
+      { postedByUserId: pearlEmployer._id },
+      {
+        companyId: companyDocs['Pearl Construction Ltd']._id,
+        postedByUserId: pearlEmployer._id,
+        title: 'Site Electrician',
+        category: 'formal',
+        requiredSkills: [elecSkill._id],
+        description: 'Oversee all electrical installations on our new commercial complex in Entebbe. Minimum Grade-2 licence required.',
+        location: 'Entebbe, Uganda',
+        compensationRange: { min: 800000, max: 1200000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 12,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: false,
+        applicationMethod: 'external',
+      }
+    );
+
+    // Nile Media — graphic designer
+    await ensureOpportunity(
+      { postedByUserId: nileEmployer._id },
+      {
+        companyId: companyDocs['Nile Media Group']._id,
+        postedByUserId: nileEmployer._id,
+        title: 'Graphic Designer & Content Creator',
+        category: 'formal',
+        requiredSkills: [gfxSkill._id, vidSkill._id],
+        description: 'Produce visual content for social media, TV, and digital advertising campaigns. Proficiency in Adobe CC suite required.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 900000, max: 1500000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 9,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: false,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // Equator Health — registered nurse
+    await ensureOpportunity(
+      { postedByUserId: healthEmployer._id },
+      {
+        companyId: companyDocs['Equator Health Services']._id,
+        postedByUserId: healthEmployer._id,
+        title: 'Registered Nurse — General Ward',
+        category: 'formal',
+        requiredSkills: [nurseSkill._id, patientSkill._id],
+        description: 'Join our multidisciplinary team at Jinja branch. Minimum 2 years post-registration experience. BScN or Diploma in Nursing accepted.',
+        location: 'Jinja, Uganda',
+        compensationRange: { min: 1200000, max: 1800000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 5,
+        status: 'published',
+        experienceLevel: 'entry',
+        isRemote: false,
+        applicationMethod: 'external',
+      }
+    );
+
+    // Savannah Agribusiness — field agronomist
+    await ensureOpportunity(
+      { postedByUserId: agriEmployer._id },
+      {
+        companyId: companyDocs['Savannah Agribusiness Ltd']._id,
+        postedByUserId: agriEmployer._id,
+        title: 'Field Agronomist',
+        category: 'formal',
+        requiredSkills: [cropSkill._id, irrigSkill._id],
+        description: 'Support 500+ contracted out-grower farmers across Acholi sub-region. Monitor crop health, advise on inputs, and coordinate with our procurement team at harvest.',
+        location: 'Gulu, Uganda',
+        compensationRange: { min: 1000000, max: 1600000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 20,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: false,
+        applicationMethod: 'external',
+      }
+    );
+
+    console.log('\nSeeding complete!');
     process.exit(0);
   } catch (error) {
     console.error('Seeding failed:', error);

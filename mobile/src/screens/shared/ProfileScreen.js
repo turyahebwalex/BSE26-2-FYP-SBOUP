@@ -10,19 +10,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
-import { profileAPI } from '../../services/api';
+import { profileAPI, BASE_URL } from '../../services/api';
 
 const ProfileScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const [profile, setProfile] = useState(null);
-  const [skills, setSkills] = useState([]);
+  const [profile, setProfile]         = useState(null);
+  const [skills, setSkills]           = useState([]);
   const [experiences, setExperiences] = useState([]);
-  const [education, setEducation] = useState([]);
-  const [preference, setPreference] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+  const [education, setEducation]     = useState([]);
+  const [preference, setPreference]   = useState(null);
+  const [loading, setLoading]         = useState(true);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [error, setError]             = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);   // ← NEW
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -35,10 +37,7 @@ const ProfileScreen = ({ navigation }) => {
       setPreference(data.preference || null);
     } catch (err) {
       if (err.response?.status === 404) {
-        setProfile(null);
-        setSkills([]);
-        setExperiences([]);
-        setEducation([]);
+        setProfile(null); setSkills([]); setExperiences([]); setEducation([]);
       } else {
         setError('Failed to load profile.');
       }
@@ -48,34 +47,46 @@ const ProfileScreen = ({ navigation }) => {
     }
   }, []);
 
+  // ── NEW: fetch unread notification count ──────────────────────────────────────
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+      const res = await fetch(`${BASE_URL}/notifications?page=1&limit=1`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch { /* silent — badge is non-critical */ }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchProfile();
+      fetchUnreadCount();   // ← refresh count every time screen focuses
     });
     return unsubscribe;
-  }, [navigation, fetchProfile]);
+  }, [navigation, fetchProfile, fetchUnreadCount]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchProfile();
-  };
-
-  const handleLogout = () => {
-    logout();
+    fetchUnreadCount();
   };
 
   const getInitials = () => {
     const name = user?.fullName || user?.name || 'U';
     const parts = name.split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.charAt(0).toUpperCase();
+    return parts.length >= 2
+      ? (parts[0][0] + parts[1][0]).toUpperCase()
+      : name.charAt(0).toUpperCase();
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F97316" />
         </View>
@@ -84,7 +95,7 @@ const ProfileScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -98,13 +109,11 @@ const ProfileScreen = ({ navigation }) => {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{getInitials()}</Text>
           </View>
-          <Text style={styles.userName}>
-            {user?.fullName || user?.name || 'User'}
-          </Text>
+          <Text style={styles.userName}>{user?.fullName || user?.name || 'User'}</Text>
           <Text style={styles.userEmail}>{user?.email || ''}</Text>
           <View style={styles.roleBadge}>
             <Text style={styles.roleText}>
-              {(user?.role || 'user').replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+              {(user?.role || 'user').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
             </Text>
           </View>
         </View>
@@ -116,10 +125,8 @@ const ProfileScreen = ({ navigation }) => {
           </View>
         )}
 
-        {/* Profile Details or Create Prompt */}
         {profile ? (
           <>
-            {/* Bio */}
             {profile.bio && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>About</Text>
@@ -129,28 +136,21 @@ const ProfileScreen = ({ navigation }) => {
               </View>
             )}
 
-            {/* Skills */}
             {skills.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Skills</Text>
                 <View style={styles.card}>
                   {skills.map((ps, index) => {
-                    const skillName =
-                      ps.skillId?.skillName || ps.skillId?.name || ps.skillName || 'Skill';
+                    const skillName = ps.skillId?.skillName || ps.skillId?.name || ps.skillName || 'Skill';
                     const proficiency = ps.proficiencyLevel || '';
                     const years = ps.numberOfYears;
                     return (
                       <View key={ps._id || index} style={styles.skillRow}>
                         <View style={styles.skillInfo}>
                           <Ionicons name="checkmark-circle" size={16} color="#F97316" />
-                          <Text style={styles.skillName}>
-                            {skillName}
-                            {years ? ` • ${years}y` : ''}
-                          </Text>
+                          <Text style={styles.skillName}>{skillName}{years ? ` • ${years}y` : ''}</Text>
                         </View>
-                        {proficiency && (
-                          <Text style={styles.proficiency}>{proficiency}</Text>
-                        )}
+                        {proficiency && <Text style={styles.proficiency}>{proficiency}</Text>}
                       </View>
                     );
                   })}
@@ -158,85 +158,52 @@ const ProfileScreen = ({ navigation }) => {
               </View>
             )}
 
-            {/* Experience */}
             {experiences.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Experience</Text>
                 {experiences.map((exp, index) => (
                   <View key={exp._id || index} style={styles.card}>
-                    <Text style={styles.expTitle}>
-                      {exp.jobTitle || exp.title || 'Role'}
-                    </Text>
-                    <Text style={styles.expCompany}>
-                      {exp.companyName || exp.organization || exp.company || ''}
-                    </Text>
+                    <Text style={styles.expTitle}>{exp.jobTitle || exp.title || 'Role'}</Text>
+                    <Text style={styles.expCompany}>{exp.companyName || exp.organization || exp.company || ''}</Text>
                     <Text style={styles.expDates}>
-                      {exp.startDate
-                        ? new Date(exp.startDate).toLocaleDateString('en-UG', {
-                            month: 'short',
-                            year: 'numeric',
-                          })
-                        : ''}
+                      {exp.startDate ? new Date(exp.startDate).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' }) : ''}
                       {' - '}
-                      {exp.endDate
-                        ? new Date(exp.endDate).toLocaleDateString('en-UG', {
-                            month: 'short',
-                            year: 'numeric',
-                          })
-                        : 'Present'}
+                      {exp.endDate ? new Date(exp.endDate).toLocaleDateString('en-UG', { month: 'short', year: 'numeric' }) : 'Present'}
                     </Text>
-                    {exp.description && (
-                      <Text style={styles.expDescription}>{exp.description}</Text>
-                    )}
+                    {exp.description && <Text style={styles.expDescription}>{exp.description}</Text>}
                   </View>
                 ))}
               </View>
             )}
 
-            {/* Education */}
             {education.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Education</Text>
                 {education.map((edu, index) => (
                   <View key={edu._id || index} style={styles.card}>
-                    <Text style={styles.expTitle}>
-                      {edu.qualification || edu.degree || 'Qualification'}
-                    </Text>
-                    <Text style={styles.expCompany}>
-                      {edu.institution || edu.school || ''}
-                    </Text>
+                    <Text style={styles.expTitle}>{edu.qualification || edu.degree || 'Qualification'}</Text>
+                    <Text style={styles.expCompany}>{edu.institution || edu.school || ''}</Text>
                     {(edu.startYear || edu.endYear) && (
-                      <Text style={styles.expDates}>
-                        {edu.startYear || ''}
-                        {edu.endYear ? ` - ${edu.endYear}` : ''}
-                      </Text>
+                      <Text style={styles.expDates}>{edu.startYear || ''}{edu.endYear ? ` - ${edu.endYear}` : ''}</Text>
                     )}
                   </View>
                 ))}
               </View>
             )}
 
-            {/* Portfolio */}
             {profile.portfolioItems?.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Portfolio</Text>
                 {profile.portfolioItems.map((item, index) => (
                   <View key={item._id || index} style={styles.card}>
                     <Text style={styles.expTitle}>{item.title}</Text>
-                    {item.description ? (
-                      <Text style={styles.expDescription}>{item.description}</Text>
-                    ) : null}
-                    {item.fileUrl ? (
-                      <Text style={[styles.expDates, { color: '#F97316' }]} numberOfLines={1}>
-                        🔗 {item.fileUrl}
-                      </Text>
-                    ) : null}
+                    {item.description ? <Text style={styles.expDescription}>{item.description}</Text> : null}
+                    {item.fileUrl ? <Text style={[styles.expDates, { color: '#F97316' }]} numberOfLines={1}>🔗 {item.fileUrl}</Text> : null}
                   </View>
                 ))}
               </View>
             )}
 
-            {/* Preferences */}
             {preference && (preference.workStyle || preference.remotePreference || preference.learningWillingness || preference.personalityTraits?.length > 0) && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Work Preferences</Text>
@@ -265,9 +232,7 @@ const ProfileScreen = ({ navigation }) => {
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                         {preference.personalityTraits.map((t, i) => (
                           <View key={i} style={styles.traitBadge}>
-                            <Text style={styles.traitBadgeText}>
-                              {t.trait} · {t.level}
-                            </Text>
+                            <Text style={styles.traitBadgeText}>{t.trait} · {t.level}</Text>
                           </View>
                         ))}
                       </View>
@@ -279,7 +244,8 @@ const ProfileScreen = ({ navigation }) => {
 
             <TouchableOpacity
               style={styles.editButton}
-              onPress={() => navigation.navigate('EditProfile', { profile, skills, experiences, education, preference })}            >
+              onPress={() => navigation.navigate('EditProfile', { profile, skills, experiences, education, preference })}
+            >
               <Ionicons name="create-outline" size={18} color="#FFFFFF" />
               <Text style={styles.editButtonText}>Edit Profile</Text>
             </TouchableOpacity>
@@ -308,12 +274,22 @@ const ProfileScreen = ({ navigation }) => {
           >
             <Ionicons name="notifications-outline" size={20} color="#374151" />
             <Text style={styles.menuItemText}>Notifications</Text>
+
+            {/* ── Orange unread badge ── */}
+            {unreadCount > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
+
             <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
           <Ionicons name="log-out-outline" size={18} color="#EF4444" />
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
@@ -323,263 +299,104 @@ const ProfileScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-  },
-  profileHeader: {
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 24,
-  },
+  container:     { flex: 1, backgroundColor: '#F9FAFB' },
+  center:        { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollView:    { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 32 },
+  profileHeader: { alignItems: 'center', marginTop: 12, marginBottom: 24 },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 80, height: 80, borderRadius: 40,
     backgroundColor: '#F97316',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center', alignItems: 'center', marginBottom: 12,
   },
-  avatarText: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  userName: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  userEmail: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
+  avatarText:   { fontSize: 30, fontWeight: '700', color: '#FFFFFF' },
+  userName:     { fontSize: 22, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
+  userEmail:    { fontSize: 14, color: '#6B7280', marginBottom: 8 },
   roleBadge: {
-    backgroundColor: '#FFF7ED',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: '#FDBA74',
+    backgroundColor: '#FFF7ED', borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 4,
+    borderWidth: 1, borderColor: '#FDBA74',
   },
-  roleText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#EA580C',
-  },
+  roleText:     { fontSize: 12, fontWeight: '600', color: '#EA580C' },
   errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    borderRadius: 8,
-    padding: 10,
-    gap: 6,
-    marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FEF2F2', borderRadius: 8,
+    padding: 10, gap: 6, marginBottom: 12,
   },
-  errorText: {
-    fontSize: 13,
-    color: '#EF4444',
-  },
-  section: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 8,
-  },
+  errorText:    { fontSize: 13, color: '#EF4444' },
+  section:      { marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937', marginBottom: 8 },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
   },
-  bioText: {
-    fontSize: 14,
-    color: '#4B5563',
-    lineHeight: 20,
-  },
+  bioText:      { fontSize: 14, color: '#4B5563', lineHeight: 20 },
   skillRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F9FAFB',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F9FAFB',
   },
-  skillInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  skillName: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  proficiency: {
-    fontSize: 12,
-    color: '#F97316',
-    fontWeight: '500',
-  },
-  expTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  expCompany: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  expDates: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 4,
-  },
-  expDescription: {
-    fontSize: 13,
-    color: '#4B5563',
-    marginTop: 6,
-    lineHeight: 18,
-  },
+  skillInfo:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  skillName:    { fontSize: 14, color: '#374151' },
+  proficiency:  { fontSize: 12, color: '#F97316', fontWeight: '500' },
+  expTitle:     { fontSize: 15, fontWeight: '600', color: '#1F2937' },
+  expCompany:   { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  expDates:     { fontSize: 12, color: '#9CA3AF', marginTop: 4 },
+  expDescription: { fontSize: 13, color: '#4B5563', marginTop: 6, lineHeight: 18 },
   prefRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F9FAFB',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F9FAFB',
   },
-  prefKey: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  prefValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#F97316',
-    textTransform: 'capitalize',
-  },
-  traitBadge: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  traitBadgeText: {
-    fontSize: 11,
-    color: '#6B7280',
-    textTransform: 'capitalize',
-  },
+  prefKey:      { fontSize: 13, color: '#6B7280' },
+  prefValue:    { fontSize: 13, fontWeight: '600', color: '#F97316', textTransform: 'capitalize' },
+  traitBadge:   { backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  traitBadgeText: { fontSize: 11, color: '#6B7280', textTransform: 'capitalize' },
   editButton: {
-    backgroundColor: '#F97316',
-    borderRadius: 12,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
+    backgroundColor: '#F97316', borderRadius: 12, paddingVertical: 14,
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    gap: 8, marginBottom: 20,
   },
-  editButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  editButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   createPrompt: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 32,
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 32,
+    alignItems: 'center', marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
   },
-  createTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginTop: 12,
-    marginBottom: 6,
+  createTitle:      { fontSize: 18, fontWeight: '600', color: '#1F2937', marginTop: 12, marginBottom: 6 },
+  createText:       { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 16 },
+  createButton:     { backgroundColor: '#F97316', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
+  createButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  menuSection:      { marginBottom: 16 },
+  menuItem: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FFFFFF', borderRadius: 12,
+    padding: 16, gap: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
-  createText: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  createButton: {
+  menuItemText: { flex: 1, fontSize: 15, color: '#374151' },
+
+  // ── Notification badge ────────────────────────────────────────────────────────
+  notifBadge: {
     backgroundColor: '#F97316',
     borderRadius: 10,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  createButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  menuSection: {
-    marginBottom: 16,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  menuItemText: {
-    flex: 1,
-    fontSize: 15,
-    color: '#374151',
-  },
-  logoutButton: {
-    flexDirection: 'row',
+    minWidth: 20,
+    height: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 5,
+    marginRight: 4,
   },
-  logoutText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#EF4444',
+  notifBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+
+  logoutButton: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    gap: 6, paddingVertical: 14,
+    borderWidth: 1, borderColor: '#FEE2E2',
+    borderRadius: 12, backgroundColor: '#FFFFFF',
   },
+  logoutText: { fontSize: 15, fontWeight: '600', color: '#EF4444' },
 });
 
 export default ProfileScreen;

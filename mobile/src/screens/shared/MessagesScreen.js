@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,310 +7,497 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
+  TextInput,
+  Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { messageAPI } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api, { BASE_URL } from '../../services/api';
+import NotificationsScreen from './NotificationsScreen';
+import MessagesInbox from './MessagesInbox';
+import { useAuth } from '../../context/AuthContext';
 
-const MessagesScreen = ({ navigation }) => {
-  const [conversations, setConversations] = useState([]);
-  const [loading, setLoading] = useState(true);
+// ─── Constants ────────────────────────────────────────────────────────────────
+const FILTER_CHIPS = ['Workers', 'Employers', 'Companies'];
+
+// ─── Avatar ───────────────────────────────────────────────────────────────────
+const AvatarCircle = ({ name, size = 48, online = false, avatar }) => (
+  <View style={{ position: 'relative' }}>
+    {avatar ? (
+      <Image
+        source={{ uri: avatar }}
+        style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: '#fff' }}
+      />
+    ) : (
+      <View style={{
+        width: size, height: size, borderRadius: size / 2,
+        backgroundColor: '#F97316', justifyContent: 'center',
+        alignItems: 'center', borderWidth: 2, borderColor: '#fff',
+      }}>
+        <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: '#fff' }}>
+          {name ? name.charAt(0).toUpperCase() : '?'}
+        </Text>
+      </View>
+    )}
+    {online && (
+      <View style={{
+        position: 'absolute', bottom: 1, right: 1,
+        width: 12, height: 12, borderRadius: 6,
+        backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#fff',
+      }} />
+    )}
+  </View>
+);
+
+// ─── People card (role badges removed, context hint removed) ─────────────────
+const PeopleCard = ({ item, onMessage, navigation }) => (   // CHANGE: accept navigation directly
+  <View style={styles.personCard}>
+    <AvatarCircle name={item.name} size={64} avatar={item.avatar} />
+    <View style={styles.personDetails}>
+
+      {/* Name only (no role badge) */}
+      <View style={styles.nameRow}>
+        <Text style={styles.personName} numberOfLines={1}>{item.name}</Text>
+      </View>
+
+      {/* Title / headline */}
+      <Text style={styles.personRole} numberOfLines={1}>
+        {item.title || item.headline || (item.role === 'employer' ? 'Employer' : 'Skilled Worker')}
+      </Text>
+
+      {/* Company (employers only) */}
+      {item.companyName && (
+        <View style={styles.metaRow}>
+          <Ionicons name="business-outline" size={13} color="#6B7280" />
+          <Text style={styles.metaText} numberOfLines={1}>{item.companyName}</Text>
+        </View>
+      )}
+
+      {/* Location */}
+      {item.location && (
+        <View style={styles.metaRow}>
+          <Ionicons name="location-outline" size={13} color="#9CA3AF" />
+          <Text style={styles.locationText} numberOfLines={1}>{item.location}</Text>
+        </View>
+      )}
+
+      {/* Match score (workers only, when available) */}
+      {item.match != null && (
+        <View style={styles.matchBadge}>
+          <Ionicons name="sparkles" size={11} color="#059669" />
+          <Text style={styles.matchText}>{item.match}% Match</Text>
+        </View>
+      )}
+
+      {/* Action buttons */}
+      <View style={styles.cardActions}>
+        {/* View Jobs — now navigates to Opportunities screen with company filter */}
+        {item.role === 'employer' && item.companyId && (
+          <TouchableOpacity
+            style={styles.profileBtn}
+            onPress={() => navigation.navigate('Opportunities', {
+              companyId: item.companyId,
+              companyName: item.companyName,
+            })}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="eye-outline" size={15} color="#F97316" />
+            <Text style={styles.profileBtnText}>View Jobs</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Message button */}
+        <TouchableOpacity
+          style={[styles.messageBtn, item.companyId && styles.messageBtnSecondary]}
+          onPress={() => onMessage(item)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="chatbubble-outline" size={15} color="#fff" />
+          <Text style={styles.messageBtnText}>Message</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+);
+
+// ─── Search Tab ───────────────────────────────────────────────────────────────
+const SearchTab = ({ navigation }) => {
+  const [query,      setQuery]      = useState('');
+  const [activeChip, setActiveChip] = useState('Workers');
+  const [results,    setResults]    = useState([]);
+  const [loading,    setLoading]    = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+  const [error,      setError]      = useState(null);
 
-  const fetchInbox = useCallback(async () => {
+  useEffect(() => { setResults([]); setError(null); }, [activeChip]);
+
+  const fetchData = useCallback(async (searchQuery = query, chip = activeChip) => {
     try {
       setError(null);
-      const { data } = await messageAPI.getInbox();
-      const list = data.conversations || data.messages || data.data || data || [];
-      setConversations(Array.isArray(list) ? list : []);
+      setLoading(true);
+
+      switch (chip) {
+        case 'Workers': {
+          const endpoint = searchQuery.trim()
+            ? `/users/search?query=${encodeURIComponent(searchQuery)}&role=skilled_worker`
+            : '/users/suggested?role=skilled_worker';
+          const response = await api.get(endpoint);
+          setResults(response.data?.users || []);
+          break;
+        }
+
+        case 'Employers': {
+          const endpoint = searchQuery.trim()
+            ? `/users/search?query=${encodeURIComponent(searchQuery)}&role=employer`
+            : '/users/suggested?role=employer';
+          const response = await api.get(endpoint);
+          setResults(response.data?.users || []);
+          break;
+        }
+
+        case 'Companies': {
+          const endpoint = `/users/companies/search?query=${encodeURIComponent(searchQuery)}`;
+          const response = await api.get(endpoint);
+          setResults(response.data?.companies || []);
+          break;
+        }
+
+        default:
+          setResults([]);
+      }
     } catch (err) {
-      setError('Failed to load messages.');
+      setError(err.response?.data?.error || 'Failed to load results.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [query, activeChip]);
 
   useEffect(() => {
-    fetchInbox();
-  }, [fetchInbox]);
+    const timer = setTimeout(() => fetchData(query, activeChip), 400);
+    return () => clearTimeout(timer);
+  }, [query, activeChip, fetchData]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchInbox();
-  };
+  const onRefresh = () => { setRefreshing(true); fetchData(query, activeChip); };
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
-      return date.toLocaleTimeString('en-UG', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } else if (diffDays === 1) {
-      return 'Yesterday';
-    } else if (diffDays < 7) {
-      return date.toLocaleDateString('en-UG', { weekday: 'short' });
-    }
-    return date.toLocaleDateString('en-UG', {
-      month: 'short',
-      day: 'numeric',
+  const handleMessage = (item) => {
+    navigation.navigate('Chat', {
+      userId:     item.id || item._id,
+      userName:   item.name,
+      userAvatar: item.avatar,
+      userRole:   item.role,
     });
   };
 
-  const renderConversation = ({ item }) => {
-    const otherUser = item.otherUser || item.user || item.participant || {};
-    const userName = otherUser.fullName || otherUser.name || otherUser.email || 'User';
-    const userId = otherUser._id || otherUser.id || item.userId;
-    const lastMessage = item.lastMessage || item.message || '';
-    const timestamp = item.updatedAt || item.lastMessageAt || item.createdAt;
-    const unread = item.unread || item.unreadCount || 0;
+  // handleViewProfile removed (no longer needed for jobs)
 
-    return (
-      <TouchableOpacity
-        style={[styles.convItem, unread > 0 && styles.convItemUnread]}
-        onPress={() =>
-          navigation.navigate('Chat', {
-            userId,
-            userName,
-          })
-        }
-        activeOpacity={0.7}
-      >
-        <View style={styles.convAvatar}>
-          <Text style={styles.convAvatarText}>
-            {userName.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+  const renderCompanyCard = (item) => (
+    <View key={item.id} style={styles.personCard}>
+      <View style={[styles.avatarIcon, { backgroundColor: '#3B82F6' }]}>
+        <Ionicons name="business-outline" size={32} color="#fff" />
+      </View>
+      <View style={styles.personDetails}>
+        <Text style={styles.personName}>{item.name}</Text>
+        <Text style={styles.personRole}>{item.industry || 'Company'}</Text>
+        <Text style={styles.locationText}>{item.location}</Text>
+        <TouchableOpacity
+          style={[styles.messageBtn, { backgroundColor: '#3B82F6', marginTop: 10 }]}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('Opportunities', {
+            companyId: item.id,
+            companyName: item.name,
+          })}
+        >
+          <Text style={styles.messageBtnText}>View Company Jobs</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
-        <View style={styles.convContent}>
-          <View style={styles.convHeader}>
-            <Text
-              style={[styles.convName, unread > 0 && styles.convNameUnread]}
-              numberOfLines={1}
-            >
-              {userName}
-            </Text>
-            <Text style={styles.convTime}>{formatTime(timestamp)}</Text>
-          </View>
-          <View style={styles.convMessageRow}>
-            <Text
-              style={[
-                styles.convMessage,
-                unread > 0 && styles.convMessageUnread,
-              ]}
-              numberOfLines={1}
-            >
-              {typeof lastMessage === 'string'
-                ? lastMessage
-                : lastMessage.content || lastMessage.text || ''}
-            </Text>
-            {unread > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadText}>{unread}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </TouchableOpacity>
+  const SectionHeader = () => {
+    if (activeChip === 'Workers') return (
+      <View style={styles.sectionInfo}>
+        <Ionicons name="people-outline" size={15} color="#6B7280" />
+        <Text style={styles.sectionInfoText}>
+          {query.trim() ? 'Workers matching your search' : 'Suggested skilled workers near you'}
+        </Text>
+      </View>
     );
+    if (activeChip === 'Employers') return (
+      <View style={styles.sectionInfo}>
+        <Ionicons name="briefcase-outline" size={15} color="#3B82F6" />
+        <Text style={[styles.sectionInfoText, { color: '#3B82F6' }]}>
+          {query.trim() ? 'Employers matching your search' : 'Suggested employers'}
+        </Text>
+      </View>
+    );
+    return null;
   };
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <View style={styles.header}>
-          <Text style={styles.screenTitle}>Messages</Text>
-        </View>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#F97316" />
-        </View>
-      </SafeAreaView>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#F97316" />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Text style={styles.screenTitle}>Messages</Text>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} tintColor="#F97316" />
+      }
+    >
+      <View style={styles.searchBar}>
+        <Ionicons name="search-outline" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={
+            activeChip === 'Employers'
+              ? 'Search employers or companies…'
+              : activeChip === 'Workers'
+              ? 'Search skills, roles, or names…'
+              : 'Search companies…'
+          }
+          placeholderTextColor="#9CA3AF"
+          value={query}
+          onChangeText={setQuery}
+        />
+        {query !== '' && (
+          <TouchableOpacity onPress={() => setQuery('')}>
+            <Ionicons name="close-circle" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {error && (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      <FlatList
-        data={conversations}
-        keyExtractor={(item) =>
-          item._id || item.id || item.conversationId || Math.random().toString()
-        }
-        renderItem={renderConversation}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="chatbubbles-outline" size={48} color="#D1D5DB" />
-            <Text style={styles.emptyTitle}>No Messages</Text>
-            <Text style={styles.emptyText}>
-              Start a conversation by connecting with employers or workers.
+      <View style={styles.chipsRow}>
+        {FILTER_CHIPS.map((chip) => (
+          <TouchableOpacity
+            key={chip}
+            style={[styles.chip, activeChip === chip && styles.chipActive]}
+            onPress={() => { setActiveChip(chip); setError(null); }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.chipText, activeChip === chip && styles.chipTextActive]}>
+              {chip}
             </Text>
-          </View>
-        }
-      />
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle-outline" size={15} color="#EF4444" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity onPress={onRefresh}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : results.length === 0 && !loading ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons
+            name={activeChip === 'Employers' ? 'briefcase-outline' : activeChip === 'Companies' ? 'business-outline' : 'people-outline'}
+            size={40}
+            color="#D1D5DB"
+          />
+          <Text style={styles.emptyTitle}>
+            {activeChip === 'Employers' ? 'No employers found' : activeChip === 'Companies' ? 'No companies found' : 'No workers found'}
+          </Text>
+          <Text style={styles.emptyText}>
+            {activeChip === 'Employers' && !query.trim()
+              ? 'Try searching for an employer or company name'
+              : `No ${activeChip.toLowerCase()} match your search`}
+          </Text>
+        </View>
+      ) : (
+        <>
+          <SectionHeader />
+          {results.map((item) =>
+            activeChip === 'Companies'
+              ? renderCompanyCard(item)
+              : (
+                <PeopleCard
+                  key={item.id || item._id}
+                  item={item}
+                  onMessage={handleMessage}
+                  navigation={navigation}   // Pass navigation to PeopleCard
+                />
+              )
+          )}
+        </>
+      )}
+    </ScrollView>
+  );
+};
+
+// ─── Notifications Tab ────────────────────────────────────────────────────────
+const NotificationsTab = ({ navigation, notificationsRef }) => (
+  <NotificationsScreen ref={notificationsRef} navigation={navigation} hideHeader={true} />
+);
+
+// ─── Main MessagesScreen ──────────────────────────────────────────────────────
+const MessagesScreen = ({ navigation }) => {
+  const [activeTab, setActiveTab] = useState('search');
+  const { unreadMessageCount, unreadNotificationCount, setUnreadNotificationCount } = useAuth();
+  const notificationsRef = useRef(null);
+
+  const markAllNotificationsRead = async () => {
+    if (!unreadNotificationCount || unreadNotificationCount === 0) return;
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+      const res = await fetch(`${BASE_URL}/notifications/read-all`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        notificationsRef.current?.refresh?.();
+        if (setUnreadNotificationCount) setUnreadNotificationCount(0);
+        Alert.alert('Success', 'All notifications marked as read');
+      } else {
+        Alert.alert('Error', 'Failed to mark notifications as read');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not connect to server');
+    }
+  };
+
+  const headerConfig = {
+    search: { title: 'Messaging Hub', rightAction: null },
+    inbox:  { title: 'Inbox',         rightAction: null },
+    notifications: {
+      title: 'Notifications',
+      rightAction: (
+        <TouchableOpacity onPress={markAllNotificationsRead} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons
+            name={unreadNotificationCount > 0 ? 'checkbox-outline' : 'checkbox'}
+            size={24}
+            color="#F97316"
+          />
+        </TouchableOpacity>
+      ),
+    },
+  };
+
+  const { title, rightAction } = headerConfig[activeTab];
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'search':        return <SearchTab navigation={navigation} />;
+      case 'inbox':         return <MessagesInbox navigation={navigation} />;
+      case 'notifications': return <NotificationsTab navigation={navigation} notificationsRef={notificationsRef} />;
+      default:              return null;
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-back" size={24} color="#1F2937" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{title}</Text>
+        <View style={styles.headerRight}>{rightAction}</View>
+      </View>
+
+      <View style={styles.tabBar}>
+        {[
+          { key: 'search',        label: 'Search' },
+          { key: 'inbox',         label: 'Messages',      count: unreadMessageCount },
+          { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
+        ].map(({ key, label, count }) => (
+          <TouchableOpacity
+            key={key}
+            style={styles.tabItem}
+            onPress={() => setActiveTab(key)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>
+                {label}
+              </Text>
+              {count > 0 && (
+                <View style={styles.tabBadge}>
+                  <Text style={styles.tabBadgeText}>{count > 99 ? '99+' : count}</Text>
+                </View>
+              )}
+            </View>
+            {activeTab === key && <View style={styles.tabIndicator} />}
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {renderTabContent()}
     </SafeAreaView>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  screenTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    marginHorizontal: 20,
-    borderRadius: 8,
-    padding: 10,
-    gap: 6,
-    marginBottom: 8,
-  },
-  errorText: {
-    fontSize: 13,
-    color: '#EF4444',
-  },
-  listContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  convItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  convItemUnread: {
-    backgroundColor: '#FFF7ED',
-    borderWidth: 1,
-    borderColor: '#FDBA74',
-  },
-  convAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F97316',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  convAvatarText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  convContent: {
-    flex: 1,
-  },
-  convHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  convName: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#1F2937',
-    flex: 1,
-    marginRight: 8,
-  },
-  convNameUnread: {
-    fontWeight: '700',
-  },
-  convTime: {
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  convMessageRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  convMessage: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    flex: 1,
-    marginRight: 8,
-  },
-  convMessageUnread: {
-    color: '#374151',
-    fontWeight: '500',
-  },
-  unreadBadge: {
-    backgroundColor: '#F97316',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-  },
-  unreadText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  center:    { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+
+  header:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 12 },
+  backBtn:      { width: 40, padding: 2 },
+  headerTitle:  { flex: 1, fontSize: 17, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
+  headerRight:  { width: 40, alignItems: 'flex-end' },
+
+  tabBar:          { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#fff', marginBottom: 4 },
+  tabItem:         { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
+  tabLabel:        { fontSize: 14, fontWeight: '500', color: '#9CA3AF' },
+  tabLabelActive:  { color: '#F97316', fontWeight: '700' },
+  tabIndicator:    { position: 'absolute', bottom: 0, left: '20%', right: '20%', height: 2, borderRadius: 2, backgroundColor: '#F97316' },
+  tabBadge:        { marginLeft: 6, backgroundColor: '#F97316', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+  tabBadgeText:    { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
+
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 16 },
+  searchBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 25, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 14 },
+  searchInput:   { flex: 1, fontSize: 14, color: '#1F2937' },
+  chipsRow:      { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  chip:          { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#fff' },
+  chipActive:    { borderColor: '#F97316', backgroundColor: '#FFF7ED' },
+  chipText:      { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  chipTextActive:{ color: '#F97316' },
+
+  sectionInfo:     { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+  sectionInfoText: { fontSize: 12, color: '#6B7280', flex: 1, lineHeight: 17 },
+
+  personCard:    { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  avatarIcon:    { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  personDetails: { flex: 1, marginLeft: 14 },
+  nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  personName:    { fontSize: 15, fontWeight: '700', color: '#1F2937', flex: 1 },
+
+  matchBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginBottom: 8 },
+  matchText:     { fontSize: 11, fontWeight: '700', color: '#059669' },
+
+  personRole:    { fontSize: 13, color: '#6B7280', marginBottom: 4 },
+  metaRow:       { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
+  metaText:      { fontSize: 12, color: '#6B7280', flex: 1 },
+  locationText:  { fontSize: 12, color: '#9CA3AF', flex: 1 },
+
+  cardActions:        { flexDirection: 'row', gap: 8, marginTop: 10 },
+  profileBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderColor: '#F97316', borderRadius: 10, paddingVertical: 9 },
+  profileBtnText:     { fontSize: 13, fontWeight: '600', color: '#F97316' },
+  messageBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#F97316', borderRadius: 10, paddingVertical: 10 },
+  messageBtnSecondary:{ flex: 1 },
+  messageBtnText:     { fontSize: 13, fontWeight: '700', color: '#fff' },
+
+  errorBanner:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', borderRadius: 8, padding: 10, gap: 6, marginTop: 10 },
+  errorText:      { fontSize: 13, color: '#EF4444', flex: 1 },
+  retryText:      { fontSize: 13, color: '#F97316', fontWeight: '600' },
+  emptyContainer: { alignItems: 'center', paddingVertical: 48, gap: 8 },
+  emptyTitle:     { fontSize: 15, fontWeight: '600', color: '#374151' },
+  emptyText:      { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
 });
 
 export default MessagesScreen;

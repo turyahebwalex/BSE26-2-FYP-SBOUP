@@ -12,21 +12,24 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI } from '../../services/api';
+import ReportBottomSheet from '../../components/ReportBottomSheet';
 
 const OpportunityDetailScreen = ({ route, navigation }) => {
   const { opportunityId: routeOppId, opportunity: passedOpp, matchScore: passedScore } = route.params || {};
   const resolvedId =
     routeOppId || passedOpp?._id || passedOpp?.id || passedOpp?.opportunityId || null;
   const passedHasFullDetails = !!(passedOpp && passedOpp._id && passedOpp.description !== undefined);
-  const [opportunity, setOpportunity] = useState(passedHasFullDetails ? passedOpp : null);
-  const [matchScore, setMatchScore] = useState(passedScore || null);
-  const [loading, setLoading] = useState(!passedHasFullDetails);
-  const [applying, setApplying] = useState(false);
-  const [showApplyForm, setShowApplyForm] = useState(false);
-  const [coverLetter, setCoverLetter] = useState('');
-  const [applied, setApplied] = useState(false);
-  const [error, setError] = useState(null);
-  const [profileId, setProfileId] = useState(null);
+
+  const [opportunity,   setOpportunity]   = useState(passedHasFullDetails ? passedOpp : null);
+  const [matchScore,    setMatchScore]     = useState(passedScore || null);
+  const [loading,       setLoading]        = useState(!passedHasFullDetails);
+  const [applying,      setApplying]       = useState(false);
+  const [showApplyForm, setShowApplyForm]  = useState(false);
+  const [coverLetter,   setCoverLetter]    = useState('');
+  const [applied,       setApplied]        = useState(false);
+  const [error,         setError]          = useState(null);
+  const [profileId,     setProfileId]      = useState(null);
+  const [showReport,    setShowReport]     = useState(false); // ← report sheet
 
   useEffect(() => {
     if (!passedHasFullDetails && resolvedId) {
@@ -39,7 +42,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     try {
       const { data } = await opportunityAPI.getOne(resolvedId);
       setOpportunity(data.opportunity || data);
-    } catch (err) {
+    } catch {
       setError('Failed to load opportunity details.');
     } finally {
       setLoading(false);
@@ -94,9 +97,10 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  // ─── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#F97316" />
         </View>
@@ -104,9 +108,10 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     );
   }
 
+  // ─── Error ──────────────────────────────────────────────────────────────────
   if (error || !opportunity) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
           <Text style={styles.errorTitle}>{error || 'Opportunity not found.'}</Text>
@@ -131,191 +136,217 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     deadline,
   } = opportunity;
 
-  const displaySkills = requiredSkills || [];
-  const displayCompany = companyId?.name || postedByUserId?.fullName || 'Company';
+  const displaySkills   = requiredSkills || [];
+  const displayCompany  = companyId?.name || postedByUserId?.fullName || 'Company';
 
   const typeBadgeColors = {
-    formal: { bg: '#DBEAFE', text: '#1D4ED8' },
-    contract: { bg: '#FEF3C7', text: '#D97706' },
-    freelance: { bg: '#D1FAE5', text: '#059669' },
-    apprenticeship: { bg: '#EDE9FE', text: '#7C3AED' },
+    formal:        { bg: '#DBEAFE', text: '#1D4ED8' },
+    contract:      { bg: '#FEF3C7', text: '#D97706' },
+    freelance:     { bg: '#D1FAE5', text: '#059669' },
+    apprenticeship:{ bg: '#EDE9FE', text: '#7C3AED' },
   };
   const badge = typeBadgeColors[category] || typeBadgeColors.formal;
 
+  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.headerSection}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={22} color="#1F2937" />
-            </TouchableOpacity>
-            {matchScore != null && (
-              <View style={styles.matchBadge}>
-                <Ionicons name="sparkles" size={14} color="#F97316" />
-                <Text style={styles.matchText}>{Math.round(matchScore)}% Match</Text>
+    <>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Header ── */}
+          <View style={styles.headerSection}>
+            <View style={styles.headerTop}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={22} color="#1F2937" />
+              </TouchableOpacity>
+
+              <View style={styles.headerRight}>
+                {matchScore != null && (
+                  <View style={styles.matchBadge}>
+                    <Ionicons name="sparkles" size={14} color="#F97316" />
+                    <Text style={styles.matchText}>{Math.round(matchScore)}% Match</Text>
+                  </View>
+                )}
+                {/* 3-dot report button */}
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => setShowReport(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="ellipsis-vertical" size={20} color="#6B7280" />
+                </TouchableOpacity>
               </View>
-            )}
+            </View>
+
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.company}>{displayCompany}</Text>
+
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <Ionicons name="location-outline" size={16} color="#6B7280" />
+                <Text style={styles.metaText}>{location || 'Uganda'}</Text>
+              </View>
+              <View style={[styles.typeBadge, { backgroundColor: badge.bg }]}>
+                <Text style={[styles.typeBadgeText, { color: badge.text }]}>
+                  {(category || 'formal').charAt(0).toUpperCase() + (category || 'formal').slice(1)}
+                </Text>
+              </View>
+            </View>
           </View>
 
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.company}>{displayCompany}</Text>
-
-          <View style={styles.metaRow}>
-            <View style={styles.metaItem}>
-              <Ionicons name="location-outline" size={16} color="#6B7280" />
-              <Text style={styles.metaText}>{location || 'Uganda'}</Text>
-            </View>
-            <View style={[styles.typeBadge, { backgroundColor: badge.bg }]}>
-              <Text style={[styles.typeBadgeText, { color: badge.text }]}>
-                {(category || 'formal').charAt(0).toUpperCase() + (category || 'formal').slice(1)}
+          {/* ── Compensation ── */}
+          {compensationRange && (compensationRange.min || compensationRange.max) && (
+            <View style={styles.infoCard}>
+              <View style={styles.infoHeader}>
+                <Ionicons name="cash-outline" size={18} color="#F97316" />
+                <Text style={styles.infoTitle}>Compensation</Text>
+              </View>
+              <Text style={styles.infoText}>
+                {`${compensationRange.currency || 'UGX'} ${
+                  compensationRange.min ? compensationRange.min.toLocaleString() : '—'
+                }${compensationRange.max ? ` – ${compensationRange.max.toLocaleString()}` : ''}${
+                  compensationRange.period ? ` / ${compensationRange.period}` : ''
+                }`}
               </Text>
             </View>
-          </View>
-        </View>
+          )}
 
-        {/* Compensation */}
-        {compensationRange && (compensationRange.min || compensationRange.max) && (
-          <View style={styles.infoCard}>
-            <View style={styles.infoHeader}>
-              <Ionicons name="cash-outline" size={18} color="#F97316" />
-              <Text style={styles.infoTitle}>Compensation</Text>
+          {/* ── Experience Level ── */}
+          {experienceLevel && (
+            <View style={styles.infoCard}>
+              <View style={styles.infoHeader}>
+                <Ionicons name="trophy-outline" size={18} color="#F97316" />
+                <Text style={styles.infoTitle}>Experience Level</Text>
+              </View>
+              <Text style={styles.infoText}>
+                {experienceLevel.charAt(0).toUpperCase() + experienceLevel.slice(1)}
+              </Text>
             </View>
-            <Text style={styles.infoText}>
-              {`${compensationRange.currency || 'UGX'} ${
-                compensationRange.min ? compensationRange.min.toLocaleString() : '—'
-              }${compensationRange.max ? ` – ${compensationRange.max.toLocaleString()}` : ''}${
-                compensationRange.period ? ` / ${compensationRange.period}` : ''
-              }`}
-            </Text>
-          </View>
-        )}
+          )}
 
-        {/* Experience Level */}
-        {experienceLevel && (
-          <View style={styles.infoCard}>
-            <View style={styles.infoHeader}>
-              <Ionicons name="trophy-outline" size={18} color="#F97316" />
-              <Text style={styles.infoTitle}>Experience Level</Text>
+          {/* ── Deadline ── */}
+          {deadline && (
+            <View style={styles.infoCard}>
+              <View style={styles.infoHeader}>
+                <Ionicons name="calendar-outline" size={18} color="#F97316" />
+                <Text style={styles.infoTitle}>Application Deadline</Text>
+              </View>
+              <Text style={styles.infoText}>
+                {new Date(deadline).toLocaleDateString('en-UG', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })}
+              </Text>
             </View>
-            <Text style={styles.infoText}>
-              {experienceLevel.charAt(0).toUpperCase() + experienceLevel.slice(1)}
-            </Text>
-          </View>
-        )}
+          )}
 
-        {/* Deadline */}
-        {deadline && (
-          <View style={styles.infoCard}>
-            <View style={styles.infoHeader}>
-              <Ionicons name="calendar-outline" size={18} color="#F97316" />
-              <Text style={styles.infoTitle}>Application Deadline</Text>
-            </View>
-            <Text style={styles.infoText}>
-              {new Date(deadline).toLocaleDateString('en-UG', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </Text>
-          </View>
-        )}
-
-        {/* Description */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <Text style={styles.description}>{description || 'No description provided.'}</Text>
-        </View>
-
-        {/* Required Skills */}
-        {displaySkills.length > 0 && (
+          {/* ── Description ── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Required Skills</Text>
-            <View style={styles.skillsContainer}>
-              {displaySkills.map((skill, index) => {
-                const skillName =
-                  typeof skill === 'string'
-                    ? skill
-                    : skill.skillName || skill.name || skill.skill;
-                return (
-                  <View key={skill._id || index} style={styles.skillChip}>
-                    <Text style={styles.skillChipText}>{skillName}</Text>
-                  </View>
-                );
-              })}
-            </View>
+            <Text style={styles.sectionTitle}>Description</Text>
+            <Text style={styles.description}>{description || 'No description provided.'}</Text>
           </View>
-        )}
 
-        {/* Apply Form */}
-        {showApplyForm && !applied && (
-          <View style={styles.applyForm}>
-            <Text style={styles.sectionTitle}>Cover Letter (Optional)</Text>
-            <TextInput
-              style={styles.coverLetterInput}
-              placeholder="Tell the employer why you're a great fit..."
-              placeholderTextColor="#9CA3AF"
-              multiline
-              numberOfLines={5}
-              textAlignVertical="top"
-              value={coverLetter}
-              onChangeText={setCoverLetter}
-            />
-            <View style={styles.applyFormButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowApplyForm(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, applying && styles.buttonDisabled]}
-                onPress={handleApply}
-                disabled={applying}
-              >
-                {applying ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Submit Application</Text>
-                )}
-              </TouchableOpacity>
+          {/* ── Required Skills ── */}
+          {displaySkills.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Required Skills</Text>
+              <View style={styles.skillsContainer}>
+                {displaySkills.map((skill, index) => {
+                  const skillName =
+                    typeof skill === 'string'
+                      ? skill
+                      : skill.skillName || skill.name || skill.skill;
+                  return (
+                    <View key={skill._id || index} style={styles.skillChip}>
+                      <Text style={styles.skillChipText}>{skillName}</Text>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
 
-      {/* Bottom Apply Button */}
-      {!showApplyForm && (
-        <View style={styles.bottomBar}>
+          {/* ── Apply Form ── */}
+          {showApplyForm && !applied && (
+            <View style={styles.applyForm}>
+              <Text style={styles.sectionTitle}>Cover Letter (Optional)</Text>
+              <TextInput
+                style={styles.coverLetterInput}
+                placeholder="Tell the employer why you're a great fit..."
+                placeholderTextColor="#9CA3AF"
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+                value={coverLetter}
+                onChangeText={setCoverLetter}
+              />
+              <View style={styles.applyFormButtons}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setShowApplyForm(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.submitButton, applying && styles.buttonDisabled]}
+                  onPress={handleApply}
+                  disabled={applying}
+                >
+                  {applying ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Submit Application</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* ── Subtle report link at the bottom ── */}
           <TouchableOpacity
-            style={[
-              styles.applyButton,
-              applied && styles.appliedButton,
-            ]}
-            onPress={() => {
-              if (!applied) {
-                setShowApplyForm(true);
-              }
-            }}
-            disabled={applied}
+            style={styles.reportLink}
+            onPress={() => setShowReport(true)}
+            activeOpacity={0.7}
           >
-            <Ionicons
-              name={applied ? 'checkmark-circle' : 'paper-plane-outline'}
-              size={20}
-              color="#FFFFFF"
-            />
-            <Text style={styles.applyButtonText}>
-              {applied ? 'Applied' : 'Apply Now'}
-            </Text>
+            <Ionicons name="flag-outline" size={14} color="#9CA3AF" />
+            <Text style={styles.reportLinkText}>Report this job posting</Text>
           </TouchableOpacity>
-        </View>
-      )}
-    </SafeAreaView>
+        </ScrollView>
+
+        {/* ── Bottom Apply Button ── */}
+        {!showApplyForm && (
+          <View style={styles.bottomBar}>
+            <TouchableOpacity
+              style={[styles.applyButton, applied && styles.appliedButton]}
+              onPress={() => { if (!applied) setShowApplyForm(true); }}
+              disabled={applied}
+            >
+              <Ionicons
+                name={applied ? 'checkmark-circle' : 'paper-plane-outline'}
+                size={20}
+                color="#FFFFFF"
+              />
+              <Text style={styles.applyButtonText}>
+                {applied ? 'Applied' : 'Apply Now'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+
+      {/* ── Report bottom sheet (outside SafeAreaView so it overlays everything) ── */}
+      <ReportBottomSheet
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+        targetId={resolvedId}
+        targetType="opportunity"
+        targetLabel={title ? `"${title}"` : 'this job posting'}
+      />
+    </>
   );
 };
 
@@ -352,8 +383,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
+
+  // Header
   headerSection: {
     marginTop: 8,
     marginBottom: 16,
@@ -377,6 +410,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   matchBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -392,6 +430,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#F97316',
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   title: {
     fontSize: 24,
@@ -427,6 +478,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+
+  // Info cards
   infoCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -454,6 +507,8 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     paddingLeft: 26,
   },
+
+  // Sections
   section: {
     marginTop: 8,
     marginBottom: 16,
@@ -487,6 +542,8 @@ const styles = StyleSheet.create({
     color: '#EA580C',
     fontWeight: '500',
   },
+
+  // Apply form
   applyForm: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -541,6 +598,22 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.7,
   },
+
+  // Report link
+  reportLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 16,
+    marginBottom: 8,
+  },
+  reportLinkText: {
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+
+  // Bottom bar
   bottomBar: {
     position: 'absolute',
     bottom: 0,

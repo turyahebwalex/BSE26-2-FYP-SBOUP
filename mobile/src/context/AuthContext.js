@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authAPI } from '../services/api';
+import api, { authAPI } from '../services/api';   // ✅ fixed import
+import socketService from '../services/socket';
 
 const AuthContext = createContext(null);
 
@@ -15,10 +16,62 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+
+  const fetchUnreadMessageCount = async () => {
+    try {
+      const { data } = await api.get('/messages/unread-count');
+      setUnreadMessageCount(data.unreadCount || 0);
+    } catch (error) {
+      console.error('Failed to fetch unread message count', error);
+    }
+  };
+
+  const fetchUnreadNotificationCount = async () => {
+  try {
+    // Fetch only the first page with a small limit to get the unreadCount
+    const { data } = await api.get('/notifications', { params: { page: 1, limit: 1 } });
+    setUnreadNotificationCount(data.unreadCount || 0);
+  } catch (error) {
+    console.error('Failed to fetch unread notification count', error);
+  }
+};
+
+  const refreshUnreadCounts = () => {
+    if (user) {
+      fetchUnreadMessageCount();
+      fetchUnreadNotificationCount();
+    }
+  };
 
   useEffect(() => {
     loadUser();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchUnreadMessageCount();
+      fetchUnreadNotificationCount();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    const handleNewMessage = () => fetchUnreadMessageCount();
+    const handleNewNotification = () => fetchUnreadNotificationCount();
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('new_notification', handleNewNotification);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('new_notification', handleNewNotification);
+    };
+  }, [user]);
 
   const loadUser = async () => {
     try {
@@ -66,10 +119,6 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       return { success: true, user: userData };
     } catch (error) {
-      // Distinguish a server rejection (bad credentials, locked account, etc.)
-      // from a network failure (timeout, unreachable host) — the latter shows
-      // "check your credentials" otherwise, which sends people on a wild goose
-      // chase when the real cause is a Wi-Fi or backend-URL problem.
       let message;
       if (error.response) {
         message =
@@ -117,6 +166,8 @@ export const AuthProvider = ({ children }) => {
     try {
       await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
       setUser(null);
+      setUnreadMessageCount(0);
+      setUnreadNotificationCount(0);
     } catch (error) {
       console.log('Logout error:', error?.message);
       setUser(null);
@@ -132,6 +183,9 @@ export const AuthProvider = ({ children }) => {
         register,
         logout,
         loadUser,
+        unreadMessageCount,
+        unreadNotificationCount,
+        refreshUnreadCounts,
       }}
     >
       {children}
