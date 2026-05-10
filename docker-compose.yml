@@ -29,37 +29,33 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-server
-    ports:
-      - "5000:5000"
+    # Use the host's network stack so outbound calls (ESCO, etc.) reach the
+    # internet on networks that block traffic from Docker's bridge subnet
+    # (campus Wi-Fi, restrictive corporate LANs). Side effect: every other
+    # service the server talks to must be reachable on localhost via the
+    # port mappings each container already publishes.
+    network_mode: host
     environment:
       - NODE_ENV=development
       - PORT=5000
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
-      - REDIS_HOST=redis
+      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      - REDIS_HOST=localhost
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
       - JWT_ACCESS_EXPIRY=15m
       - JWT_REFRESH_EXPIRY=7d
       - CLIENT_URL=http://localhost:3000
-      - MATCHING_SERVICE_URL=http://matching-engine:5001
-      - FRAUD_DETECTION_SERVICE_URL=http://fraud-detection:5002
-      - CV_GENERATION_SERVICE_URL=http://cv-generation:5003
-      - LEARNING_SERVICE_URL=http://learning-engine:5004
-      - CHATBOT_SERVICE_URL=http://chatbot-service:5005
+      - MATCHING_SERVICE_URL=http://localhost:5001
+      - FRAUD_DETECTION_SERVICE_URL=http://localhost:5002
+      - CV_GENERATION_SERVICE_URL=http://localhost:5003
+      - LEARNING_SERVICE_URL=http://localhost:5004
+      - CHATBOT_SERVICE_URL=http://localhost:5005
     depends_on:
       - mongodb
       - redis
     volumes:
       - ./server:/app
       - /app/node_modules
-    networks:
-      - sboup-network
-    # Outbound DNS so calls to the ESCO taxonomy API resolve. Override via
-    # SERVER_DNS_PRIMARY / SERVER_DNS_SECONDARY if your network firewalls
-    # public resolvers (e.g. campus Wi-Fi may require the LAN gateway).
-    dns:
-      - ${SERVER_DNS_PRIMARY:-8.8.8.8}
-      - ${SERVER_DNS_SECONDARY:-9.9.9.9}
 
   # ─── Presentation Layer ───
   client:
@@ -114,22 +110,38 @@ services:
       - sboup-network
 
   cv-generation:
+    image: ghcr.io/turyahebwalex/sboup-cv:latest
     build:
       context: ./ai-services/cv-generation
       dockerfile: Dockerfile
       network: host
     container_name: sboup-cv
-    ports:
-      - "5003:5003"
+    # Same reason as the server above: the campus Wi-Fi blocks egress from
+    # Docker's bridge subnet, which breaks Hugging Face model downloads on
+    # first start. Host networking uses the host's resolver and route table.
+    network_mode: host
     environment:
-      - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      - MONGODB_DB_NAME=sboup_dev
+      - STORAGE_BACKEND=${CV_STORAGE_BACKEND:-local}
+      - LOCAL_STORAGE_DIR=/app/storage
+      - PUBLIC_BASE_URL=${CV_PUBLIC_BASE_URL:-http://localhost:5003}
+      - INTERNAL_API_KEY=${CV_INTERNAL_API_KEY:-}
+      - HF_MODEL_CACHE_DIR=/app/model_cache
+      - CV_PRESIGNED_URL_EXPIRY_SECONDS=3600
+      - RATE_LIMIT_PER_USER_PER_MINUTE=3
+      - LOG_LEVEL=INFO
+    volumes:
+      # Persist generated PDFs and model weights across container restarts so
+      # the mobile client can continue to download CVs and we don't re-pull
+      # ~820MB of HF model weights on every rebuild.
+      - cv_storage:/app/storage
+      - cv_model_cache:/app/model_cache
     depends_on:
       - mongodb
-    networks:
-      - sboup-network
 
   learning-engine:
+    image: ghcr.io/turyahebwalex/sboup-learning:latest
     build:
       context: ./ai-services/learning-engine
       dockerfile: Dockerfile
@@ -157,6 +169,8 @@ services:
     environment:
       - FLASK_ENV=development
       - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
     depends_on:
       - mongodb
     networks:
@@ -185,6 +199,8 @@ services:
 volumes:
   mongodb_data:
   redis_data:
+  cv_storage:
+  cv_model_cache:
 
 networks:
   sboup-network:

@@ -4,18 +4,12 @@ import Constants from 'expo-constants';
 
 const API_PORT = 5000;
 
-// Auto-detect the backend host from Metro's dev-server address. When a phone
-// connects via LAN, hostUri looks like "10.70.1.222:8081" — using that same
-// IP for the backend means any collaborator on the same Wi-Fi as their phone
-// can run `docker compose up --build` without editing mobile/.env.
-// Set EXPO_PUBLIC_API_URL only to override (tunnels, deployed backend, etc).
+// Auto-detect the backend host from Metro's dev-server address.
 function resolveBaseUrl() {
-  // 1. Use explicit env variable if provided (from .env file)
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // 2. Auto-detect from Metro's dev-server address (LAN development)
   const hostUri =
     Constants.expoConfig?.hostUri ||
     Constants.expoGoConfig?.debuggerHost ||
@@ -27,7 +21,6 @@ function resolveBaseUrl() {
     return `http://${host}:${API_PORT}/api`;
   }
 
-  // 3. Fallback to localhost
   return `http://localhost:${API_PORT}/api`;
 }
 
@@ -36,7 +29,7 @@ console.log('🔍 [API] BASE_URL =', BASE_URL);
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000,
+  timeout: 300000, // 5 minutes — needed for local Ollama on CPU
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -59,13 +52,22 @@ const processQueue = (error, token = null) => {
   failedQueue = [];
 };
 
+// Endpoints where a 401 means "bad credentials", not "expired session".
+const AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh'];
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    const isAuthRequest = originalRequest?.url?.includes('/auth/') && !originalRequest?.url?.includes('/auth/me');
+    const isAuthEndpoint = AUTH_ENDPOINTS.some((path) =>
+      originalRequest?.url?.endsWith(path)
+    );
 
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !isAuthEndpoint
+    ) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -121,6 +123,7 @@ export const profileAPI = {
   getProfile: (id) => api.get(`/profiles/${id}`),
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
+  updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 }),
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (skillId) => api.delete(`/profiles/skills/${skillId}`),
   addExperience: (data) => api.post('/profiles/experience', data),
@@ -196,6 +199,8 @@ export const notificationAPI = {
 export const skillAPI = {
   getAll: (params) => api.get('/skills', { params }),
   getCategories: () => api.get('/skills/categories'),
+  suggest: (data) => api.post('/skills/suggest', data),
+  addCustom: (name) => api.post('/skills/custom', { name }),
 };
 
 // ── Company ──
@@ -209,6 +214,11 @@ export const companyAPI = {
 // ── Report ──
 export const reportAPI = {
   create: (data) => api.post('/reports', data),
+};
+
+// ── Chatbot ──
+export const chatbotAPI = {
+  query: (data) => api.post('/chatbot/query', data),
 };
 
 export default api;

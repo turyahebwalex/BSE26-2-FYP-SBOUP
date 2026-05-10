@@ -48,11 +48,18 @@ const PostOpportunityPage = () => {
       .catch(() => setCompany(null));
   }, [user?.companyId]);
 
-  // Debounced AI suggestions: only fire when both title and description have meaningful content.
+  // Debounced AI suggestions. Title is the strongest signal for ESCO — short
+  // job titles like "Driver" or "Welder" are real and should trigger, so the
+  // gate is just title ≥3. Description ≥20 matches the in-form hint and the
+  // server-side validator, giving the suggester enough context to be useful.
+  const aiTitleOk = form.title.trim().length >= 3;
+  const aiDescOk = form.description.trim().length >= 20;
+  const aiReady = aiTitleOk && aiDescOk;
+
   useEffect(() => {
     const title = form.title.trim();
     const description = form.description.trim();
-    if (title.length < 10 || description.length < 10) {
+    if (title.length < 3 || description.length < 20) {
       setSuggestions([]);
       return;
     }
@@ -271,35 +278,43 @@ const PostOpportunityPage = () => {
         <label className="block text-sm font-medium mb-2 text-primary">5. REQUIRED SKILLS</label>
         <p className="text-xs text-gray-500 mb-3">Pick the skills this opportunity needs. Suggestions appear once your title and description are filled in.</p>
 
-        {(suggestLoading || suggestions.length > 0) && (
-          <div className="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-primary uppercase tracking-wide">AI Suggested</span>
-              {suggestLoading && <span className="text-xs text-gray-500">Thinking…</span>}
-            </div>
-            {suggestions.length > 0 ? (
-              <div className="flex gap-2 flex-wrap">
-                {suggestions.map((s) => {
-                  const selected = form.requiredSkills.includes(s._id);
-                  const external = s.source && s.source !== 'internal';
-                  return (
-                    <button
-                      key={s._id}
-                      onClick={() => toggleSkill(s._id)}
-                      title={external ? `Suggested from ${s.source}` : 'From your skill catalog'}
-                      className={`badge text-xs ${selected ? 'bg-primary text-white' : 'bg-white border border-primary/40 text-primary'}`}
-                    >
-                      {external && <span className="mr-1">⚡</span>}
-                      {s.name}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              !suggestLoading && <p className="text-xs text-gray-500">No suggestions yet — try refining your title or description.</p>
-            )}
+        <div className="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-primary uppercase tracking-wide">AI Suggested</span>
+            {suggestLoading && <span className="text-xs text-gray-500">Thinking…</span>}
           </div>
-        )}
+          {!aiReady ? (
+            <p className="text-xs text-gray-500">
+              {!aiTitleOk
+                ? 'Add a title (3+ characters) on the previous step to get AI skill suggestions.'
+                : `Add a description of at least 20 characters (currently ${form.description.trim().length}) to get AI skill suggestions.`}
+            </p>
+          ) : suggestions.length > 0 ? (
+            <div className="flex gap-2 flex-wrap">
+              {suggestions.map((s) => {
+                const selected = form.requiredSkills.includes(s._id);
+                const external = s.source && s.source !== 'internal';
+                return (
+                  <button
+                    key={s._id}
+                    onClick={() => toggleSkill(s._id)}
+                    title={external ? `Suggested from ${s.source}` : 'From your skill catalog'}
+                    className={`badge text-xs ${selected ? 'bg-primary text-white' : 'bg-white border border-primary/40 text-primary'}`}
+                  >
+                    {external && <span className="mr-1">⚡</span>}
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            !suggestLoading && (
+              <p className="text-xs text-gray-500">
+                No suggestions yet — try refining your title or description.
+              </p>
+            )
+          )}
+        </div>
 
         <div className="flex gap-2 flex-wrap max-h-60 overflow-y-auto">
           {allSkills

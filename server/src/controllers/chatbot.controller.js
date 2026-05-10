@@ -6,7 +6,12 @@ exports.sendQuery = async (req, res) => {
     const { query, sessionId } = req.body;
     const response = await axios.post(
       `${process.env.CHATBOT_SERVICE_URL}/api/chatbot/query`,
-      { query, userId: req.user._id.toString(), sessionId }
+      {
+        query,
+        userId:   req.user._id.toString(),
+        userRole: req.user.role,          // pass role so Kazi personalises correctly
+        sessionId,
+      }
     );
     res.json(response.data);
   } catch (error) {

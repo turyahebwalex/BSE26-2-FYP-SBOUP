@@ -1,0 +1,69 @@
+name: Build and push images to GHCR
+
+# Builds happen on GitHub's runners (fast, reliable network) instead of on
+# teammate laptops behind throttled / blocking campus links. Teammates then
+# `docker compose pull` the resulting images and skip pip + HF model downloads
+# entirely. See README / scripts/dev.sh for the consumer side.
+
+# `on` is quoted because YAML 1.1 parses bare `on:` as the boolean
+# True (same trap as `yes`/`no`/`off`). GitHub's runner is permissive,
+# but stricter schema validators (VSCode's GitHub Actions extension)
+# correctly flag the mismatch. Quoting is the canonical fix.
+"on":
+  push:
+    branches: [main]
+    # Only re-build when the two services I own change. Other services
+    # (server, client, mobile, matching, fraud, chatbot) are owned by
+    # teammates — they publish their own images from their own
+    # workflows, so building them here would just stamp my namespace
+    # with someone else's stale code.
+    paths:
+      - 'ai-services/cv-generation/**'
+      - 'ai-services/learning-engine/**'
+      - '.github/workflows/build-images.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: cv
+            context: ./ai-services/cv-generation
+          - service: learning
+            context: ./ai-services/learning-engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Repository owner is lowercased here because GHCR requires lowercase
+      # image paths and GitHub usernames can contain uppercase letters.
+      - name: Compute image name
+        id: img
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "tag=ghcr.io/${owner_lc}/sboup-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ steps.img.outputs.tag }}:latest
+            ${{ steps.img.outputs.tag }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

@@ -10,21 +10,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { profileAPI, BASE_URL } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ProfileScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const [profile, setProfile]         = useState(null);
-  const [skills, setSkills]           = useState([]);
+  const [profile, setProfile] = useState(null);
+  const [skills, setSkills] = useState([]);
   const [experiences, setExperiences] = useState([]);
-  const [education, setEducation]     = useState([]);
-  const [preference, setPreference]   = useState(null);
-  const [loading, setLoading]         = useState(true);
-  const [refreshing, setRefreshing]   = useState(false);
-  const [error, setError]             = useState(null);
-  const [unreadCount, setUnreadCount] = useState(0);   // ← NEW
+  const [education, setEducation] = useState([]);
+  const [preference, setPreference] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);   // ← ADDED (was missing)
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -47,7 +47,6 @@ const ProfileScreen = ({ navigation }) => {
     }
   }, []);
 
-  // ── NEW: fetch unread notification count ──────────────────────────────────────
   const fetchUnreadCount = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
@@ -59,13 +58,15 @@ const ProfileScreen = ({ navigation }) => {
         const data = await res.json();
         setUnreadCount(data.unreadCount || 0);
       }
-    } catch { /* silent — badge is non-critical */ }
+    } catch {
+      /* silent — badge is non-critical */
+    }
   }, []);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchProfile();
-      fetchUnreadCount();   // ← refresh count every time screen focuses
+      fetchUnreadCount();
     });
     return unsubscribe;
   }, [navigation, fetchProfile, fetchUnreadCount]);
@@ -73,7 +74,10 @@ const ProfileScreen = ({ navigation }) => {
   const onRefresh = () => {
     setRefreshing(true);
     fetchProfile();
-    fetchUnreadCount();
+  };
+
+  const handleLogout = () => {
+    logout();
   };
 
   const getInitials = () => {
@@ -109,7 +113,9 @@ const ProfileScreen = ({ navigation }) => {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{getInitials()}</Text>
           </View>
-          <Text style={styles.userName}>{user?.fullName || user?.name || 'User'}</Text>
+          <Text style={styles.userName}>
+            {user?.fullName || user?.name || 'User'}
+          </Text>
           <Text style={styles.userEmail}>{user?.email || ''}</Text>
           <View style={styles.roleBadge}>
             <Text style={styles.roleText}>
@@ -275,7 +281,6 @@ const ProfileScreen = ({ navigation }) => {
             <Ionicons name="notifications-outline" size={20} color="#374151" />
             <Text style={styles.menuItemText}>Notifications</Text>
 
-            {/* ── Orange unread badge ── */}
             {unreadCount > 0 && (
               <View style={styles.notifBadge}>
                 <Text style={styles.notifBadgeText}>
@@ -289,7 +294,7 @@ const ProfileScreen = ({ navigation }) => {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={18} color="#EF4444" />
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
@@ -299,15 +304,33 @@ const ProfileScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container:     { flex: 1, backgroundColor: '#F9FAFB' },
-  center:        { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollView:    { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 32 },
-  profileHeader: { alignItems: 'center', marginTop: 12, marginBottom: 24 },
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+  },
+  profileHeader: {
+    alignItems: 'center',
+    marginTop: 12,
+    marginBottom: 24,
+  },
   avatar: {
     width: 80, height: 80, borderRadius: 40,
     backgroundColor: '#F97316',
-    justifyContent: 'center', alignItems: 'center', marginBottom: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   avatarText:   { fontSize: 30, fontWeight: '700', color: '#FFFFFF' },
   userName:     { fontSize: 22, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
@@ -377,7 +400,6 @@ const styles = StyleSheet.create({
   },
   menuItemText: { flex: 1, fontSize: 15, color: '#374151' },
 
-  // ── Notification badge ────────────────────────────────────────────────────────
   notifBadge: {
     backgroundColor: '#F97316',
     borderRadius: 10,
