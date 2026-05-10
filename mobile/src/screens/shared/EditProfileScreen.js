@@ -233,7 +233,7 @@ const EditProfileScreen = ({ route, navigation }) => {
   };
 
   const filteredSkills = allSkills.filter((s) =>
-    (s.name || '').toLowerCase().includes(skillSearch.toLowerCase())
+    (s.skillName || '').toLowerCase().includes(skillSearch.toLowerCase())
   );
 
   return (
@@ -300,7 +300,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
         <View style={styles.skillsRow}>
           {skills.map((ps) => {
-            const name = ps.skillId?.name || ps.skillName || 'Skill';
+            const name = ps.skillId?.skillName || ps.skillName || 'Skill';
             return (
               <View key={ps._id} style={styles.skillChip}>
                 <Text style={styles.skillChipText}>
@@ -507,7 +507,7 @@ const EditProfileScreen = ({ route, navigation }) => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {pendingSkill ? `Proficiency: ${pendingSkill.name}` : 'Select Skill'}
+                {pendingSkill ? `Proficiency: ${pendingSkill.skillName}` : 'Select Skill'}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -551,7 +551,7 @@ const EditProfileScreen = ({ route, navigation }) => {
                             already && { color: '#9CA3AF' },
                           ]}
                         >
-                          {item.name}
+                          {item.skillName}
                           {already ? ' (added)' : ''}
                         </Text>
                         {!already && (

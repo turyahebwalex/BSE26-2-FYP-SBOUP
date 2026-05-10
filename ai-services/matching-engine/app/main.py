@@ -224,15 +224,17 @@ def _build_feature_row(worker_skills, opp_skills, worker_ctx, opp_doc):
     )
 
     return {
+        # ── Gate feature — must match feature_list.json order ──
+        'skill_relevance_gate':         int(cosine_sim > 0.0 or skill_category_overlap > 0),
         'skill_overlap_count':          overlap_count,
         'skill_gap_count':              gap_count,
         'skill_overlap_ratio':          round(overlap_count / n_req, 4),
         'cosine_similarity':            round(cosine_sim, 4),
+        'skill_category_overlap':       skill_category_overlap,
+        'worker_category_match_ratio':  worker_category_match_ratio,
         'location_match':               location_match,
         'salary_fit':                   salary_fit,
         'exp_fit':                      exp_fit,
-        'skill_category_overlap':       skill_category_overlap,
-        'worker_category_match_ratio':  worker_category_match_ratio,
         'worker_n_skills':              worker_ctx['n_skills'],
         'worker_total_exp_months':      worker_ctx['total_exp_months'],
         'worker_profile_completeness':  worker_ctx['profile_completeness'],

@@ -11,8 +11,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { opportunityAPI } from '../../services/api';
+import { opportunityAPI, matchingAPI } from '../../services/api';
 import OpportunityCard from '../../components/OpportunityCard';
+import ChatbotWidget from '../../components/ChatbotWidget';
 
 const CATEGORIES = [
   { key: 'all', label: 'All' },
@@ -34,15 +35,36 @@ const DiscoverScreen = ({ navigation }) => {
     try {
       setError(null);
       const params = {};
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim();
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (selectedCategory !== 'all') params.category = selectedCategory;
+
+      // Fetch opportunities and match scores in parallel
+      const [oppsRes, recsRes] = await Promise.allSettled([
+        opportunityAPI.getAll(params),
+        matchingAPI.getRecommendations(),
+      ]);
+
+      const list = oppsRes.status === 'fulfilled'
+        ? (oppsRes.value.data.opportunities || oppsRes.value.data.data || oppsRes.value.data || [])
+        : [];
+
+      // Build a score map from recommendations: opportunityId → matchScore
+      const scoreMap = {};
+      if (recsRes.status === 'fulfilled') {
+        const recs = recsRes.value.data.recommendations || recsRes.value.data.matches || recsRes.value.data || [];
+        recs.forEach((r) => {
+          const id = String(r.opportunityId || r._id || '');
+          if (id) scoreMap[id] = typeof r.matchScore === 'number' ? r.matchScore : 0;
+        });
       }
-      if (selectedCategory !== 'all') {
-        params.category = selectedCategory;
-      }
-      const { data } = await opportunityAPI.getAll(params);
-      const list = data.opportunities || data.data || data || [];
-      setOpportunities(Array.isArray(list) ? list : []);
+
+      // Merge scores into each opportunity
+      const enriched = (Array.isArray(list) ? list : []).map((opp) => ({
+        ...opp,
+        matchScore: scoreMap[String(opp._id || opp.id)] ?? opp.matchScore ?? 0,
+      }));
+
+      setOpportunities(enriched);
     } catch (err) {
       setError('Failed to load opportunities. Pull to refresh.');
       setOpportunities([]);
@@ -143,58 +165,70 @@ const DiscoverScreen = ({ navigation }) => {
 
   if (loading && !refreshing) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <View style={styles.header}>
-          <Text style={styles.screenTitle}>Discover</Text>
-        </View>
-        {renderHeader()}
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#F97316" />
-        </View>
-      </SafeAreaView>
+      <View style={styles.screenWrapper}>
+        <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+          <View style={styles.header}>
+            <Text style={styles.screenTitle}>Discover</Text>
+          </View>
+          {renderHeader()}
+          <View style={styles.center}>
+            <ActivityIndicator size="large" color="#F97316" />
+          </View>
+        </SafeAreaView>
+        <ChatbotWidget />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Text style={styles.screenTitle}>Discover</Text>
-      </View>
-
-      {error && (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
-          <Text style={styles.errorText}>{error}</Text>
+    <View style={styles.screenWrapper}>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+        <View style={styles.header}>
+          <Text style={styles.screenTitle}>Discover</Text>
         </View>
-      )}
 
-      <FlatList
-        data={opportunities}
-        keyExtractor={(item) => item._id || item.id || Math.random().toString()}
-        renderItem={({ item }) => (
-          <OpportunityCard
-            opportunity={item}
-            onPress={() =>
-              navigation.navigate('OpportunityDetail', {
-                opportunityId: item._id || item.id,
-                opportunity: item,
-              })
-            }
-          />
+        {error && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
         )}
-        ListHeaderComponent={renderHeader}
-        ListEmptyComponent={renderEmpty}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} />
-        }
-      />
-    </SafeAreaView>
+
+        <FlatList
+          data={opportunities}
+          keyExtractor={(item) => item._id || item.id || Math.random().toString()}
+          renderItem={({ item }) => (
+            <OpportunityCard
+              opportunity={item}
+              onPress={() =>
+                navigation.navigate('OpportunityDetail', {
+                  opportunityId: item._id || item.id,
+                  opportunity: item,
+                  matchScore: item.matchScore ?? 0,
+                })
+              }
+            />
+          )}
+          ListHeaderComponent={renderHeader}
+          ListEmptyComponent={renderEmpty}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} />
+          }
+        />
+      </SafeAreaView>
+
+      {/* Kazi chatbot — floats over the screen */}
+      <ChatbotWidget />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  screenWrapper: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',

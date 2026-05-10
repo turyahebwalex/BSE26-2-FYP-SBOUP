@@ -1,14 +1,13 @@
 """
-SBOUP Chatbot Microservice — Kazi (RAG + Gemini)
-Replaces the previous pattern-matching chatbot with an intelligent,
-context-aware assistant powered by RAG and Google Gemini.
+SBOUP Chatbot Microservice — Kazi (RAG + Groq)
+Intelligent assistant powered by RAG and Groq's hosted LLM API.
 
 Pipeline per request:
   1. Retrieve relevant knowledge chunks from ChromaDB (RAG)
   2. Fetch user's real profile data from MongoDB (personalisation)
   3. Load conversation history from MongoDB (memory)
   4. Build system prompt with all context injected
-  5. Call Gemini 2.0 Flash for a natural language response
+  5. POST to Groq /openai/v1/chat/completions for a natural language response
   6. Save the turn to conversation history
   7. Return response + suggested actions to the client
 """
@@ -38,10 +37,13 @@ CHROMA_DIR       = os.path.join(BASE_DIR, "chroma_db")
 KNOWLEDGE_DIR    = os.path.join(BASE_DIR, "knowledge")
 COLLECTION_NAME  = "sboup_knowledge"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-GEMINI_MODEL     = "gemini-2.0-flash"
-MONGODB_URI      = os.getenv("MONGODB_URI", "mongodb://localhost:27017/sboup_dev")
-GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
-DB_NAME          = MONGODB_URI.split("/")[-1].split("?")[0]
+# ── Groq config — edit GROQ_MODEL here or in .env to switch models ────────────
+GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL    = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
+# ─────────────────────────────────────────────────────────────────────────────
+MONGODB_URI   = os.getenv("MONGODB_URI", "mongodb://mongodb:27017/sboup_dev")
+DB_NAME       = MONGODB_URI.split("/")[-1].split("?")[0]
 
 # Proficiency weights (mirrors matching engine)
 PROFICIENCY_WEIGHT = {
@@ -53,13 +55,13 @@ PROFICIENCY_WEIGHT = {
 _embed_model   = None
 _chroma_col    = None
 _mongo_db      = None
-_gemini_model  = None
+_groq_ready    = False   # True once GROQ_API_KEY is confirmed present
 _components_loaded = False
 
 
 def _load_components():
     """Load all components once on first request."""
-    global _embed_model, _chroma_col, _mongo_db, _gemini_model, _components_loaded
+    global _embed_model, _chroma_col, _mongo_db, _groq_ready, _components_loaded
     if _components_loaded:
         return
 
@@ -84,24 +86,12 @@ def _load_components():
     except Exception as e:
         logger.warning(f"MongoDB unavailable: {e}")
 
-    # 3. Gemini
-    if GEMINI_API_KEY and GEMINI_API_KEY not in ("your-gemini-api-key-here", ""):
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
-            _gemini_model = genai.GenerativeModel(
-                model_name=GEMINI_MODEL,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=600,
-                    temperature=0.4,
-                    top_p=0.9,
-                ),
-            )
-            logger.info(f"Gemini ready: {GEMINI_MODEL}")
-        except Exception as e:
-            logger.warning(f"Gemini unavailable: {e}")
+    # 3. Groq — just verify the API key is set (no network call needed at startup)
+    if GROQ_API_KEY and GROQ_API_KEY not in ("your-groq-api-key-here", ""):
+        _groq_ready = True
+        logger.info(f"Groq ready — model: {GROQ_MODEL}")
     else:
-        logger.warning("GEMINI_API_KEY not set — running in fallback mode")
+        logger.warning("GROQ_API_KEY not set — running in fallback mode")
 
     _components_loaded = True
 
@@ -291,20 +281,14 @@ match scores, generate CVs, and upskill.
 
 Rules:
 - Always be warm, encouraging, and professional.
-- If you don't know something, say so honestly — never make up facts.
 - Keep responses concise: 2–4 sentences for simple questions, more for complex ones.
 - When a worker has a low match score, explain why and suggest specific improvements.
 - When a worker's profile is incomplete, tell them exactly what section to add.
-- Never make up job opportunities, salary figures, or skill recommendations \
-that are not grounded in the user's actual data.
 - Respond in the same language the user writes in.
 - Do not answer questions unrelated to work, jobs, skills, or the SBOUP platform.
 
-Platform context:
-- Compensation is in UGX (Ugandan Shillings).
-- Job categories: formal, contract, freelance, apprenticeship.
-- Profile completeness: title (15%), bio (10%), location (10%), \
-skills (25%), experience (25%), portfolio (15%).
+Platform context: Compensation in UGX. \
+Job types: formal, contract, freelance, apprenticeship.
 
 --- USER CONTEXT ---
 {user_context}
@@ -316,24 +300,44 @@ skills (25%), experience (25%), portfolio (15%).
 
 # ── LLM call ──────────────────────────────────────────────────────────────────
 
-def _call_gemini(system_prompt: str, history: list, message: str) -> str:
-    if _gemini_model is None:
+def _call_groq(system_prompt: str, history: list, message: str) -> str:
+    """
+    POST to Groq's OpenAI-compatible chat endpoint and return the reply.
+
+    Endpoint : POST https://api.groq.com/openai/v1/chat/completions
+    Auth     : Bearer token from GROQ_API_KEY
+    Messages : [{"role": "system"|"user"|"assistant", "content": str}, ...]
+    """
+    if not _groq_ready:
         return _fallback(message)
+
     try:
-        contents = [
-            {"role": "user",  "parts": [system_prompt]},
-            {"role": "model", "parts": ["Understood. I'm Kazi, ready to help."]},
-        ]
+        import requests as _req
+
+        # Build the messages array — same format as OpenAI
+        messages = [{"role": "system", "content": system_prompt}]
         for msg in history:
-            contents.append({
-                "role":  "model" if msg["role"] == "assistant" else "user",
-                "parts": [msg["content"]],
-            })
-        contents.append({"role": "user", "parts": [message]})
-        response = _gemini_model.generate_content(contents)
-        return response.text.strip()
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": message})
+
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type":  "application/json",
+        }
+        payload = {
+            "model":       GROQ_MODEL,
+            "messages":    messages,
+            "temperature": 0.4,
+            "max_tokens":  500,
+        }
+
+        resp = _req.post(GROQ_API_URL, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
     except Exception as e:
-        logger.error(f"Gemini error: {e}")
+        logger.error(f"Groq error: {e}")
         return _fallback(message)
 
 
@@ -419,7 +423,7 @@ def process_query():
             knowledge_context=knowledge_context or "No relevant knowledge found.",
         )
 
-        response_text = _call_gemini(system_prompt, history, query)
+        response_text = _call_groq(system_prompt, history, query)
 
         if user_id and response_text:
             _save_turn(user_id, query, response_text)
@@ -431,7 +435,7 @@ def process_query():
             'response':         response_text,
             'intent':           None,
             'suggestedActions': _suggested_actions(query, user_role),
-            'fallback':         (_gemini_model is None),
+            'fallback':         (not _groq_ready),
             'latency_ms':       latency_ms,
         })
 
@@ -469,9 +473,9 @@ def health():
         'status':  'ok',
         'service': 'chatbot-service',
         'components': {
-            'rag':          'ready' if _chroma_col else 'not loaded',
-            'llm':          'ready' if _gemini_model else 'fallback mode',
-            'mongodb':      'connected' if _mongo_db else 'offline',
+            'rag':     'ready' if _chroma_col else 'not loaded',
+            'llm':     f'ready ({GROQ_MODEL})' if _groq_ready else 'fallback mode',
+            'mongodb': 'connected' if _mongo_db else 'offline',
         },
     })
 

@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8081
 
-CMD ["npx", "expo", "start", "--lan"]
+CMD ["npx", "expo", "start", "--lan", "--clear"]

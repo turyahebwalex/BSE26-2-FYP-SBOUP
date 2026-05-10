@@ -30,7 +30,7 @@ const BASE_URL = resolveBaseUrl();
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000,
+  timeout: 300000,  // 5 minutes — needed for local Ollama on CPU
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -199,6 +199,11 @@ export const companyAPI = {
 // ── Report ──
 export const reportAPI = {
   create: (data) => api.post('/reports', data),
+};
+
+// ── Chatbot ──
+export const chatbotAPI = {
+  query: (data) => api.post('/chatbot/query', data),
 };
 
 export default api;

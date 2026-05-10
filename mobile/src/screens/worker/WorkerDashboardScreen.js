@@ -34,7 +34,15 @@ const WorkerDashboardScreen = ({ navigation }) => {
 
       if (recsRes.status === 'fulfilled') {
         const data = recsRes.value.data;
-        setRecommendations(data.recommendations || data.matches || data || []);
+        const all = data.recommendations || data.matches || data || [];
+        // Only show opportunities where the worker has a real match (score > 0)
+        const matched = Array.isArray(all)
+          ? all.filter((r) => {
+              const score = r.matchScore ?? r.score ?? (r.opportunity || r).matchScore ?? 0;
+              return score > 0;
+            })
+          : [];
+        setRecommendations(matched);
       }
       if (appsRes.status === 'fulfilled') {
         const data = appsRes.value.data;

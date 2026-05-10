@@ -131,7 +131,7 @@ const ProfileScreen = ({ navigation }) => {
                 <View style={styles.card}>
                   {skills.map((ps, index) => {
                     const skillName =
-                      ps.skillId?.name || ps.skillName || 'Skill';
+                      ps.skillId?.skillName || ps.skillName || 'Skill';
                     const proficiency = ps.proficiencyLevel || '';
                     const years = ps.numberOfYears;
                     return (
