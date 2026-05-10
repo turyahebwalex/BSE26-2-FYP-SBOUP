@@ -1,8 +1,17 @@
 """Environment configuration loaded once at process start."""
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+# python-dotenv is installed inside the Docker image (see requirements.txt) but
+# not in any host venv, so the import must degrade gracefully when the module
+# is imported on the host (tests, IDE language servers, ad-hoc scripts). In
+# Docker compose the env vars come from the `environment:` block anyway, so a
+# missing .env loader is a no-op there too.
+try:
+    from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
+
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def _get(name: str, default: str = "") -> str:
