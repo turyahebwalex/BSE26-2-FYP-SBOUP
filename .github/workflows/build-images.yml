@@ -8,12 +8,14 @@ name: Build and push images to GHCR
 on:
   push:
     branches: [main]
+    # Only re-build when the two services I own change. Other services
+    # (server, client, mobile, matching, fraud, chatbot) are owned by
+    # teammates — they publish their own images from their own
+    # workflows, so building them here would just stamp my namespace
+    # with someone else's stale code.
     paths:
-      - 'server/**'
-      - 'client/**'
-      - 'ai-services/**'
-      - 'mobile/**'
-      - 'docker-compose.yml'
+      - 'ai-services/cv-generation/**'
+      - 'ai-services/learning-engine/**'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
 
@@ -27,22 +29,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - service: server
-            context: ./server
-          - service: client
-            context: ./client
           - service: cv
             context: ./ai-services/cv-generation
-          - service: matching
-            context: ./ai-services/matching-engine
-          - service: fraud
-            context: ./ai-services/fraud-detection
           - service: learning
             context: ./ai-services/learning-engine
-          - service: chatbot
-            context: ./ai-services/chatbot-service
-          - service: mobile
-            context: ./mobile
     steps:
       - uses: actions/checkout@v4
 

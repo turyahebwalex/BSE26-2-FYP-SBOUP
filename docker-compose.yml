@@ -24,7 +24,6 @@ services:
 
   # ─── Application Services Layer ───
   server:
-    image: ghcr.io/turyahebwalex/sboup-server:latest
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -60,7 +59,6 @@ services:
 
   # ─── Presentation Layer ───
   client:
-    image: ghcr.io/turyahebwalex/sboup-client:latest
     build:
       context: ./client
       dockerfile: Dockerfile
@@ -80,7 +78,6 @@ services:
 
   # ─── Intelligence Layer ───
   matching-engine:
-    image: ghcr.io/turyahebwalex/sboup-matching:latest
     build:
       context: ./ai-services/matching-engine
       dockerfile: Dockerfile
@@ -97,7 +94,6 @@ services:
       - sboup-network
 
   fraud-detection:
-    image: ghcr.io/turyahebwalex/sboup-fraud:latest
     build:
       context: ./ai-services/fraud-detection
       dockerfile: Dockerfile
@@ -163,7 +159,6 @@ services:
       - sboup-network
 
   chatbot-service:
-    image: ghcr.io/turyahebwalex/sboup-chatbot:latest
     build:
       context: ./ai-services/chatbot-service
       dockerfile: Dockerfile
@@ -181,7 +176,6 @@ services:
 
   # ─── Mobile App (Expo Dev Server) ───
   mobile:
-    image: ghcr.io/turyahebwalex/sboup-mobile:latest
     build:
       context: ./mobile
       dockerfile: Dockerfile
