@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { opportunityAPI, matchingAPI } from '../../services/api';
+import { opportunityAPI, matchingAPI, profileAPI } from '../../services/api';
 import OpportunityCard from '../../components/OpportunityCard';
 import ChatbotWidget from '../../components/ChatbotWidget';
 
@@ -30,6 +30,14 @@ const DiscoverScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [profileId, setProfileId] = useState(null);
+
+  // Fetch the worker's profileId once on mount
+  useEffect(() => {
+    profileAPI.getMyProfile()
+      .then(({ data }) => setProfileId(data.profile?._id || null))
+      .catch(() => setProfileId(null));
+  }, []);
 
   const fetchOpportunities = useCallback(async () => {
     try {
@@ -38,33 +46,36 @@ const DiscoverScreen = ({ navigation }) => {
       if (searchQuery.trim()) params.search = searchQuery.trim();
       if (selectedCategory !== 'all') params.category = selectedCategory;
 
-      // Fetch opportunities and match scores in parallel
-      const [oppsRes, recsRes] = await Promise.allSettled([
-        opportunityAPI.getAll(params),
-        matchingAPI.getRecommendations(),
-      ]);
+      const { data } = await opportunityAPI.getAll(params);
+      const list = data.opportunities || data.data || data || [];
+      const opps = Array.isArray(list) ? list : [];
 
-      const list = oppsRes.status === 'fulfilled'
-        ? (oppsRes.value.data.opportunities || oppsRes.value.data.data || oppsRes.value.data || [])
-        : [];
+      // Fetch match scores in parallel if we have a profileId
+      if (profileId && opps.length > 0) {
+        const scoreResults = await Promise.allSettled(
+          opps.map((opp) =>
+            matchingAPI.getMatchScore(profileId, opp._id || opp.id)
+              .then((r) => ({ id: opp._id || opp.id, score: r.data?.matchScore ?? 0 }))
+              .catch(() => ({ id: opp._id || opp.id, score: 0 }))
+          )
+        );
 
-      // Build a score map from recommendations: opportunityId → matchScore
-      const scoreMap = {};
-      if (recsRes.status === 'fulfilled') {
-        const recs = recsRes.value.data.recommendations || recsRes.value.data.matches || recsRes.value.data || [];
-        recs.forEach((r) => {
-          const id = String(r.opportunityId || r._id || '');
-          if (id) scoreMap[id] = typeof r.matchScore === 'number' ? r.matchScore : 0;
+        const scoreMap = {};
+        scoreResults.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            scoreMap[result.value.id] = result.value.score;
+          }
         });
+
+        setOpportunities(
+          opps.map((opp) => ({
+            ...opp,
+            matchScore: scoreMap[opp._id || opp.id] ?? 0,
+          }))
+        );
+      } else {
+        setOpportunities(opps);
       }
-
-      // Merge scores into each opportunity
-      const enriched = (Array.isArray(list) ? list : []).map((opp) => ({
-        ...opp,
-        matchScore: scoreMap[String(opp._id || opp.id)] ?? opp.matchScore ?? 0,
-      }));
-
-      setOpportunities(enriched);
     } catch (err) {
       setError('Failed to load opportunities. Pull to refresh.');
       setOpportunities([]);
@@ -72,7 +83,7 @@ const DiscoverScreen = ({ navigation }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, profileId]);
 
   useEffect(() => {
     fetchOpportunities();

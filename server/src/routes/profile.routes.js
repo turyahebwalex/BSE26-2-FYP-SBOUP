@@ -24,7 +24,8 @@ router.delete('/education/:eduId', authenticate, ctrl.deleteEducation);
 // Preferences
 router.put('/preferences', authenticate, ctrl.updatePreference);
 
-// Avatar
-router.put('/avatar', authenticate, ctrl.updateAvatar);
+// Portfolio
+router.post('/portfolio', authenticate, ctrl.addPortfolioItem);
+router.delete('/portfolio/:itemId', authenticate, ctrl.removePortfolioItem);
 
 module.exports = router;

@@ -9,10 +9,18 @@ A complete guide for contributors to clone, set up, run, and contribute to the *
 After cloning the repo, this is everything you need to bring up the entire stack (web, mobile, backend, AI services, database):
 
 ```bash
-bash scripts/setup.sh && docker compose up --build
+bash scripts/setup.sh && bash scripts/dev.sh
 ```
 
-`scripts/setup.sh` creates any missing `.env` files, installs Node deps, and seeds the database with the shared demo accounts. `docker compose up --build` then builds and starts all 10 services. Scan the QR code printed by the `sboup-mobile` container with Expo Go on your phone to launch the mobile app.
+`scripts/setup.sh` creates any missing `.env` files, installs Node deps, and seeds the database with the shared demo accounts (run once after cloning, idempotent). `scripts/dev.sh` then prompts for mobile mode (Wi-Fi QR / USB / skip), auto-detects your LAN IP for CV PDF URLs, brings up the Docker stack, and launches Expo on the host so the QR code is reachable from your phone.
+
+**Working on a slow or throttled network?** Add `--pull` to fetch pre-built images for the heavy AI services from GHCR instead of building them locally:
+
+```bash
+bash scripts/dev.sh --pull
+```
+
+See [section 7](#7-pre-built-images-on-ghcr) for what's published and why.
 
 Demo logins (same on every collaborator's machine):
 
@@ -32,13 +40,14 @@ Demo logins (same on every collaborator's machine):
 4. [Architecture Overview](#4-architecture-overview)
 5. [Environment Configuration](#5-environment-configuration)
 6. [Running with Docker (Recommended)](#6-running-with-docker-recommended)
-7. [How Docker Guarantees Correct Versions for All Contributors & CI/CD](#7-how-docker-guarantees-correct-versions-for-all-contributors--cicd)
-8. [Running the Mobile App (Expo Go on Physical Device)](#8-running-the-mobile-app-expo-go-on-physical-device)
-9. [Running Without Docker (Manual Setup)](#9-running-without-docker-manual-setup)
-10. [Verifying Everything Works](#10-verifying-everything-works)
-11. [Contributing — Git Workflow](#11-contributing--git-workflow)
-12. [Common Issues & Troubleshooting](#12-common-issues--troubleshooting)
-13. [Ports Summary](#13-ports-summary)
+7. [Pre-Built Images on GHCR (for slow networks / weak laptops)](#7-pre-built-images-on-ghcr)
+8. [How Docker Guarantees Correct Versions for All Contributors & CI/CD](#8-how-docker-guarantees-correct-versions-for-all-contributors--cicd)
+9. [Running the Mobile App (Expo Go on Physical Device)](#9-running-the-mobile-app-expo-go-on-physical-device)
+10. [Running Without Docker (Manual Setup)](#10-running-without-docker-manual-setup)
+11. [Verifying Everything Works](#11-verifying-everything-works)
+12. [Contributing — Git Workflow](#12-contributing--git-workflow)
+13. [Common Issues & Troubleshooting](#13-common-issues--troubleshooting)
+14. [Ports Summary](#14-ports-summary)
 
 ---
 
@@ -260,28 +269,42 @@ See the full `.env.example` file for all available variables. You will need to c
 From the project root, after a fresh clone:
 
 ```bash
-bash scripts/setup.sh && docker compose up --build
+bash scripts/setup.sh && bash scripts/dev.sh
 ```
 
-That's the full setup. The two halves do this:
+That's the full setup:
 
-1. **`bash scripts/setup.sh`** — bootstraps the workspace (creates any missing `.env` files, installs Node deps for `server`/`client`/`mobile`, and seeds Mongo with the shared demo accounts). Idempotent — re-running it is safe.
-2. **`docker compose up --build`** — pulls MongoDB 7 and Redis 7, builds containers for server, client, all 5 AI services, and mobile, installs all Node and Python dependencies **inside the containers**, and starts every service with the correct environment variables and networking.
+1. **`bash scripts/setup.sh`** — bootstraps the workspace (creates any missing `.env` files, installs Node deps for `server`/`client`/`mobile`, and seeds Mongo with the shared demo accounts). Idempotent — re-running is safe; only needed after a fresh clone or after dependencies change.
+2. **`bash scripts/dev.sh`** — interactive launcher. Prompts for **mobile mode** (Wi-Fi / USB / skip), auto-detects your LAN IP and exports `CV_PUBLIC_BASE_URL` so generated CV PDFs render on the phone, brings up the Docker stack detached, and starts Expo on the host. `Ctrl+C` tears the stack down cleanly via the script's exit trap.
 
-On subsequent runs you usually only need `docker compose up` (no `--build`, no setup script) unless dependencies or Dockerfiles changed.
+On subsequent runs you usually only need `bash scripts/dev.sh` — no rebuild, no setup script.
 
-### Start specific services only
+### `dev.sh` flags
+
+| Flag | When to use |
+|------|------|
+| *(none)* | Day-to-day. Uses cached images. Fast. |
+| `--pull` | Fetch the latest pre-built images for `cv-generation` and `learning-engine` from GHCR before starting. **Strongly recommended on slow / throttled networks** — see [section 7](#7-pre-built-images-on-ghcr). |
+| `--build` | Force a local rebuild. Use after editing a `Dockerfile` or `requirements.txt` you own. |
+
+Equivalent env vars: `BUILD=1` and `PULL=1`.
+
+### Start specific services only (without dev.sh)
+
+If you want backend-only without the mobile picker:
 
 ```bash
-# Backend + database only (no AI services or frontend)
-docker compose up --build mongodb redis server
+# Backend + database only
+docker compose up -d mongodb redis server
 
-# Backend + web client (most common for web development)
-docker compose up --build mongodb redis server client
+# Backend + web client
+docker compose up -d mongodb redis server client
 
-# Everything except mobile
-docker compose up --build mongodb redis server client matching-engine fraud-detection cv-generation learning-engine chatbot-service
+# Everything except mobile (which is started via Expo on the host)
+docker compose up -d --scale mobile=0
 ```
+
+Pass `--build` to any of these if you've edited a Dockerfile.
 
 ### Stop services
 
@@ -293,21 +316,95 @@ docker compose down
 docker compose down -v
 ```
 
+If you started via `dev.sh`, just press `Ctrl+C` in that terminal — the script's exit trap runs `docker compose down` for you.
+
 ### Rebuild after dependency changes
 
-If someone updates a `package.json`, `requirements.txt`, or `Dockerfile`:
+If you've edited a `package.json`, `requirements.txt`, or `Dockerfile`:
 
 ```bash
-docker compose build --no-cache <service-name>
-docker compose up <service-name>
+# For everything in the stack
+bash scripts/dev.sh --build
 
-# Or rebuild everything
-docker compose up --build
+# For one service only
+docker compose build --no-cache <service-name>
+docker compose up -d <service-name>
 ```
+
+If the change is to `cv-generation` or `learning-engine` and you push it to `main`, GitHub Actions will rebuild and push a fresh image to GHCR automatically — your teammates pull rather than rebuilding.
 
 ---
 
-## 7. How Docker Guarantees Correct Versions for All Contributors & CI/CD
+## 7. Pre-Built Images on GHCR
+
+The two heaviest AI services in this repo — `cv-generation` and `learning-engine` — pull large dependencies (PyTorch CPU wheel + multi-GB HuggingFace model weights). On throttled networks (campus / MikroTik / hotel / mobile-tethered) those builds can take **45 minutes to several hours** and frequently time out mid-stream.
+
+To skip that pain, the repo ships a GitHub Actions workflow ([.github/workflows/build-images.yml](../.github/workflows/build-images.yml)) that builds these two services on GitHub's runners (fast, reliable network) and pushes the resulting images to **GitHub Container Registry (GHCR)**. Collaborators pull the finished images instead of building.
+
+### Published images
+
+| Service | Image | Visibility |
+|---------|-------|------------|
+| `cv-generation` | `ghcr.io/turyahebwalex/sboup-cv:latest` | Public |
+| `learning-engine` | `ghcr.io/turyahebwalex/sboup-learning:latest` | Public |
+
+Public visibility means **no `docker login` is required to pull** — anyone on a clean Docker install can fetch them.
+
+### Why only these two
+
+Each AI service is owned by a specific teammate:
+
+| Service | Owner | Published from this repo? |
+|---------|-------|---------------------------|
+| `cv-generation`, `learning-engine` | Alex | ✅ Yes |
+| `matching-engine`, `chatbot-service` | Allan | No (Allan publishes from his own workflow) |
+| `fraud-detection` | Rebecca / Vanessa | No |
+
+The shared shell (`server`, `client`, `mobile`) builds quickly enough on any laptop that pre-publishing isn't worth the CI time. They build locally from source.
+
+### Pulling pre-built images
+
+```bash
+bash scripts/dev.sh --pull
+```
+
+`dev.sh` runs `docker compose pull --ignore-pull-failures` first — successful pulls overwrite the local cache, failed ones (e.g. you're offline) silently fall back to whatever's already cached. Then the stack starts.
+
+To pull manually (without dev.sh):
+
+```bash
+docker compose pull cv-generation learning-engine
+docker compose up -d
+```
+
+### How re-builds reach you
+
+When Alex pushes a change under `ai-services/cv-generation/` or `ai-services/learning-engine/` to `main`, the workflow rebuilds and pushes new `:latest` images. The next time you run `bash scripts/dev.sh --pull`, you receive them. No notification — just always pull when you `git pull`.
+
+To check what version of the cv image you have locally:
+
+```bash
+docker image inspect ghcr.io/turyahebwalex/sboup-cv:latest --format '{{.Created}} {{index .RepoDigests 0}}'
+```
+
+### Image-tag strategy in `docker-compose.yml`
+
+Services Alex publishes have **both** `image:` and `build:` fields:
+
+```yaml
+cv-generation:
+  image: ghcr.io/turyahebwalex/sboup-cv:latest    # ← pulled when --pull
+  build:
+    context: ./ai-services/cv-generation          # ← built when --build
+```
+
+This lets the same compose file drive both flows: `--pull` fetches the registry image, `--build` rebuilds from source and tags the local image with the same name. A vanilla `docker compose up` reuses whichever copy is already cached.
+
+Services Alex doesn't publish (server, client, mobile, matching, fraud, chatbot) have only `build:` — Compose builds them locally and never tries to pull from GHCR.
+
+---
+
+## 8. How Docker Guarantees Correct Versions for All Contributors & CI/CD
 
 > **This is the key advantage of our Docker setup.** Every collaborator and CI/CD pipeline gets identical, reproducible environments automatically — no "works on my machine" issues.
 
@@ -411,63 +508,71 @@ No `nvm use`, no `pip install`, no version matrix — Docker provides the comple
 
 ---
 
-## 8. Running the Mobile App (Expo Go on Physical Device)
+## 9. Running the Mobile App (Expo Go on Physical Device)
 
-The mobile app runs as an **Expo development server inside Docker** and serves a QR code you scan with the Expo Go app on your phone.
+`scripts/dev.sh` handles all of this — it brings up the Docker stack and starts Expo on the host (not inside Docker) so the QR code is reachable from your phone over your real LAN. The in-Docker `mobile` service still exists for collaborators who don't want Node locally, but it's excluded by default in `dev.sh`.
 
 ### Prerequisites
 
-- Your phone and computer must be on the **same WiFi network**
-- Install **Expo Go** on your phone from [Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent) or [App Store](https://apps.apple.com/app/expo-go/id982107779)
+- **Expo Go** installed on your phone from [Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent) or [App Store](https://apps.apple.com/app/expo-go/id982107779)
+- For Wi-Fi mode: phone and laptop on the **same Wi-Fi network**
+- For USB mode: `adb` installed (`sudo apt install adb` on Ubuntu) and phone in **Developer Options → USB debugging** mode
 
-### Start the mobile container
+### Three modes
 
-```bash
-# Start backend + mobile (mobile depends on the backend API)
-docker compose up --build mongodb redis server mobile
+When you run `bash scripts/dev.sh` it asks:
+
+```
+How would you like to run the mobile app?
+  1) Wi-Fi  — scan QR in Expo Go (phone + laptop on the same Wi-Fi)
+  2) USB    — phone plugged in with USB debugging on (faster reload)
+  3) Skip   — only run backend + web client
 ```
 
-### What happens inside the container
+| Mode | When to pick it |
+|------|-----------------|
+| **1. Wi-Fi** | Default. Both devices on the same Wi-Fi, the network allows device-to-device traffic. Prints a QR you scan in Expo Go. |
+| **2. USB** | Restrictive Wi-Fi (campus / hotel / corporate with client isolation), or you want faster live reloads. `adb reverse` tunnels Metro and the API over the USB cable. Press **`a`** in the Expo menu to launch the app. |
+| **3. Skip** | You're only working on the web client or backend — no mobile build. |
 
-1. Docker builds a `node:20-alpine` container
-2. `npm install` installs Expo SDK 54, React Native 0.79, `@expo/ngrok`, and all dependencies
-3. `npx expo start --tunnel` starts the Expo dev server with an ngrok tunnel so the phone reaches Metro even on networks with AP isolation
-4. The container runs with `network_mode: host`, sharing your computer's network interfaces
-5. A **QR code** appears in the terminal output
+### How the backend URL resolves
 
-### Scan the QR code
-
-1. Open **Expo Go** on your phone
-2. Scan the QR code displayed in the terminal
-3. The app will download the JavaScript bundle and launch on your phone
-
-### How the backend URL is resolved
-
-You normally don't set anything. [`mobile/src/services/api.js`](../mobile/src/services/api.js) auto-detects the backend host from Metro's address, so any collaborator on the same Wi-Fi as their phone just runs the one command and logs in.
+You normally don't set anything. [`mobile/src/services/api.js`](../mobile/src/services/api.js) auto-detects the backend host from Metro's address. Collaborators on the same Wi-Fi as their phone just run `bash scripts/dev.sh` and log in.
 
 The override variable is only for special cases:
 
-| Variable | Set in | Purpose |
-|----------|--------|---------|
-| `EXPO_PUBLIC_API_URL` | shell or `docker-compose.yml` | Forces a specific API URL — needed when the laptop and phone are **not** on the same network (e.g. you're tunnelling the backend over the internet for a remote teammate). Leave empty otherwise. |
+| Variable | Purpose |
+|----------|---------|
+| `EXPO_PUBLIC_API_URL` | Forces a specific API URL — needed when the laptop and phone are **not** on the same network (e.g. you're tunnelling the backend over the internet for a remote teammate). Leave empty otherwise. |
 
 Example for a remote collaborator using a public backend tunnel:
 
 ```bash
-EXPO_PUBLIC_API_URL=https://my-backend.loca.lt/api docker compose up -d mobile
+EXPO_PUBLIC_API_URL=https://my-backend.loca.lt/api bash scripts/dev.sh
+```
+
+### How CV PDF URLs resolve
+
+The `cv-generation` service embeds `PUBLIC_BASE_URL` into every PDF URL it returns. If left at the default `localhost`, the mobile client opens the URL in Google Drive's PDF viewer and Drive can't fetch `http://localhost` from the phone — the user sees "Cannot display PDF".
+
+`scripts/dev.sh` resolves your laptop's LAN IP via `ip route get` and exports `CV_PUBLIC_BASE_URL=http://<lan-ip>:5003` automatically before bringing up the stack. Skipped on USB mode (where `adb reverse` already remaps localhost on the phone). To override manually:
+
+```bash
+export CV_PUBLIC_BASE_URL=http://<your-lan-ip-or-tunnel>:5003
+docker compose up -d cv-generation
 ```
 
 ### Why `network_mode: host`?
 
-Expo in LAN mode needs to advertise the host machine's real IP address so your phone can connect. A bridged Docker network would isolate the container, making the QR code point to an unreachable internal IP. `network_mode: host` lets the Expo server use the host's network interfaces directly.
+Several services (`server`, `cv-generation`, `mobile`) use `network_mode: host` because (a) Expo in LAN mode must advertise the host's real IP so the phone can connect, and (b) Docker's default bridge subnet is sometimes blocked outright on restrictive Wi-Fi (campus / corporate). Host networking sidesteps both issues.
 
 ---
 
-## 9. Running Without Docker (Manual Setup)
+## 10. Running Without Docker (Manual Setup)
 
 > **Note:** Docker is the recommended approach. Manual setup requires installing and managing all dependencies yourself.
 
-### 9.1 Start MongoDB
+### 10.1 Start MongoDB
 
 ```bash
 # If installed locally
@@ -477,7 +582,7 @@ sudo systemctl start mongod
 docker run -d -p 27017:27017 --name sboup-mongo mongo:7
 ```
 
-### 9.2 Start Redis
+### 10.2 Start Redis
 
 ```bash
 # If installed locally
@@ -487,7 +592,7 @@ sudo systemctl start redis-server
 docker run -d -p 6379:6379 --name sboup-redis redis:7-alpine
 ```
 
-### 9.3 Start the Backend Server
+### 10.3 Start the Backend Server
 
 ```bash
 cd server
@@ -503,7 +608,7 @@ To seed the database with initial data:
 npm run seed
 ```
 
-### 9.4 Start the Web Client
+### 10.4 Start the Web Client
 
 In a **new terminal**:
 
@@ -515,7 +620,7 @@ npm start
 
 The web app will open at **http://localhost:3000**.
 
-### 9.5 Start AI Services (optional)
+### 10.5 Start AI Services (optional)
 
 Each AI service runs independently. In a **new terminal** for each:
 
@@ -531,7 +636,7 @@ python run.py
 
 Repeat for: `fraud-detection`, `cv-generation`, `learning-engine`, `chatbot-service`.
 
-### 9.6 Start the Mobile App (without Docker)
+### 10.6 Start the Mobile App (without Docker)
 
 ```bash
 cd mobile
@@ -545,7 +650,7 @@ npx expo start
 
 ---
 
-## 10. Verifying Everything Works
+## 11. Verifying Everything Works
 
 ### Backend health check
 
@@ -600,9 +705,9 @@ sboup-mobile      Up
 
 ---
 
-## 11. Contributing — Git Workflow
+## 12. Contributing — Git Workflow
 
-### 11.1 Create a Feature Branch
+### 12.1 Create a Feature Branch
 
 Always work on a branch — never commit directly to `main`:
 
@@ -621,7 +726,7 @@ git checkout -b feature/your-feature-name
 | `refactor/` | Code improvements | `refactor/auth-middleware` |
 | `docs/` | Documentation only | `docs/update-readme` |
 
-### 11.2 Make Your Changes
+### 12.2 Make Your Changes
 
 Edit code, then stage and commit:
 
@@ -637,19 +742,24 @@ git commit -m "Add: description of what you did"
 - `Refactor:` — code restructuring
 - `Docs:` — documentation only
 
-### 11.3 After Changing Dependencies
+### 12.3 After Changing Dependencies
 
 If you modify `package.json`, `requirements.txt`, or a `Dockerfile`, **always rebuild the affected container** to verify it works before committing:
 
 ```bash
-# Rebuild and test the specific service
+# Rebuild the whole stack
+bash scripts/dev.sh --build
+
+# Or just one service
 docker compose build --no-cache <service-name>
-docker compose up <service-name>
+docker compose up -d <service-name>
 ```
 
 This ensures your teammates and CI/CD will also be able to build successfully.
 
-### 11.4 Keep Your Branch Up to Date
+**For `cv-generation` and `learning-engine` only:** after your change is merged to `main`, the GitHub Actions workflow ([.github/workflows/build-images.yml](../.github/workflows/build-images.yml)) rebuilds and pushes a new `:latest` image to GHCR within 2–4 minutes (cached) or 10–15 minutes (cold cache). Teammates pick it up via `bash scripts/dev.sh --pull` on their next run.
+
+### 12.4 Keep Your Branch Up to Date
 
 Before pushing, sync with the latest main:
 
@@ -669,13 +779,13 @@ git add .
 git rebase --continue
 ```
 
-### 11.5 Push Your Branch
+### 12.5 Push Your Branch
 
 ```bash
 git push -u origin feature/your-feature-name
 ```
 
-### 11.6 Open a Pull Request
+### 12.6 Open a Pull Request
 
 1. Go to the repository on GitHub
 2. Click **"Compare & pull request"** (or **New Pull Request**)
@@ -683,7 +793,7 @@ git push -u origin feature/your-feature-name
 4. Write a clear title and description of your changes
 5. Submit the PR
 
-### 11.7 After Your PR is Merged
+### 12.7 After Your PR is Merged
 
 ```bash
 git checkout main
@@ -693,7 +803,30 @@ git branch -d feature/your-feature-name    # delete the local branch
 
 ---
 
-## 12. Common Issues & Troubleshooting
+## 13. Common Issues & Troubleshooting
+
+### Docker: `pip install` times out building cv-generation or learning-engine
+
+The torch wheel and HuggingFace model weights are multi-hundred-MB downloads that throttled networks (campus / MikroTik / hotel Wi-Fi) cannot sustain. Skip the build entirely and pull the pre-built image instead:
+
+```bash
+bash scripts/dev.sh --pull
+```
+
+This fetches `ghcr.io/turyahebwalex/sboup-{cv,learning}:latest` (built on GitHub's runners) and uses them in place of a local build. See [section 7](#7-pre-built-images-on-ghcr).
+
+If you absolutely need to build locally (e.g. you're modifying the Dockerfile), retry the build — pip downloads survive across retries thanks to the BuildKit cache mount and the shell-level retry loop in `ai-services/cv-generation/Dockerfile`. Total retry attempts: 5.
+
+### Generated CV PDF says "Cannot display PDF" on the phone
+
+The PDF URL embeds whatever host the cv-generation service thinks it's reachable at. Default is `localhost`, which Drive's PDF viewer can't fetch from the phone. `dev.sh` auto-detects your LAN IP and exports `CV_PUBLIC_BASE_URL`. If detection failed (you'd see a warning at startup), set it manually:
+
+```bash
+export CV_PUBLIC_BASE_URL=http://<your-laptop-LAN-IP>:5003
+docker compose up -d cv-generation        # recreates with new env var
+```
+
+Find your LAN IP with `ip route get 1.1.1.1` (Linux) or `ipconfig getifaddr en0` (macOS).
 
 ### Docker: `npm install` hangs or fails with DNS errors
 
@@ -808,7 +941,7 @@ Ensure `CLIENT_URL=http://localhost:3000` is set (already configured in `docker-
 
 ---
 
-## 13. Ports Summary
+## 14. Ports Summary
 
 | Service | Port | Container Name |
 |---------|------|----------------|

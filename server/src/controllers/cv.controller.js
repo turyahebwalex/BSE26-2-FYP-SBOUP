@@ -10,25 +10,35 @@ exports.generateCV = async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found. Create a profile first.' });
 
     const result = await mlService.generateCV({
+      userId: req.user._id,
       profileId: profile._id,
       templateType,
       opportunityId,
       selectedData,
+      description,
     });
 
     if (!result.ok) {
       return res.status(503).json({ error: 'CV generation service unavailable.' });
     }
 
+    // Python service is stateless; we own the DB write. Reuse the cvId it
+    // returned as our UserCV._id so the file URL (which embeds the same id)
+    // and the DB record stay aligned.
+    const data = result.data?.data || result.data || {};
+    if (!data.fileUrl) {
+      return res.status(502).json({ error: 'CV generation returned no file URL.' });
+    }
     const cv = await UserCV.create({
+      ...(data.cvId ? { _id: data.cvId } : {}),
       userId: req.user._id,
       profileId: profile._id,
       opportunityId: opportunityId || null,
       templateType: templateType || 'chronological',
-      cvFieldTarget: result.data.cvFieldTarget || selectedData || {},
+      cvFieldTarget: data.cvFieldTarget || selectedData || {},
       description: description || '',
-      fileUrl: result.data.fileUrl,
-      fileFormat: result.data.fileFormat || 'pdf',
+      fileUrl: data.fileUrl,
+      fileFormat: data.fileFormat || 'pdf',
     });
 
     res.status(201).json({ cv });

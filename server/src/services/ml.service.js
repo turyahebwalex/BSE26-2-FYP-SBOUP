@@ -74,12 +74,15 @@ const detectFraud = (opportunity) =>
   });
 
 // ─── CV Generation ───────────────────────────────────────────────
-const generateCV = ({ profileId, templateType, opportunityId, selectedData }) =>
+const generateCV = ({ userId, profileId, templateType, opportunityId, selectedData, description, targetField }) =>
   tryPost(`${process.env.CV_GENERATION_SERVICE_URL}/api/cv/generate`, {
+    userId: userId ? String(userId) : undefined,
     profileId: String(profileId),
     templateType,
     opportunityId: opportunityId ? String(opportunityId) : null,
     selectedData: selectedData || {},
+    description: description || '',
+    targetField: targetField || '',
   });
 
 // ─── Learning Engine ─────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,20 +17,50 @@ import { profileAPI, skillAPI } from '../../services/api';
 
 const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced', 'expert'];
 const EXPERIENCE_CATEGORIES = ['formal', 'contract', 'freelance', 'apprenticeship', 'community'];
+const WORK_STYLES = ['collaborative', 'independent', 'flexible'];
+const REMOTE_PREFS = ['high', 'medium', 'low'];
+const LEARNING_PREFS = ['high', 'medium', 'low'];
+const TRAIT_LEVELS = ['low', 'medium', 'high'];
+const PERSONALITY_TRAITS = [
+  'creativity',
+  'openness',
+  'agreeableness',
+  'dependability',
+  'resilience',
+];
 
 const EditProfileScreen = ({ route, navigation }) => {
-  const existingProfile = route.params?.profile || null;
+  const initialProfile = route.params?.profile || null;
   const existingSkills = route.params?.skills || [];
   const existingExperiences = route.params?.experiences || [];
   const existingEducation = route.params?.education || [];
+  const existingPreference = route.params?.preference || null;
+  const existingPortfolio = initialProfile?.portfolioItems || [];
 
-  const [title, setTitle] = useState(existingProfile?.title || '');
-  const [bio, setBio] = useState(existingProfile?.bio || '');
-  const [location, setLocation] = useState(existingProfile?.location || '');
+  // Stateful so that the first add-* call (which lazily creates the profile
+  // via ensureProfile) updates this and subsequent calls don't re-create it.
+  const [existingProfile, setExistingProfile] = useState(initialProfile);
+  const [title, setTitle] = useState(initialProfile?.title || '');
+  const [bio, setBio] = useState(initialProfile?.bio || '');
+  const [location, setLocation] = useState(initialProfile?.location || '');
   const [skills, setSkills] = useState(existingSkills);
   const [experiences, setExperiences] = useState(existingExperiences);
   const [education, setEducation] = useState(existingEducation);
+  const [portfolio, setPortfolio] = useState(existingPortfolio);
   const [saving, setSaving] = useState(false);
+
+  // Preferences
+  const [workStyle, setWorkStyle] = useState(existingPreference?.workStyle || '');
+  const [remotePref, setRemotePref] = useState(existingPreference?.remotePreference || '');
+  const [learningPref, setLearningPref] = useState(existingPreference?.learningWillingness || '');
+
+  // Personality traits — stored as { trait: string, level: string }[]
+  const [traitLevels, setTraitLevels] = useState(() => {
+    const existing = existingPreference?.personalityTraits || [];
+    const map = {};
+    existing.forEach((t) => { map[t.trait] = t.level; });
+    return map; // e.g. { conscientiousness: 'high', openness: 'medium' }
+  });
 
   // Skill picker modal
   const [allSkills, setAllSkills] = useState([]);
@@ -38,6 +68,33 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [skillSearch, setSkillSearch] = useState('');
   const [pendingSkill, setPendingSkill] = useState(null);
   const [pendingProficiency, setPendingProficiency] = useState('intermediate');
+  // Which input method the user chose: null (chooser), 'ai', 'browse', 'custom'
+  const [skillMethod, setSkillMethod] = useState(null);
+
+  const openSkillModal = () => {
+    setSkillMethod(null);
+    setSkillSearch('');
+    setCustomInput('');
+    setPendingSkill(null);
+    setShowSkillModal(true);
+  };
+
+  const closeSkillModal = () => {
+    setShowSkillModal(false);
+    setPendingSkill(null);
+    setSkillMethod(null);
+  };
+
+  // AI skill suggestions — driven by the FULL profile context (title, bio,
+  // location, experiences, education, and the skills already added). The
+  // server uses each of these to widen its matching pool and to exclude
+  // skills the user already has.
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+
+  // Manual custom-skill entry (3rd input method, alongside AI + database list).
+  const [customInput, setCustomInput] = useState('');
+  const [customAdding, setCustomAdding] = useState(false);
 
   // Experience form
   const [showExpForm, setShowExpForm] = useState(false);
@@ -56,6 +113,12 @@ const EditProfileScreen = ({ route, navigation }) => {
   const [eduStartYear, setEduStartYear] = useState('');
   const [eduEndYear, setEduEndYear] = useState('');
 
+  // Portfolio form
+  const [showPortfolioForm, setShowPortfolioForm] = useState(false);
+  const [portTitle, setPortTitle] = useState('');
+  const [portDescription, setPortDescription] = useState('');
+  const [portUrl, setPortUrl] = useState('');
+
   useEffect(() => {
     fetchSkills();
   }, []);
@@ -70,6 +133,100 @@ const EditProfileScreen = ({ route, navigation }) => {
     }
   };
 
+  // Snapshot of profile context sent to the AI suggester. Memoized so the
+  // effect below doesn't fire on every parent re-render — only when the
+  // underlying skills/experience/education arrays actually change content.
+  const profileContext = useMemo(
+    () => ({
+      existingSkills: skills
+        .map((ps) => ps.skillId?.skillName || ps.skillId?.name || ps.skillName)
+        .filter(Boolean),
+      experiences: experiences.map((e) => ({
+        jobTitle: e.jobTitle || '',
+        company: e.companyName || '',
+        description: e.description || '',
+      })),
+      education: education.map((e) => ({
+        qualification: e.qualification || '',
+        fieldOfStudy: e.fieldOfStudy || '',
+      })),
+    }),
+    [skills, experiences, education]
+  );
+
+  // Stable string fingerprint of the context so useEffect can depend on it
+  // without spuriously re-firing on identical content.
+  const contextSignature = useMemo(
+    () =>
+      JSON.stringify({
+        s: [...profileContext.existingSkills].sort(),
+        e: profileContext.experiences
+          .map((x) => `${x.jobTitle}|${x.company}|${x.description}`)
+          .sort(),
+        ed: profileContext.education
+          .map((x) => `${x.qualification}|${x.fieldOfStudy}`)
+          .sort(),
+      }),
+    [profileContext]
+  );
+
+  // Debounced AI suggestions. Fires when there is enough signal anywhere in
+  // the profile — title+bio OR at least one experience/education entry — so
+  // a worker who lists past jobs but no bio still gets ideas.
+  useEffect(() => {
+    const t = title.trim();
+    const b = bio.trim();
+    const loc = location.trim();
+    const hasTitleBio = t.length >= 3 && b.length >= 10;
+    const hasOtherContext =
+      profileContext.experiences.length > 0 ||
+      profileContext.education.length > 0 ||
+      profileContext.existingSkills.length > 0;
+
+    if (!hasTitleBio && !hasOtherContext) {
+      setSuggestions([]);
+      return;
+    }
+
+    let alive = true;
+    setSuggestLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await skillAPI.suggest({
+          title: t,
+          description: b,
+          location: loc,
+          existingSkills: profileContext.existingSkills,
+          experiences: profileContext.experiences,
+          education: profileContext.education,
+        });
+        if (!alive) return;
+        const list = data.suggestions || [];
+        setSuggestions(list);
+        // Merge any newly-created external skills into allSkills so they also
+        // appear in the database catalog below.
+        setAllSkills((prev) => {
+          const existing = new Set(prev.map((s) => String(s._id)));
+          const merged = [...prev];
+          for (const s of list) {
+            if (!existing.has(String(s._id))) {
+              merged.push({ _id: s._id, skillName: s.name });
+            }
+          }
+          return merged;
+        });
+      } catch {
+        if (alive) setSuggestions([]);
+      } finally {
+        if (alive) setSuggestLoading(false);
+      }
+    }, 450);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [title, bio, location, contextSignature]);
+
   const ensureProfile = async () => {
     if (existingProfile?._id) return existingProfile;
     if (!title.trim()) {
@@ -82,7 +239,9 @@ const EditProfileScreen = ({ route, navigation }) => {
       location: location.trim(),
       visibility: 'public',
     });
-    return data.profile || data;
+    const created = data.profile || data;
+    setExistingProfile(created);
+    return created;
   };
 
   const handleSaveProfile = async () => {
@@ -99,11 +258,25 @@ const EditProfileScreen = ({ route, navigation }) => {
           location: location.trim(),
         });
       } else {
-        await profileAPI.createProfile({
+        const { data } = await profileAPI.createProfile({
           title: title.trim(),
           bio: bio.trim(),
           location: location.trim(),
           visibility: 'public',
+        });
+        setExistingProfile(data.profile || data);
+      }
+      // Save preferences if any are set
+      if (workStyle || remotePref || learningPref) {
+        const personalityTraits = PERSONALITY_TRAITS
+          .filter((t) => traitLevels[t])
+          .map((t) => ({ trait: t, level: traitLevels[t] }));
+
+        await profileAPI.updatePreferences({
+          workStyle:           workStyle || undefined,
+          remotePreference:    remotePref || undefined,
+          learningWillingness: learningPref || undefined,
+          personalityTraits:   personalityTraits.length > 0 ? personalityTraits : undefined,
         });
       }
       Alert.alert('Saved', 'Profile saved.');
@@ -139,6 +312,37 @@ const EditProfileScreen = ({ route, navigation }) => {
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to add skill.';
       Alert.alert('Error', msg);
+    }
+  };
+
+  const addCustomSkill = async () => {
+    const name = customInput.trim();
+    if (!name) return;
+    // Already in catalog (case-insensitive) → just open the proficiency picker.
+    const existing = allSkills.find(
+      (s) => (s.skillName || s.name || '').toLowerCase() === name.toLowerCase()
+    );
+    if (existing) {
+      openSkillPicker({
+        _id: existing._id,
+        skillName: existing.skillName || existing.name,
+      });
+      setCustomInput('');
+      return;
+    }
+    setCustomAdding(true);
+    try {
+      const { data } = await skillAPI.addCustom(name);
+      const skill = data.skill;
+      setAllSkills((prev) =>
+        prev.some((s) => String(s._id) === String(skill._id)) ? prev : [...prev, skill]
+      );
+      openSkillPicker(skill);
+      setCustomInput('');
+    } catch (err) {
+      Alert.alert('Error', err.response?.data?.error || 'Failed to add skill.');
+    } finally {
+      setCustomAdding(false);
     }
   };
 
@@ -232,8 +436,45 @@ const EditProfileScreen = ({ route, navigation }) => {
     }
   };
 
-  const filteredSkills = allSkills.filter((s) =>
-    (s.skillName || '').toLowerCase().includes(skillSearch.toLowerCase())
+  const addPortfolioItem = async () => {
+    if (!portTitle.trim()) {
+      Alert.alert('Error', 'Project title is required.');
+      return;
+    }
+    try {
+      const profile = await ensureProfile();
+      if (!profile) return;
+      const { data } = await profileAPI.addPortfolioItem({
+        title: portTitle.trim(),
+        description: portDescription.trim(),
+        fileUrl: portUrl.trim(),
+        fileType: portUrl.trim() ? 'link' : '',
+      });
+      setPortfolio((prev) => [...prev, data.portfolioItem || data]);
+      setPortTitle('');
+      setPortDescription('');
+      setPortUrl('');
+      setShowPortfolioForm(false);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to add portfolio item.';
+      Alert.alert('Error', msg);
+    }
+  };
+
+  const removePortfolioItem = async (item) => {
+    try {
+      await profileAPI.removePortfolioItem(item._id);
+      setPortfolio((prev) => prev.filter((p) => p._id !== item._id));
+    } catch {
+      Alert.alert('Error', 'Failed to remove portfolio item.');
+    }
+  };
+
+  const suggestionIds = new Set(suggestions.map((s) => String(s._id)));
+  const filteredSkills = allSkills.filter(
+    (s) =>
+      (s.skillName || s.name || '').toLowerCase().includes(skillSearch.toLowerCase()) &&
+      !suggestionIds.has(String(s._id))
   );
 
   return (
@@ -267,7 +508,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Bio</Text>
+          <Text style={styles.label}>Bio <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder="Tell us about yourself..."
@@ -281,7 +522,7 @@ const EditProfileScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>Location <Text style={styles.optional}>(optional)</Text></Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Kampala, Uganda"
@@ -291,32 +532,8 @@ const EditProfileScreen = ({ route, navigation }) => {
           />
         </View>
 
-        {/* Skills */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.label}>Skills</Text>
-          <TouchableOpacity onPress={() => setShowSkillModal(true)}>
-            <Text style={styles.addLink}>+ Add Skill</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.skillsRow}>
-          {skills.map((ps) => {
-            const name = ps.skillId?.skillName || ps.skillName || 'Skill';
-            return (
-              <View key={ps._id} style={styles.skillChip}>
-                <Text style={styles.skillChipText}>
-                  {name} · {ps.proficiencyLevel || 'intermediate'}
-                </Text>
-                <TouchableOpacity onPress={() => removeSkill(ps)}>
-                  <Ionicons name="close" size={14} color="#EA580C" />
-                </TouchableOpacity>
-              </View>
-            );
-          })}
-          {skills.length === 0 && <Text style={styles.emptyHint}>No skills added yet.</Text>}
-        </View>
-
         {/* Experience */}
-        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+        <View style={styles.sectionHeader}>
           <Text style={styles.label}>Experience</Text>
           <TouchableOpacity onPress={() => setShowExpForm(true)}>
             <Text style={styles.addLink}>+ Add</Text>
@@ -487,6 +704,197 @@ const EditProfileScreen = ({ route, navigation }) => {
           </View>
         )}
 
+        {/* Portfolio */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>
+            Portfolio <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <TouchableOpacity onPress={() => setShowPortfolioForm(true)}>
+            <Text style={styles.addLink}>+ Add Project</Text>
+          </TouchableOpacity>
+        </View>
+
+        {portfolio.map((item, index) => (
+          <View key={item._id || index} style={styles.entryCard}>
+            <View style={styles.entryInfo}>
+              <Text style={styles.entryTitle}>{item.title}</Text>
+              {item.description ? (
+                <Text style={styles.entrySubtitle} numberOfLines={2}>{item.description}</Text>
+              ) : null}
+              {item.fileUrl ? (
+                <Text style={styles.entryDates} numberOfLines={1}>🔗 {item.fileUrl}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity onPress={() => removePortfolioItem(item)}>
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+
+        {showPortfolioForm && (
+          <View style={styles.addForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Project / Work Title *"
+              placeholderTextColor="#9CA3AF"
+              value={portTitle}
+              onChangeText={setPortTitle}
+            />
+            <TextInput
+              style={[styles.input, styles.textArea, { marginTop: 8 }]}
+              placeholder="Description (what you built, your role, outcome)"
+              placeholderTextColor="#9CA3AF"
+              value={portDescription}
+              onChangeText={setPortDescription}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+            <TextInput
+              style={[styles.input, { marginTop: 8 }]}
+              placeholder="Link to work (URL, GitHub, Drive, etc.) — optional"
+              placeholderTextColor="#9CA3AF"
+              value={portUrl}
+              onChangeText={setPortUrl}
+              autoCapitalize="none"
+              keyboardType="url"
+            />
+            <View style={styles.formActions}>
+              <TouchableOpacity onPress={() => setShowPortfolioForm(false)}>
+                <Text style={styles.cancelLink}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addButton} onPress={addPortfolioItem}>
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Preferences */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>Work Preferences</Text>
+        </View>
+
+        <View style={styles.prefCard}>
+          <Text style={styles.prefLabel}>Work Style <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {WORK_STYLES.map((style) => (
+              <TouchableOpacity
+                key={style}
+                style={[styles.optionChip, workStyle === style && styles.optionChipActive]}
+                onPress={() => setWorkStyle(style)}
+              >
+                <Text style={[styles.optionText, workStyle === style && styles.optionTextActive]}>
+                  {style}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Remote Work Preference <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {REMOTE_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, remotePref === pref && styles.optionChipActive]}
+                onPress={() => setRemotePref(pref)}
+              >
+                <Text style={[styles.optionText, remotePref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.prefLabel, { marginTop: 12 }]}>Learning Willingness <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={styles.chipRow}>
+            {LEARNING_PREFS.map((pref) => (
+              <TouchableOpacity
+                key={pref}
+                style={[styles.optionChip, learningPref === pref && styles.optionChipActive]}
+                onPress={() => setLearningPref(pref)}
+              >
+                <Text style={[styles.optionText, learningPref === pref && styles.optionTextActive]}>
+                  {pref}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Personality Traits */}
+          <Text style={[styles.prefLabel, { marginTop: 16 }]}>
+            Personality Traits <Text style={styles.optional}>(optional)</Text>
+          </Text>
+          <Text style={styles.prefHint}>
+            Select a level for each trait that describes you. Used for CV generation and opportunity matching.
+          </Text>
+          {PERSONALITY_TRAITS.map((trait) => (
+            <View key={trait} style={styles.traitRow}>
+              <Text style={styles.traitName}>{trait}</Text>
+              <View style={styles.traitChips}>
+                {TRAIT_LEVELS.map((level) => (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.traitChip,
+                      traitLevels[trait] === level && styles.traitChipActive,
+                    ]}
+                    onPress={() =>
+                      setTraitLevels((prev) => ({
+                        ...prev,
+                        [trait]: prev[trait] === level ? '' : level,
+                      }))
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.traitChipText,
+                        traitLevels[trait] === level && styles.traitChipTextActive,
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* Skills — placed last so the AI suggester sees the fully-filled
+            profile (title, bio, location, experience, education, preferences)
+            and can produce accurate suggestions instead of thin/vague ones. */}
+        <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+          <Text style={styles.label}>Skills</Text>
+          <TouchableOpacity onPress={openSkillModal}>
+            <Text style={styles.addLink}>+ Add</Text>
+          </TouchableOpacity>
+        </View>
+
+        {skills.length === 0 ? (
+          <Text style={[styles.emptyHint, { marginBottom: 8 }]}>
+            No skills added yet. Tap + Add to pick from AI suggestions, the catalog, or type your own.
+          </Text>
+        ) : (
+          <View style={styles.skillsRow}>
+            {skills.map((ps) => {
+              const skillName =
+                ps.skillId?.skillName || ps.skillId?.name || ps.skillName || 'Skill';
+              return (
+                <View key={ps._id} style={styles.skillChip}>
+                  <Text style={styles.skillChipText}>
+                    {skillName}
+                    {ps.proficiencyLevel ? ` · ${ps.proficiencyLevel}` : ''}
+                  </Text>
+                  <TouchableOpacity onPress={() => removeSkill(ps)}>
+                    <Ionicons name="close" size={14} color="#EA580C" />
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* Save Profile (basic fields) */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.buttonDisabled]}
@@ -506,20 +914,141 @@ const EditProfileScreen = ({ route, navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {pendingSkill ? `Proficiency: ${pendingSkill.skillName}` : 'Select Skill'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowSkillModal(false);
-                  setPendingSkill(null);
-                }}
-              >
+              <View style={styles.modalHeaderLeft}>
+                {!pendingSkill && skillMethod && (
+                  <TouchableOpacity
+                    onPress={() => setSkillMethod(null)}
+                    style={styles.modalBackBtn}
+                  >
+                    <Ionicons name="chevron-back" size={22} color="#1F2937" />
+                  </TouchableOpacity>
+                )}
+                <Text style={styles.modalTitle}>
+                  {pendingSkill
+                    ? `Proficiency: ${pendingSkill.skillName || pendingSkill.name}`
+                    : skillMethod === 'ai'
+                    ? 'AI Suggested'
+                    : skillMethod === 'browse'
+                    ? 'Browse Skills'
+                    : skillMethod === 'custom'
+                    ? 'Add Custom Skill'
+                    : 'Add a Skill'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={closeSkillModal}>
                 <Ionicons name="close" size={24} color="#1F2937" />
               </TouchableOpacity>
             </View>
 
-            {!pendingSkill ? (
+            {!pendingSkill && skillMethod === null && (
+              <View style={styles.methodChooser}>
+                <Text style={styles.methodIntro}>
+                  Choose how you'd like to add a skill. You can come back here to try a different way.
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.methodCard}
+                  onPress={() => setSkillMethod('ai')}
+                >
+                  <View style={[styles.methodIcon, { backgroundColor: '#FFF7ED' }]}>
+                    <Ionicons name="flash" size={20} color="#F97316" />
+                  </View>
+                  <View style={styles.methodTextBlock}>
+                    <Text style={styles.methodTitle}>AI Suggested</Text>
+                    <Text style={styles.methodSubtitle}>
+                      Get skill ideas based on your title and bio.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.methodCard}
+                  onPress={() => setSkillMethod('browse')}
+                >
+                  <View style={[styles.methodIcon, { backgroundColor: '#EFF6FF' }]}>
+                    <Ionicons name="search" size={20} color="#2563EB" />
+                  </View>
+                  <View style={styles.methodTextBlock}>
+                    <Text style={styles.methodTitle}>Search Skills</Text>
+                    <Text style={styles.methodSubtitle}>
+                      Browse and pick from the existing skills catalog.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.methodCard}
+                  onPress={() => setSkillMethod('custom')}
+                >
+                  <View style={[styles.methodIcon, { backgroundColor: '#F0FDF4' }]}>
+                    <Ionicons name="create-outline" size={20} color="#16A34A" />
+                  </View>
+                  <View style={styles.methodTextBlock}>
+                    <Text style={styles.methodTitle}>Add a Custom Skill</Text>
+                    <Text style={styles.methodSubtitle}>
+                      Type a skill that isn't in the catalog yet.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {!pendingSkill && skillMethod === 'ai' && (
+              <View style={styles.aiPanel}>
+                <View style={styles.aiHeaderRow}>
+                  <Text style={styles.aiHeaderText}>AI SUGGESTED</Text>
+                  {suggestLoading && (
+                    <Text style={styles.aiThinking}>Thinking…</Text>
+                  )}
+                </View>
+                {suggestions.length > 0 ? (
+                  <View style={styles.aiPillsRow}>
+                    {suggestions.map((s) => {
+                      const already = skills.some(
+                        (ps) => (ps.skillId?._id || ps.skillId) === s._id
+                      );
+                      return (
+                        <TouchableOpacity
+                          key={s._id}
+                          disabled={already}
+                          onPress={() =>
+                            openSkillPicker({ _id: s._id, skillName: s.name })
+                          }
+                          style={[styles.aiPill, already && styles.aiPillActive]}
+                        >
+                          <Ionicons
+                            name="flash"
+                            size={11}
+                            color={already ? '#FFFFFF' : '#F97316'}
+                            style={{ marginRight: 4 }}
+                          />
+                          <Text
+                            style={[
+                              styles.aiPillText,
+                              already && styles.aiPillTextActive,
+                            ]}
+                          >
+                            {s.name}
+                            {already ? ' ✓' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  !suggestLoading && (
+                    <Text style={styles.aiEmptyText}>
+                      No suggestions yet — add a Professional Title and Bio, or fill in at least one Experience or Education entry, and ideas will appear here.
+                    </Text>
+                  )
+                )}
+              </View>
+            )}
+
+            {!pendingSkill && skillMethod === 'browse' && (
               <>
                 <View style={styles.modalSearch}>
                   <Ionicons name="search-outline" size={16} color="#9CA3AF" />
@@ -533,6 +1062,7 @@ const EditProfileScreen = ({ route, navigation }) => {
                 </View>
 
                 <FlatList
+                  style={{ flex: 1 }}
                   data={filteredSkills}
                   keyExtractor={(item) => item._id || item.id}
                   renderItem={({ item }) => {
@@ -551,7 +1081,7 @@ const EditProfileScreen = ({ route, navigation }) => {
                             already && { color: '#9CA3AF' },
                           ]}
                         >
-                          {item.skillName}
+                          {item.skillName || item.name}
                           {already ? ' (added)' : ''}
                         </Text>
                         {!already && (
@@ -565,7 +1095,43 @@ const EditProfileScreen = ({ route, navigation }) => {
                   }
                 />
               </>
-            ) : (
+            )}
+
+            {!pendingSkill && skillMethod === 'custom' && (
+              <View style={styles.customSkillBlock}>
+                <Text style={styles.customSkillLabel}>ADD A CUSTOM SKILL</Text>
+                <View style={styles.customSkillRow}>
+                  <TextInput
+                    style={styles.customSkillInput}
+                    placeholder="e.g. Boda boda dispatching"
+                    placeholderTextColor="#9CA3AF"
+                    value={customInput}
+                    onChangeText={setCustomInput}
+                    onSubmitEditing={addCustomSkill}
+                    returnKeyType="done"
+                    autoFocus
+                  />
+                  <TouchableOpacity
+                    onPress={addCustomSkill}
+                    disabled={customAdding || !customInput.trim()}
+                    style={[
+                      styles.customSkillBtn,
+                      (customAdding || !customInput.trim()) &&
+                        styles.customSkillBtnDisabled,
+                    ]}
+                  >
+                    <Text style={styles.customSkillBtnText}>
+                      {customAdding ? 'Adding…' : '+ Add'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.aiEmptyText}>
+                  If a matching skill already exists in the catalog, we'll use that one instead of creating a duplicate.
+                </Text>
+              </View>
+            )}
+
+            {pendingSkill && (
               <View style={{ padding: 20 }}>
                 <Text style={[styles.label, { marginBottom: 12 }]}>
                   Choose your proficiency level
@@ -670,6 +1236,49 @@ const styles = StyleSheet.create({
   },
   skillChipText: { fontSize: 13, color: '#EA580C', fontWeight: '500' },
   emptyHint: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+  prefCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  prefLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  prefHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 8, lineHeight: 16 },
+  optional: { fontSize: 12, fontWeight: '400', color: '#9CA3AF' },
+  traitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9FAFB',
+  },
+  traitName: {
+    fontSize: 13,
+    color: '#374151',
+    textTransform: 'capitalize',
+    flex: 1,
+  },
+  traitChips: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  traitChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  traitChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  traitChipText: { fontSize: 11, color: '#6B7280' },
+  traitChipTextActive: { color: '#F97316', fontWeight: '600' },
   entryCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -762,7 +1371,48 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modalBackBtn: {
+    marginRight: 6,
+    marginLeft: -6,
+    padding: 2,
+  },
   modalTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
+  methodChooser: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 10,
+  },
+  methodIntro: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  methodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+  },
+  methodIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  methodTextBlock: { flex: 1 },
+  methodTitle: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
+  methodSubtitle: { fontSize: 12, color: '#6B7280', marginTop: 2, lineHeight: 16 },
   modalSearch: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -796,6 +1446,80 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     fontSize: 14,
   },
+  aiPanel: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  aiHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  aiHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#EA580C',
+    letterSpacing: 0.5,
+  },
+  aiThinking: { fontSize: 11, color: '#9CA3AF' },
+  aiPillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  aiPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  aiPillActive: {
+    backgroundColor: '#F97316',
+    borderColor: '#F97316',
+  },
+  aiPillText: { fontSize: 12, color: '#EA580C', fontWeight: '500' },
+  aiPillTextActive: { color: '#FFFFFF' },
+  aiEmptyText: { fontSize: 11, color: '#9CA3AF' },
+  customSkillBlock: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  customSkillLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6B7280',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  customSkillRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  customSkillInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#1F2937',
+    backgroundColor: '#FFFFFF',
+  },
+  customSkillBtn: {
+    backgroundColor: '#F97316',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  customSkillBtnDisabled: { opacity: 0.5 },
+  customSkillBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 });
 
 export default EditProfileScreen;

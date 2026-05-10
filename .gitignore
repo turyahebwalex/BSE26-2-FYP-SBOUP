@@ -45,3 +45,6 @@ ai-services/*/models/*.h5
 # Uploads
 uploads/
 temp/
+
+# Expo (local dev cache)
+.expo/
