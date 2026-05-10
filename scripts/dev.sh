@@ -51,7 +51,31 @@ if [[ "$choice" == "2" ]]; then
   fi
 fi
 
-# 3. Start the Docker stack detached so the terminal is free for Expo.
+# 3. Resolve the laptop's LAN IP and pin CV_PUBLIC_BASE_URL to it.
+#
+# The cv-generation service embeds PUBLIC_BASE_URL into every PDF URL it
+# returns. If left at the default `localhost`, the mobile client opens
+# the URL in Google Drive's PDF viewer and Drive can't fetch
+# http://localhost from the phone — "Cannot display PDF". Pinning this
+# to the actual LAN IP fixes the viewer and direct downloads.
+#
+# Skipped for choice 2 (USB) because adb reverse already maps
+# 127.0.0.1 on the phone to the laptop's localhost.
+if [[ "$choice" != "2" ]] && [[ -z "${CV_PUBLIC_BASE_URL:-}" ]]; then
+  # `ip route get` returns the source IP used to reach the public
+  # internet — i.e., whichever LAN/wifi interface is the default route.
+  # Avoids the docker0 / bridge IPs that `hostname -I` would mix in.
+  LAN_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)"
+  if [[ -n "$LAN_IP" ]]; then
+    export CV_PUBLIC_BASE_URL="http://${LAN_IP}:5003"
+    log "Auto-detected LAN IP ${LAN_IP}; CV PDFs will use ${CV_PUBLIC_BASE_URL}"
+  else
+    warn "Could not detect LAN IP — generated CV PDFs may fail to open on the phone."
+    warn "Set CV_PUBLIC_BASE_URL=http://<your-lan-ip>:5003 manually if so."
+  fi
+fi
+
+# 4. Start the Docker stack detached so the terminal is free for Expo.
 #
 # The compose file ships a `mobile` service that boots Expo on host port
 # 8081 — useful for collaborators who don't want Node locally, but it
