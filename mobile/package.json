@@ -5,7 +5,10 @@
   "scripts": {
     "start": "expo start",
     "start:lan": "expo start --lan --clear",
+    "start:wifi": "expo start --lan --clear --go",
     "start:tunnel": "expo start --tunnel --clear",
+    "start:usb": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:5000 tcp:5000 && EXPO_PUBLIC_API_URL=http://127.0.0.1:5000/api expo start --localhost --go",
+    "start:usb:clean": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:5000 tcp:5000 && EXPO_PUBLIC_API_URL=http://127.0.0.1:5000/api expo start --localhost --clear --go",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
