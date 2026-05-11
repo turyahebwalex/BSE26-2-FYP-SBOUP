@@ -48,3 +48,4 @@ temp/
 
 # Expo (local dev cache)
 .expo/
+docker-compose.override.yml
