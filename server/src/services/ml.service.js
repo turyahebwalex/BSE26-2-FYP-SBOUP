@@ -89,8 +89,31 @@ const generateCV = ({ userId, profileId, templateType, opportunityId, selectedDa
 const generateLearningPath = ({ userId, targetSkill, opportunityId }) =>
   tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/generate`, {
     userId: String(userId),
-    targetSkill,
-    opportunityId: opportunityId ? String(opportunityId) : null,
+    targetSkill: targetSkill || undefined,
+    opportunityId: opportunityId ? String(opportunityId) : undefined,
+  });
+
+const analyseSkillGaps = ({ profileId, opportunityId }) =>
+  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/skill-gaps`, {
+    profileId: String(profileId),
+    opportunityId: String(opportunityId),
+  });
+
+const getDashboardFit = ({ userId }) =>
+  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/dashboard-fit`, {
+    userId: String(userId),
+  });
+
+// Best-effort: failure here does not block the local LearningPath update.
+// The matching-engine reads profileskills fresh on every score call, so
+// any successful upsert here closes the SDD §3.2.5 feedback loop on the
+// next match request.
+const markLearningProgress = ({ userId, learningPathId, resourceUrl, isCompleted }) =>
+  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/progress`, {
+    userId: String(userId),
+    learningPathId: String(learningPathId),
+    resourceUrl: String(resourceUrl),
+    isCompleted: Boolean(isCompleted),
   });
 
 module.exports = {
@@ -101,4 +124,7 @@ module.exports = {
   detectFraud,
   generateCV,
   generateLearningPath,
+  analyseSkillGaps,
+  getDashboardFit,
+  markLearningProgress,
 };
