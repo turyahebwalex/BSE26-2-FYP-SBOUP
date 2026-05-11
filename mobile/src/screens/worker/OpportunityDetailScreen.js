@@ -47,6 +47,8 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [profileId, setProfileId] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [bridging, setBridging] = useState(false);
+  const [aliasHints, setAliasHints] = useState([]);
+  const [proficiencyShortfalls, setProficiencyShortfalls] = useState([]);
 
   // Opportunity-driven pathway generation — engages the §6.0 matching-engine
   // consistency contract on the AI service so the resulting pathway targets
@@ -106,6 +108,17 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           setMatchScore(d.score ?? d.matchScore ?? null);
           if (d.breakdown) setMatchBreakdown(d.breakdown);
           if (d.missingSkills) setMissingSkills(d.missingSkills);
+        } catch (_) {}
+
+        // Enrich the breakdown card with the learning-engine's alias hints
+        // and proficiency shortfalls so the worker sees 'did you mean…?'
+        // suggestions BEFORE committing to a pathway. Best-effort: a
+        // failure here just hides the enrichment, never blocks the card.
+        try {
+          const gapsRes = await learningAPI.skillGaps(resolvedId);
+          const g = gapsRes.data || {};
+          if (Array.isArray(g.aliasHints)) setAliasHints(g.aliasHints);
+          if (Array.isArray(g.proficiencyShortfalls)) setProficiencyShortfalls(g.proficiencyShortfalls);
         } catch (_) {}
       }
     } catch (_) {}
@@ -393,6 +406,37 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                       Add these skills to your profile or bridge a learning path to improve your
                       score.
                     </Text>
+
+                    {/* §6.0 enrichment — soft "did you mean…?" prompts.
+                        The chips above remain authoritative; these are
+                        suggestions to update the worker's profile. */}
+                    {aliasHints.length > 0 && (
+                      <View style={styles.hintsBlock}>
+                        <Text style={styles.hintsHeader}>Did you mean…?</Text>
+                        {aliasHints.slice(0, 3).map((h, i) => (
+                          <Text key={`alias-${i}`} style={styles.hintItem}>
+                            • You may already have{' '}
+                            <Text style={styles.hintStrong}>{h.missingSkill}</Text> as{' '}
+                            <Text style={styles.hintStrong}>{h.youMayAlreadyHave}</Text>.
+                            {h.suggestion ? ` ${h.suggestion}` : ''}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+
+                    {proficiencyShortfalls.length > 0 && (
+                      <View style={styles.shortfallsBlock}>
+                        <Text style={styles.hintsHeader}>Level up</Text>
+                        {proficiencyShortfalls.slice(0, 3).map((p, i) => (
+                          <Text key={`pf-${i}`} style={styles.hintItem}>
+                            • <Text style={styles.hintStrong}>{p.skill}</Text> — you're at{' '}
+                            <Text style={styles.hintStrong}>{p.current}</Text>, role needs{' '}
+                            <Text style={styles.hintStrong}>{p.required}</Text>.
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+
                     <TouchableOpacity
                       style={[styles.bridgeButton, bridging && styles.bridgeButtonDisabled]}
                       onPress={handleBridgeSkillGap}
@@ -897,8 +941,37 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     lineHeight: 17,
   },
-  bridgeButton: {
+  hintsBlock: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 8,
+    padding: 10,
     marginTop: 10,
+  },
+  shortfallsBlock: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+  },
+  hintsHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  hintItem: {
+    fontSize: 12,
+    color: '#14532D',
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  hintStrong: {
+    fontWeight: '700',
+  },
+  bridgeButton: {
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
