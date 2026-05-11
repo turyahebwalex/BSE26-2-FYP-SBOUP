@@ -1,0 +1,12 @@
+{
+  "//": "Pyright config for the Learning Engine service. Heavy ML dependencies (torch, transformers, sentence-transformers) and small ones (python-dotenv) are intentionally installed ONLY inside the Docker image, not in any host venv. Without this config, Pyright/Pylance flags every `import transformers` etc. as unresolved, polluting the Problems panel for every collaborator. Source of truth for runtime: ai-services/learning-engine/Dockerfile + requirements.txt.",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "venvPath": ".",
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "model_cache",
+    "storage"
+  ]
+}
