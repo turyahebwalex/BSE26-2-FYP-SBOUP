@@ -82,7 +82,6 @@ const userSchema = new mongoose.Schema(
     },
     socketIds: [{
       type: String,
-      index: true,
     }],
     pushTokens: [{
       type: String,
@@ -115,7 +114,6 @@ const userSchema = new mongoose.Schema(
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 
-userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ role: 1, accountStatus: 1 });
 userSchema.index({ companyId: 1 });
 userSchema.index({ isOnline: 1, lastSeenAt: -1 });
