@@ -80,9 +80,16 @@ exports.getOpportunities = async (req, res) => {
       minPay,
       maxPay,
       sortBy = 'createdAt',
+      companyId,                                     // ← ADD THIS LINE
     } = req.query;
 
     const filter = { status: 'published', deadline: { $gte: new Date() } };
+
+    // ← ADD THIS BLOCK
+    if (companyId) {
+      filter.companyId = companyId;
+    }
+
     if (category) filter.category = category;
     if (location) filter.location = { $regex: location, $options: 'i' };
     if (experienceLevel) filter.experienceLevel = experienceLevel;
@@ -200,13 +207,20 @@ exports.archiveOpportunity = async (req, res) => {
 
 exports.getMyOpportunities = async (req, res) => {
   try {
-    const opportunities = await Opportunity.find({ postedByUserId: req.user._id })
+    // Get the employer's companyId from their user document
+    const user = await User.findById(req.user._id).select('companyId');
+    if (!user.companyId) {
+      return res.status(400).json({ error: 'No company associated with your account.' });
+    }
+
+    // Find opportunities belonging to that company
+    const opportunities = await Opportunity.find({ companyId: user.companyId })
       .populate('requiredSkills', 'skillName category')
       .populate('companyId', 'name logoUrl')
+      .populate('postedByUserId', 'fullName email') // optional
       .sort({ createdAt: -1 });
 
-    // Enrich each posting with applicant match-score aggregates so the
-    // "My Opportunities" page can show real matching percentages.
+    // (Keep the aggregation for match scores and applicant counts as is)
     const ids = opportunities.map((o) => o._id);
     const aggregates = ids.length
       ? await Application.aggregate([
