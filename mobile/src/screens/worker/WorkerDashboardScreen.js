@@ -246,7 +246,18 @@ const WorkerDashboardScreen = ({ navigation }) => {
                     key={cat.category || idx}
                     style={styles.fitCard}
                     activeOpacity={0.85}
-                    onPress={() => navigation.navigate('Learning')}
+                    onPress={() =>
+                      navigation.navigate(
+                        'Learning',
+                        // Pre-fill the generate modal with the top
+                        // missing skill in this category so the worker
+                        // can confirm + generate a pathway for the
+                        // specific gap they tapped. Falls back to
+                        // opening the modal blank when no missing
+                        // skills (rare — worker fully matches category).
+                        top ? { prefillSkill: top } : undefined
+                      )
+                    }
                   >
                     <View style={styles.fitCardHeader}>
                       <View style={styles.fitBadge}>
