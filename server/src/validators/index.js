@@ -194,9 +194,20 @@ const generateCV = Joi.object({
 });
 
 // ─── Learning ────────────────────────────────────────────────────
+// Exactly one of targetSkill / opportunityId is required (opportunity-driven
+// engages the §6.0 matching-engine consistency contract; target-skill is
+// standalone). Mirrors the AI service's contract on /api/learning/generate.
 const generateLearningPath = Joi.object({
-  targetSkill: Joi.string().max(150).required(),
+  targetSkill: Joi.string().max(150).allow(null, ''),
   opportunityId: Joi.string().hex().length(24).allow(null, ''),
+})
+  .or('targetSkill', 'opportunityId')
+  .messages({
+    'object.missing': 'Provide either targetSkill or opportunityId.',
+  });
+
+const analyseSkillGaps = Joi.object({
+  opportunityId: Joi.string().hex().length(24).required(),
 });
 
 // Combine all schemas into an object
@@ -224,6 +235,7 @@ const schemas = {
   createCompany,
   generateCV,
   generateLearningPath,
+  analyseSkillGaps,
 };
 
 /**
