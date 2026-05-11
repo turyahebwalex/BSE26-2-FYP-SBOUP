@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema(
     passwordHash: {
       type: String,
       required: [true, 'Password is required'],
-      maxlength: 255, // ✅ FIXED: was 60 — bcrypt hashes are 60 chars but
+      maxlength: 255, // FIXED: was 60 — bcrypt hashes are 60 chars but
                       // give headroom for future algorithm changes and to
                       // prevent Mongoose validation from tripping on edge cases
       select: true,
@@ -124,7 +124,7 @@ userSchema.index({ fullName: 'text' });
 
 // ── Password hashing ──────────────────────────────────────────────────────────
 //
-// ✅ FIXED: Use a dedicated flag (`_passwordNeedsHashing`) instead of relying
+// FIXED: Use a dedicated flag (`_passwordNeedsHashing`) instead of relying
 // solely on `isModified('passwordHash')`.
 //
 // The old approach called `this.save()` inside incrementFailedAttempts() and
@@ -158,7 +158,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.passwordHash);
 };
 
-// ✅ FIXED: Use updateOne() so pre('save') is NOT triggered.
+// FIXED: Use updateOne() so pre('save') is NOT triggered.
 // This prevents the double-hash bug that corrupted passwords after failed logins.
 userSchema.methods.incrementFailedAttempts = async function () {
   const limit = parseInt(process.env.MAX_LOGIN_ATTEMPTS, 10) || 5;
@@ -180,7 +180,7 @@ userSchema.methods.incrementFailedAttempts = async function () {
   if (shouldLock) this.accountStatus = 'locked';
 };
 
-// ✅ FIXED: Use updateOne() here too — same reason.
+// FIXED: Use updateOne() here too — same reason.
 userSchema.methods.resetFailedAttempts = async function () {
   await this.constructor.updateOne(
     { _id: this._id },

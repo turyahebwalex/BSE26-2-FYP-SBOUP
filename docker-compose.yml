@@ -147,16 +147,36 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-learning
-    ports:
-      - "5004:5004"
+    # Same reason as the cv-generation service: campus Wi-Fi blocks egress
+    # from Docker's bridge subnet, breaking Hugging Face model downloads on
+    # first start. Host networking uses the host's resolver and route table.
+    network_mode: host
     environment:
-      - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      - MONGODB_DB_NAME=sboup_dev
+      - INTERNAL_API_KEY=${LEARNING_INTERNAL_API_KEY:-}
+      - HF_MODEL_CACHE_DIR=/app/model_cache
+      - HF_SEMANTIC_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - HF_SUMMARY_MODEL=google/flan-t5-small
+      - HF_SUMMARY_MAX_NEW_TOKENS=80
+      - HF_SKILL_NER_MODEL=jjzha/jobbert_skill_extraction
+      - SEMANTIC_MATCH_THRESHOLD=0.75
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - COURSERA_BASE_URL=https://api.coursera.org/api
+      - EDX_BASE_URL=https://courses.edx.org/api
+      - PROVIDER_HTTP_TIMEOUT_SECONDS=8
+      - MATCHING_SERVICE_URL=http://localhost:5001
+      - MATCHING_SERVICE_TIMEOUT_SECONDS=5
+      - PORT=5004
+      - LOG_LEVEL=INFO
+      - RATE_LIMIT_PER_USER_PER_MINUTE=10
+    volumes:
+      # Persist HF model weights across container restarts so we don't
+      # re-pull MiniLM + Flan-T5-small + Skill NER on every rebuild.
+      - learning_model_cache:/app/model_cache
     depends_on:
       - mongodb
-    networks:
-      - sboup-network
+      - matching-engine
 
   chatbot-service:
     build:
@@ -201,6 +221,7 @@ volumes:
   redis_data:
   cv_storage:
   cv_model_cache:
+  learning_model_cache:
 
 networks:
   sboup-network:

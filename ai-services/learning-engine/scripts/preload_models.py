@@ -6,17 +6,11 @@ broken DNS to huggingface.co even when the runtime container has
 working host networking. Failing the image build over a transient
 build-time DNS issue is wasteful when the runtime can fetch instead.
 
-PRE-FLIGHT: a DNS lookup is attempted first. If it fails, we skip ALL
+PRE-FLIGHT: a DNS lookup is attempted first. If it fails we skip ALL
 downloads immediately. Without this, huggingface_hub's 5-retry
 exponential-backoff chain runs ~3 minutes PER FILE on a broken-DNS
 host, and a single model has dozens of file probes — turning a fast
 fail into a 30-90 minute hang.
-
-If the cache is incomplete after build, the first runtime request will
-trigger a one-time download to the persisted `cv_model_cache` volume.
-
-Skill NER candidates are tried in order; first that loads wins. If
-none load, runtime falls back to Flan-T5 prompt-based extraction.
 
 Set FAIL_FAST=1 in the build env to revert to hard-fail behaviour
 (useful in CI where build-time network is reliable).
@@ -30,16 +24,13 @@ import sys
 CACHE = os.environ.get("HF_MODEL_CACHE_DIR", "/app/model_cache")
 FAIL_FAST = os.environ.get("FAIL_FAST", "0") == "1"
 
-# Cap any single underlying HTTP request to 10s so we surface broken
-# networks fast. Recognised by huggingface_hub for download timeouts.
+# Cap any single underlying HTTP request to 10s.
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
 
-# Default to jjzha/jobbert_skill_extraction — a BERT-base model (~440MB)
-# fine-tuned for skill extraction. Replaced the previous default
-# jjzha/escoxlmr_skill_extraction (XLM-R-large, ~2.2GB) which made the
-# published image ~2.9GB and painful to pull on slow links. Same author,
-# same task, ~5x smaller. The previous algiraldohe/lm-ner-skills-recognition
-# was removed from HuggingFace and always fails.
+# Default is jjzha/jobbert_skill_extraction — BERT-base (~440MB), ~5x
+# smaller than the previous default jjzha/escoxlmr_skill_extraction
+# (XLM-R-large, ~2.2GB). Same author, same task; the larger model
+# bloated the published image and made pulls painful on slow links.
 NER_CANDIDATES = [
     os.environ.get("HF_SKILL_NER_MODEL", "jjzha/jobbert_skill_extraction"),
     "jjzha/jobspanbert-base-cased",
@@ -47,11 +38,6 @@ NER_CANDIDATES = [
 
 
 def _hf_reachable() -> bool:
-    """Resolve huggingface.co with a 5s socket timeout.
-
-    A failure here means downloads cannot succeed, no point trying
-    them — every download attempt would take many minutes to give up.
-    """
     socket.setdefaulttimeout(5)
     try:
         socket.gethostbyname("huggingface.co")
@@ -81,15 +67,17 @@ def preload_semantic() -> None:
     from sentence_transformers import SentenceTransformer
 
     SentenceTransformer(
-        "sentence-transformers/all-MiniLM-L6-v2", cache_folder=CACHE
+        os.environ.get("HF_SEMANTIC_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+        cache_folder=CACHE,
     )
 
 
 def preload_summary() -> None:
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-    AutoTokenizer.from_pretrained("google/flan-t5-small", cache_dir=CACHE)
-    AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small", cache_dir=CACHE)
+    model_id = os.environ.get("HF_SUMMARY_MODEL", "google/flan-t5-small")
+    AutoTokenizer.from_pretrained(model_id, cache_dir=CACHE)
+    AutoModelForSeq2SeqLM.from_pretrained(model_id, cache_dir=CACHE)
 
 
 def preload_ner() -> bool:

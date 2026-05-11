@@ -1,0 +1,62 @@
+{
+  "Construction": [
+    {"title": "Construction Safety Fundamentals", "url": "https://www.osha.gov/training/library", "provider": "OSHA", "cost": 0, "estimatedDuration": "10h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "OSHA construction safety basics covering hazard recognition, fall protection, and PPE."},
+    {"title": "Reading Construction Drawings", "url": "https://www.constructconnect.com/blog/how-to-read-construction-blueprints", "provider": "ConstructConnect", "cost": 0, "estimatedDuration": "4h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.4, "description": "Plan view, elevation, and section reading with worked examples."},
+    {"title": "Site Supervision Essentials", "url": "https://www.youtube.com/playlist?list=PLConstructionMgmt", "provider": "YouTube", "cost": 0, "estimatedDuration": "8h", "type": "video", "difficultyLevel": "intermediate", "rating": 4.5, "description": "Daily site supervision, scheduling, and crew coordination."}
+  ],
+  "Carpentry": [
+    {"title": "Carpentry Basics for Beginners", "url": "https://www.youtube.com/results?search_query=carpentry+basics", "provider": "YouTube", "cost": 0, "estimatedDuration": "6h", "type": "video", "difficultyLevel": "beginner", "rating": 4.7, "description": "Hand tools, measuring, joinery, and shop safety for new carpenters."},
+    {"title": "Joinery Techniques", "url": "https://www.thisiscarpentry.com/", "provider": "ThisIsCarpentry", "cost": 0, "estimatedDuration": "10h", "type": "tutorial", "difficultyLevel": "intermediate", "rating": 4.6, "description": "Mortise and tenon, dovetail, and other classical joints in residential carpentry."},
+    {"title": "Advanced Cabinetry", "url": "https://www.finewoodworking.com/cabinetry", "provider": "Fine Woodworking", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "advanced", "rating": 4.8, "description": "Custom cabinet construction, edge banding, and fitted hardware."}
+  ],
+  "Plumbing": [
+    {"title": "Plumbing Fundamentals", "url": "https://www.youtube.com/results?search_query=plumbing+basics", "provider": "YouTube", "cost": 0, "estimatedDuration": "5h", "type": "video", "difficultyLevel": "beginner", "rating": 4.5, "description": "Pipe types, fittings, and basic residential plumbing repairs."},
+    {"title": "Pipe Fitting and Soldering", "url": "https://www.familyhandyman.com/list/plumbing-basics/", "provider": "Family Handyman", "cost": 0, "estimatedDuration": "4h", "type": "tutorial", "difficultyLevel": "intermediate", "rating": 4.4, "description": "Hands-on guidance on cutting, fitting, and soldering copper and PEX."},
+    {"title": "Drainage and Venting Systems", "url": "https://www.coursera.org/search?query=plumbing", "provider": "Coursera", "cost": 0, "estimatedDuration": "20h", "type": "course", "difficultyLevel": "advanced", "rating": 4.5, "description": "Drain-waste-vent design, code requirements, and troubleshooting."}
+  ],
+  "Tailoring": [
+    {"title": "Sewing Machine Basics", "url": "https://www.youtube.com/results?search_query=sewing+machine+basics", "provider": "YouTube", "cost": 0, "estimatedDuration": "3h", "type": "video", "difficultyLevel": "beginner", "rating": 4.6, "description": "Threading, tension, and stitch types for industrial and home machines."},
+    {"title": "Pattern Making for Tailors", "url": "https://www.thecuttingclass.com/", "provider": "The Cutting Class", "cost": 0, "estimatedDuration": "8h", "type": "tutorial", "difficultyLevel": "intermediate", "rating": 4.5, "description": "Drafting basic blocks, then deriving sleeve and bodice patterns."},
+    {"title": "Bespoke Tailoring Techniques", "url": "https://www.coursera.org/search?query=tailoring", "provider": "Coursera", "cost": 0, "estimatedDuration": "15h", "type": "course", "difficultyLevel": "advanced", "rating": 4.7, "description": "Hand-padded canvases, hand-finished buttonholes, and fitting alterations."}
+  ],
+  "Electrical": [
+    {"title": "Electrical Wiring Basics", "url": "https://www.youtube.com/results?search_query=electrical+wiring+basics", "provider": "YouTube", "cost": 0, "estimatedDuration": "6h", "type": "video", "difficultyLevel": "beginner", "rating": 4.6, "description": "Domestic circuits, wire sizing, and safe testing of live conductors."},
+    {"title": "Electrical Code Reference", "url": "https://www.nfpa.org/codes-and-standards/all-codes-and-standards/list-of-codes-and-standards/detail?code=70", "provider": "NFPA", "cost": 0, "estimatedDuration": "10h", "type": "article", "difficultyLevel": "intermediate", "rating": 4.5, "description": "NEC code overview and most-cited residential rules."},
+    {"title": "Industrial Controls", "url": "https://learn.sparkfun.com/tutorials/", "provider": "SparkFun", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "advanced", "rating": 4.4, "description": "Motor controls, contactors, and PLC fundamentals for industrial sites."}
+  ],
+  "Catering": [
+    {"title": "Food Safety Basics", "url": "https://www.servsafe.com/Manager/Manager-Online-Course", "provider": "ServSafe", "cost": 0, "estimatedDuration": "5h", "type": "course", "difficultyLevel": "beginner", "rating": 4.5, "description": "HACCP, temperature control, and cross-contamination prevention."},
+    {"title": "Knife Skills and Mise en Place", "url": "https://www.youtube.com/results?search_query=knife+skills+for+chefs", "provider": "YouTube", "cost": 0, "estimatedDuration": "3h", "type": "video", "difficultyLevel": "beginner", "rating": 4.7, "description": "Standard cuts, board hygiene, and how professional kitchens prep."},
+    {"title": "Catering Operations Management", "url": "https://www.edx.org/search?q=catering", "provider": "edX", "cost": 0, "estimatedDuration": "20h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.4, "description": "Menu costing, event logistics, and crew scheduling for caterers."}
+  ],
+  "Programming": [
+    {"title": "Programming Foundations", "url": "https://www.freecodecamp.org/learn", "provider": "freeCodeCamp", "cost": 0, "estimatedDuration": "30h", "type": "course", "difficultyLevel": "beginner", "rating": 4.8, "description": "Variables, control flow, functions, and basic data structures."},
+    {"title": "Version Control with Git", "url": "https://learngitbranching.js.org/", "provider": "Learn Git Branching", "cost": 0, "estimatedDuration": "4h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.7, "description": "Interactive Git tutorial covering branches, merges, and rebases."},
+    {"title": "Algorithms and Data Structures", "url": "https://www.coursera.org/specializations/algorithms", "provider": "Coursera", "cost": 0, "estimatedDuration": "60h", "type": "course", "difficultyLevel": "advanced", "rating": 4.6, "description": "Stanford specialisation covering big-O, sorting, graphs, and dynamic programming."}
+  ],
+  "Python": [
+    {"title": "Python for Everybody", "url": "https://www.coursera.org/specializations/python", "provider": "Coursera", "cost": 0, "estimatedDuration": "80h", "type": "course", "difficultyLevel": "beginner", "rating": 4.8, "description": "University of Michigan specialisation covering Python basics, data, and web."},
+    {"title": "Automate the Boring Stuff with Python", "url": "https://automatetheboringstuff.com/", "provider": "Online Book", "cost": 0, "estimatedDuration": "40h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.7, "description": "Practical Python scripting for everyday automation tasks."},
+    {"title": "Real Python", "url": "https://realpython.com/", "provider": "Real Python", "cost": 0, "estimatedDuration": "20h", "type": "article", "difficultyLevel": "intermediate", "rating": 4.6, "description": "Topic-deep tutorials on idiomatic Python and standard library."}
+  ],
+  "Data Analysis": [
+    {"title": "Intro to Data Analysis", "url": "https://www.kaggle.com/learn/intro-to-programming", "provider": "Kaggle", "cost": 0, "estimatedDuration": "8h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "Beginner data tooling with pandas and matplotlib."},
+    {"title": "Pandas in 10 Minutes", "url": "https://pandas.pydata.org/docs/user_guide/10min.html", "provider": "pandas.org", "cost": 0, "estimatedDuration": "1h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.5, "description": "Official pandas quickstart for data wrangling."},
+    {"title": "Statistical Thinking with Python", "url": "https://www.datacamp.com/courses/statistical-thinking-in-python-part-1", "provider": "DataCamp", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.5, "description": "EDA, hypothesis testing, and confidence intervals using Python."}
+  ],
+  "Graphic Design": [
+    {"title": "Graphic Design Fundamentals", "url": "https://www.canva.com/designschool/", "provider": "Canva Design School", "cost": 0, "estimatedDuration": "5h", "type": "course", "difficultyLevel": "beginner", "rating": 4.7, "description": "Layout, typography, colour, and composition basics."},
+    {"title": "Logo Design Principles", "url": "https://www.youtube.com/results?search_query=logo+design+process", "provider": "YouTube", "cost": 0, "estimatedDuration": "3h", "type": "video", "difficultyLevel": "intermediate", "rating": 4.5, "description": "Brand identity research, sketching, and vector refinement."},
+    {"title": "Adobe Illustrator Crash Course", "url": "https://helpx.adobe.com/illustrator/get-started.html", "provider": "Adobe", "cost": 0, "estimatedDuration": "8h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.6, "description": "Vector tools, pathfinder, and exporting print-ready artwork."}
+  ],
+  "JavaScript": [
+    {"title": "JavaScript: Understanding the Weird Parts (Free Intro)", "url": "https://www.youtube.com/watch?v=Bv_5Zv5c-Ts", "provider": "YouTube", "cost": 0, "estimatedDuration": "3h", "type": "video", "difficultyLevel": "beginner", "rating": 4.7, "description": "Closures, prototypes, and execution context in plain English."},
+    {"title": "JavaScript Algorithms and Data Structures", "url": "https://www.freecodecamp.org/learn/javascript-algorithms-and-data-structures/", "provider": "freeCodeCamp", "cost": 0, "estimatedDuration": "300h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.7, "description": "Hands-on JavaScript curriculum from variables to functional programming."},
+    {"title": "MDN JavaScript Reference", "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript", "provider": "MDN", "cost": 0, "estimatedDuration": "Reference", "type": "article", "difficultyLevel": "intermediate", "rating": 4.8, "description": "Authoritative reference for the language and the Web platform APIs."}
+  ],
+  "React": [
+    {"title": "React Official Tutorial", "url": "https://react.dev/learn", "provider": "react.dev", "cost": 0, "estimatedDuration": "10h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.8, "description": "Official tutorial covering components, JSX, state, and effects."},
+    {"title": "Full Stack Open: React", "url": "https://fullstackopen.com/en/", "provider": "University of Helsinki", "cost": 0, "estimatedDuration": "100h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.7, "description": "Comprehensive React + Node curriculum from a research university."},
+    {"title": "Build a React Application", "url": "https://scrimba.com/learn/learnreact", "provider": "Scrimba", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "Project-based React introduction with interactive code playgrounds."}
+  ]
+}

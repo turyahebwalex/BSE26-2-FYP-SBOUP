@@ -28,6 +28,4 @@ const preferenceSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
-preferenceSchema.index({ profileId: 1 });
-
 module.exports = mongoose.model('Preference', preferenceSchema);
