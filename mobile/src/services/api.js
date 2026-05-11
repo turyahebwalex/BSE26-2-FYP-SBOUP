@@ -165,7 +165,18 @@ export const matchingAPI = {
 // ── Learning ──
 export const learningAPI = {
   getMine: () => api.get('/learning/mine'),
-  generate: (targetSkill) => api.post('/learning/generate', { targetSkill }),
+  // Pass targetSkill OR opportunityId; opportunity-driven mode engages
+  // the §6.0 matching-engine consistency contract on the AI service.
+  generate: ({ targetSkill, opportunityId } = {}) =>
+    api.post('/learning/generate', { targetSkill, opportunityId }),
+  // Pure analysis (no DB write). Returns missingSkills + matchBreakdown
+  // + aliasHints for a (profile, opportunity) pair. Useful for the
+  // mobile breakdown card to surface 'did you mean…?' hints alongside
+  // the matching-engine's authoritative missing-skills chips.
+  skillGaps: (opportunityId) =>
+    api.post('/learning/skill-gaps', { opportunityId }),
+  // Drives the §6.2.4 'Close Your Skill Gaps' dashboard section.
+  dashboardFit: () => api.post('/learning/dashboard-fit', {}),
   updateProgress: (pathId, resourceIndex, isCompleted) =>
     api.put(`/learning/${pathId}/progress`, { resourceIndex, isCompleted }),
 };

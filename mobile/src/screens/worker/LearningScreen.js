@@ -59,7 +59,7 @@ const LearningScreen = ({ navigation }) => {
     }
     setGenerating(true);
     try {
-      await learningAPI.generate(skill);
+      await learningAPI.generate({ targetSkill: skill });
       setTargetSkill('');
       setGenerateModalVisible(false);
       Alert.alert('Success', 'Learning path generated.');
