@@ -34,7 +34,7 @@ INTERNAL_API_KEY = _get("INTERNAL_API_KEY", "")
 
 HF_MODEL_CACHE_DIR = _get("HF_MODEL_CACHE_DIR", "/app/model_cache")
 HF_SEMANTIC_MODEL = _get("HF_SEMANTIC_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-HF_SKILL_NER_MODEL = _get("HF_SKILL_NER_MODEL", "jjzha/escoxlmr_skill_extraction")
+HF_SKILL_NER_MODEL = _get("HF_SKILL_NER_MODEL", "jjzha/jobbert_skill_extraction")
 HF_SUMMARY_MODEL = _get("HF_SUMMARY_MODEL", "google/flan-t5-small")
 HF_SUMMARY_MAX_NEW_TOKENS = _get_int("HF_SUMMARY_MAX_NEW_TOKENS", 120)
 

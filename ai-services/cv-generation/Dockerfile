@@ -35,22 +35,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       sleep 10; \
     done
 
-# Best-effort pre-download. Docker build sandboxes often can't resolve
-# huggingface.co even when the runtime container's host networking can,
-# so the script never fails the build. If models aren't cached here,
-# they're fetched on first runtime request to the persisted
-# `cv_model_cache` volume — one-time cost, then offline forever.
+# Models are NOT pre-downloaded into the image — that bloated the
+# published image to ~2.9GB and made pulls painful on slow links.
+# Instead, the runtime fetches them on first request into the
+# persisted `cv_model_cache` Docker volume (see docker-compose.yml).
+# One-time download per host, then reused across rebuilds.
 #
-# Set FAIL_FAST=1 (build arg) in environments with reliable build-time
-# network to make missing required models break the build instead.
-ARG FAIL_FAST=0
-ENV FAIL_FAST=${FAIL_FAST}
-COPY scripts/preload_models.py scripts/preload_models.py
-RUN python scripts/preload_models.py
-
-# Note: TRANSFORMERS_OFFLINE / HF_HUB_OFFLINE are NOT set at image level.
-# When the cache is fully populated, set them to 1 in your .env or
-# docker-compose `environment:` block to lock the runtime offline.
+# To preload manually (e.g. before going offline), run inside the
+# container: `python scripts/preload_models.py`.
 
 COPY . .
 

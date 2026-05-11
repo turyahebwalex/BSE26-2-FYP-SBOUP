@@ -34,13 +34,14 @@ FAIL_FAST = os.environ.get("FAIL_FAST", "0") == "1"
 # networks fast. Recognised by huggingface_hub for download timeouts.
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
 
-# Default to jjzha/escoxlmr_skill_extraction — it's an XLM-R model fine-tuned
-# on the ESCO skill taxonomy and is the only one in this list that we've
-# verified loads at build time. The previous default
-# (algiraldohe/lm-ner-skills-recognition) was removed from HuggingFace and
-# always fails, wasting build minutes on the inevitable fallback.
+# Default to jjzha/jobbert_skill_extraction — a BERT-base model (~440MB)
+# fine-tuned for skill extraction. Replaced the previous default
+# jjzha/escoxlmr_skill_extraction (XLM-R-large, ~2.2GB) which made the
+# published image ~2.9GB and painful to pull on slow links. Same author,
+# same task, ~5x smaller. The previous algiraldohe/lm-ner-skills-recognition
+# was removed from HuggingFace and always fails.
 NER_CANDIDATES = [
-    os.environ.get("HF_SKILL_NER_MODEL", "jjzha/escoxlmr_skill_extraction"),
+    os.environ.get("HF_SKILL_NER_MODEL", "jjzha/jobbert_skill_extraction"),
     "jjzha/jobspanbert-base-cased",
 ]
 
