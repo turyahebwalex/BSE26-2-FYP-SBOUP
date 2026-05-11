@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { learningAPI } from '../../services/api';
 
 const LearningScreen = ({ navigation }) => {
@@ -45,6 +46,15 @@ const LearningScreen = ({ navigation }) => {
   useEffect(() => {
     fetchPaths();
   }, [fetchPaths]);
+
+  // Refetch when the screen comes back into focus — covers the
+  // OpportunityDetail 'Bridge a skill gap' flow, which generates a
+  // new LearningPath in another screen and navigates here.
+  useFocusEffect(
+    useCallback(() => {
+      fetchPaths();
+    }, [fetchPaths])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
