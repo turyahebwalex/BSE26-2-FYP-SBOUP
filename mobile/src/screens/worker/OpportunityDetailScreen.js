@@ -60,9 +60,17 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     try {
       const { data } = await learningAPI.generate({ opportunityId: oppId });
       const path = data?.learningPath || data?.data?.learningPath || null;
+      const pathId = path?._id || path?.id || null;
       if (path) {
         Alert.alert('Learning path created', 'Tailored for the gaps on this role.', [
-          { text: 'View', onPress: () => navigation.navigate('Learning') },
+          {
+            text: 'View',
+            // Pass the new path id so LearningScreen auto-expands it
+            // instead of forcing the worker to scan the list. Matches
+            // the spec's 'select pathway → respective path shown'
+            // expectation.
+            onPress: () => navigation.navigate('Learning', { focusPathId: pathId }),
+          },
           { text: 'OK', style: 'cancel' },
         ]);
       } else {

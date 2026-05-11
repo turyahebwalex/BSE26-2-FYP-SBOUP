@@ -19,14 +19,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { learningAPI } from '../../services/api';
 
-const LearningScreen = ({ navigation }) => {
+const LearningScreen = ({ navigation, route }) => {
+  // route.params.focusPathId — auto-expand this path id when the screen
+  // mounts. Set by OpportunityDetail's Bridge-a-skill-gap CTA so the
+  // worker sees the just-created pathway, not the generic list.
+  // route.params.prefillSkill — pre-fill the generate modal with this
+  // skill name. Set by WorkerDashboard's Close-Your-Skill-Gaps card.
+  const focusPathId = route?.params?.focusPathId || null;
+  const prefillSkill = route?.params?.prefillSkill || null;
+
   const [paths, setPaths] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedPath, setExpandedPath] = useState(null);
+  const [expandedPath, setExpandedPath] = useState(focusPathId);
   const [error, setError] = useState(null);
-  const [generateModalVisible, setGenerateModalVisible] = useState(false);
-  const [targetSkill, setTargetSkill] = useState('');
+  const [generateModalVisible, setGenerateModalVisible] = useState(Boolean(prefillSkill));
+  const [targetSkill, setTargetSkill] = useState(prefillSkill || '');
   const [generating, setGenerating] = useState(false);
 
   const fetchPaths = useCallback(async () => {
@@ -46,6 +54,20 @@ const LearningScreen = ({ navigation }) => {
   useEffect(() => {
     fetchPaths();
   }, [fetchPaths]);
+
+  // React to navigation params changing between visits — e.g. worker
+  // bridges path A, navigates back, bridges path B; React Navigation
+  // re-uses the LearningScreen instance, so we sync state explicitly.
+  useEffect(() => {
+    if (focusPathId) setExpandedPath(focusPathId);
+  }, [focusPathId]);
+
+  useEffect(() => {
+    if (prefillSkill) {
+      setTargetSkill(prefillSkill);
+      setGenerateModalVisible(true);
+    }
+  }, [prefillSkill]);
 
   // Refetch when the screen comes back into focus — covers the
   // OpportunityDetail 'Bridge a skill gap' flow, which generates a
