@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
-import { matchingAPI, applicationAPI, notificationAPI } from '../../services/api';
+import { matchingAPI, applicationAPI, notificationAPI, learningAPI } from '../../services/api';
 import OpportunityCard from '../../components/OpportunityCard';
 
 const AVATAR_KEY = (userId) => `user_avatar_uri_${userId}`;
@@ -24,6 +24,7 @@ const WorkerDashboardScreen = ({ navigation }) => {
   const [recommendations, setRecommendations] = useState([]);
   const [applicationCount, setApplicationCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [fittingCategories, setFittingCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -57,10 +58,11 @@ const WorkerDashboardScreen = ({ navigation }) => {
   const fetchDashboardData = useCallback(async () => {
     try {
       setError(null);
-      const [recsRes, appsRes, notifRes] = await Promise.allSettled([
+      const [recsRes, appsRes, notifRes, fitRes] = await Promise.allSettled([
         matchingAPI.getRecommendations(),
         applicationAPI.getMyApplications(),
         notificationAPI.getUnreadCount(),
+        learningAPI.dashboardFit(),
       ]);
 
       if (recsRes.status === 'fulfilled') {
@@ -84,6 +86,11 @@ const WorkerDashboardScreen = ({ navigation }) => {
       if (notifRes.status === 'fulfilled') {
         const data = notifRes.value.data;
         setUnreadCount(data.count || data.unreadCount || 0);
+      }
+      if (fitRes.status === 'fulfilled') {
+        const data = fitRes.value.data || {};
+        const cats = Array.isArray(data.fittingCategories) ? data.fittingCategories : [];
+        setFittingCategories(cats);
       }
     } catch (err) {
       setError('Failed to load dashboard data.');
@@ -215,6 +222,73 @@ const WorkerDashboardScreen = ({ navigation }) => {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Close Your Skill Gaps — drives the §6.2.4 dashboard section */}
+        {fittingCategories.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Close Your Skill Gaps</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Learning')}>
+                <Text style={styles.seeAll}>View Paths</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.fitScrollContent}
+            >
+              {fittingCategories.slice(0, 6).map((cat, idx) => {
+                const pct = Math.round((Number(cat.fitScore) || 0) * 100);
+                const missing = Array.isArray(cat.missingSkills) ? cat.missingSkills : [];
+                const top = missing[0];
+                return (
+                  <TouchableOpacity
+                    key={cat.category || idx}
+                    style={styles.fitCard}
+                    activeOpacity={0.85}
+                    onPress={() => navigation.navigate('Learning')}
+                  >
+                    <View style={styles.fitCardHeader}>
+                      <View style={styles.fitBadge}>
+                        <Text style={styles.fitBadgeText}>{pct}%</Text>
+                      </View>
+                      <Text style={styles.fitCategory} numberOfLines={1}>
+                        {cat.category || 'Category'}
+                      </Text>
+                    </View>
+                    {missing.length > 0 ? (
+                      <>
+                        <Text style={styles.fitMissingLabel}>
+                          {missing.length === 1 ? '1 gap to bridge' : `${missing.length} gaps to bridge`}
+                        </Text>
+                        <View style={styles.fitChipRow}>
+                          {missing.slice(0, 2).map((s, i) => (
+                            <View key={`${cat.category}-${i}`} style={styles.fitChip}>
+                              <Text style={styles.fitChipText} numberOfLines={1}>
+                                {s}
+                              </Text>
+                            </View>
+                          ))}
+                          {missing.length > 2 && (
+                            <Text style={styles.fitChipMore}>+{missing.length - 2}</Text>
+                          )}
+                        </View>
+                      </>
+                    ) : (
+                      <Text style={styles.fitMissingLabel}>You match this category.</Text>
+                    )}
+                    {!!top && (
+                      <View style={styles.fitFooter}>
+                        <Ionicons name="sparkles" size={11} color="#F97316" />
+                        <Text style={styles.fitFooterText}>Bridge {top}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
 
         {/* Recommended Opportunities */}
         <View style={styles.sectionHeader}>
@@ -452,6 +526,87 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  fitScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  fitCard: {
+    width: 200,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  fitCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  fitBadge: {
+    backgroundColor: '#FFF7ED',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  fitBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9A3412',
+  },
+  fitCategory: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  fitMissingLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginBottom: 6,
+  },
+  fitChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: 6,
+  },
+  fitChip: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    maxWidth: 110,
+  },
+  fitChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#B91C1C',
+  },
+  fitChipMore: {
+    fontSize: 10,
+    color: '#9CA3AF',
+  },
+  fitFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  fitFooterText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F97316',
   },
 });
 
