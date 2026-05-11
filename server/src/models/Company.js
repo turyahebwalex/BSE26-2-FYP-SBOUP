@@ -43,7 +43,6 @@ const companySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-companySchema.index({ name: 1 }, { unique: true });
 companySchema.index({ verificationStatus: 1 });
 companySchema.index({ industry: 1 });
 

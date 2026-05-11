@@ -45,7 +45,6 @@ const profileSchema = new mongoose.Schema(
   }
 );
 
-profileSchema.index({ userId: 1 });
 profileSchema.index({ location: 1 });
 profileSchema.index({ visibility: 1 });
 
