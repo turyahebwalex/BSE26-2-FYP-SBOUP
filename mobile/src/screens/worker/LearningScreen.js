@@ -114,6 +114,10 @@ const LearningScreen = ({ navigation }) => {
     const resources = item.resources || [];
     const targetSkill = item.targetSkill || item.skill || {};
     const skillName = typeof targetSkill === 'string' ? targetSkill : targetSkill.name || 'Skill';
+    const criticalGapCount = Number(item.criticalGapCount || 0);
+    const missingSkills = Array.isArray(item.missingSkills) ? item.missingSkills : [];
+    const aliasHints = Array.isArray(item.aliasHints) ? item.aliasHints : [];
+    const consistencyMode = item.consistencyMode || 'standalone';
 
     return (
       <View style={styles.card}>
@@ -130,6 +134,7 @@ const LearningScreen = ({ navigation }) => {
               <Text style={styles.cardTitle}>{skillName}</Text>
               <Text style={styles.cardSubtitle}>
                 {resources.length} {resources.length === 1 ? 'resource' : 'resources'}
+                {criticalGapCount > 0 && ` • ${criticalGapCount} critical ${criticalGapCount === 1 ? 'gap' : 'gaps'}`}
               </Text>
             </View>
           </View>
@@ -156,61 +161,169 @@ const LearningScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Expanded Resources */}
-        {isExpanded && resources.length > 0 && (
-          <View style={styles.resourcesList}>
-            {resources.map((resource, index) => {
-              const isCompleted = resource.isCompleted || resource.completed;
-              return (
-                <View key={resource._id || resource.id || index} style={styles.resourceItem}>
-                  <View style={styles.resourceLeft}>
-                    <Ionicons
-                      name={isCompleted ? 'checkmark-circle' : 'ellipse-outline'}
-                      size={20}
-                      color={isCompleted ? '#10B981' : '#D1D5DB'}
-                    />
-                    <View style={styles.resourceTextSection}>
-                      <Text
-                        style={[
-                          styles.resourceTitle,
-                          isCompleted && styles.resourceTitleCompleted,
-                        ]}
-                        numberOfLines={2}
-                      >
-                        {resource.title || resource.name || `Resource ${index + 1}`}
-                      </Text>
-                      {resource.type && (
-                        <Text style={styles.resourceType}>{resource.type}</Text>
-                      )}
-                    </View>
-                  </View>
-                  <View style={styles.resourceActions}>
-                    {resource.url && (
-                      <TouchableOpacity
-                        onPress={() => handleOpenLink(resource.url)}
-                        style={styles.resourceLinkButton}
-                      >
-                        <Ionicons name="open-outline" size={16} color="#3B82F6" />
-                      </TouchableOpacity>
-                    )}
-                    {!isCompleted && (
-                      <TouchableOpacity
-                        onPress={() => handleUpdateProgress(pathId, index)}
-                        style={styles.completeButton}
-                      >
-                        <Text style={styles.completeButtonText}>Done</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+        {/* Expanded — rich rationale + per-resource panels */}
+        {isExpanded && (
+          <View style={styles.expandedSection}>
+            {/* Pathway rationale (Flan-T5 header) */}
+            {!!item.pathwayRationale && (
+              <View style={styles.rationaleBlock}>
+                <View style={styles.rationaleHeader}>
+                  <Ionicons name="sparkles" size={14} color="#F97316" />
+                  <Text style={styles.rationaleLabel}>Why this pathway</Text>
                 </View>
-              );
-            })}
-          </View>
-        )}
+                <Text style={styles.rationaleText}>{item.pathwayRationale}</Text>
+              </View>
+            )}
 
-        {isExpanded && resources.length === 0 && (
-          <View style={styles.noResources}>
-            <Text style={styles.noResourcesText}>No resources available yet.</Text>
+            {/* Analysis summary banner */}
+            {!!item.analysisSummary && (
+              <View style={styles.analysisBanner}>
+                <Ionicons name="information-circle-outline" size={16} color="#0369A1" />
+                <Text style={styles.analysisText}>{item.analysisSummary}</Text>
+              </View>
+            )}
+
+            {/* Missing skill chips */}
+            {missingSkills.length > 0 && (
+              <View style={styles.chipRow}>
+                {missingSkills.slice(0, 5).map((s, i) => (
+                  <View key={`miss-${i}`} style={styles.missingChip}>
+                    <Text style={styles.missingChipText}>{s}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Alias hints — "you may already have it as…" */}
+            {aliasHints.length > 0 && (
+              <View style={styles.hintsBlock}>
+                <Text style={styles.hintsHeader}>Did you mean…?</Text>
+                {aliasHints.slice(0, 3).map((h, i) => (
+                  <Text key={`hint-${i}`} style={styles.hintItem}>
+                    • You may already have <Text style={styles.hintStrong}>{h.missingSkill}</Text> as{' '}
+                    <Text style={styles.hintStrong}>{h.youMayAlreadyHave}</Text>. {h.suggestion || ''}
+                  </Text>
+                ))}
+              </View>
+            )}
+
+            {/* Fallback marker — be honest when the matching-engine was down */}
+            {consistencyMode === 'fallback' && (
+              <Text style={styles.fallbackNote}>
+                Generated in fallback mode — the match-breakdown card may differ slightly.
+              </Text>
+            )}
+
+            {/* Resources */}
+            {resources.length > 0 ? (
+              <View style={styles.resourcesList}>
+                {resources.map((resource, index) => {
+                  const isCompleted = resource.isCompleted || resource.completed;
+                  const isFree = Number(resource.cost || 0) === 0;
+                  const priceLabel = resource.priceLabel || (isFree ? 'Free' : null);
+                  return (
+                    <View key={resource._id || resource.id || resource.url || index} style={styles.resourceItem}>
+                      <View style={styles.resourceTopRow}>
+                        <Ionicons
+                          name={isCompleted ? 'checkmark-circle' : 'ellipse-outline'}
+                          size={20}
+                          color={isCompleted ? '#10B981' : '#D1D5DB'}
+                        />
+                        <View style={styles.resourceTextSection}>
+                          <Text
+                            style={[
+                              styles.resourceTitle,
+                              isCompleted && styles.resourceTitleCompleted,
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {resource.title || resource.name || `Resource ${index + 1}`}
+                          </Text>
+                          <View style={styles.metaRow}>
+                            {!!resource.provider && (
+                              <Text style={styles.metaText}>{resource.provider}</Text>
+                            )}
+                            {!!resource.type && (
+                              <Text style={styles.metaDot}>·</Text>
+                            )}
+                            {!!resource.type && (
+                              <Text style={styles.metaText}>{resource.type}</Text>
+                            )}
+                            {!!resource.estimatedDuration && (
+                              <>
+                                <Text style={styles.metaDot}>·</Text>
+                                <Text style={styles.metaText}>{resource.estimatedDuration}</Text>
+                              </>
+                            )}
+                            {typeof resource.rating === 'number' && resource.rating > 0 && (
+                              <>
+                                <Text style={styles.metaDot}>·</Text>
+                                <Ionicons name="star" size={11} color="#F59E0B" />
+                                <Text style={styles.metaText}>{resource.rating.toFixed(1)}</Text>
+                              </>
+                            )}
+                          </View>
+                          <View style={styles.pillRow}>
+                            {priceLabel && (
+                              <View style={[styles.pill, isFree ? styles.pillFree : styles.pillPaid]}>
+                                <Text style={[styles.pillText, isFree ? styles.pillFreeText : styles.pillPaidText]}>
+                                  {priceLabel}
+                                </Text>
+                              </View>
+                            )}
+                            {!!resource.difficultyLevel && (
+                              <View style={styles.pill}>
+                                <Text style={styles.pillText}>{resource.difficultyLevel}</Text>
+                              </View>
+                            )}
+                            {!!resource.bridgesSkill && (
+                              <View style={[styles.pill, styles.pillBridge]}>
+                                <Ionicons name="git-merge-outline" size={10} color="#7C3AED" />
+                                <Text style={[styles.pillText, styles.pillBridgeText]}>
+                                  bridges {resource.bridgesSkill}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* WHY THIS COURSE? panel — §6.2.4 panel D */}
+                      {!!resource.whyThisCourse && (
+                        <View style={styles.whyBlock}>
+                          <Text style={styles.whyLabel}>WHY THIS COURSE?</Text>
+                          <Text style={styles.whyText}>{resource.whyThisCourse}</Text>
+                        </View>
+                      )}
+
+                      <View style={styles.resourceActions}>
+                        {resource.url && (
+                          <TouchableOpacity
+                            onPress={() => handleOpenLink(resource.url)}
+                            style={styles.openButton}
+                          >
+                            <Ionicons name="open-outline" size={14} color="#3B82F6" />
+                            <Text style={styles.openButtonText}>Open</Text>
+                          </TouchableOpacity>
+                        )}
+                        {!isCompleted && (
+                          <TouchableOpacity
+                            onPress={() => handleUpdateProgress(pathId, index)}
+                            style={styles.completeButton}
+                          >
+                            <Text style={styles.completeButtonText}>Mark done</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={styles.noResources}>
+                <Text style={styles.noResourcesText}>No resources available yet.</Text>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -470,25 +583,111 @@ const styles = StyleSheet.create({
   progressBarComplete: {
     backgroundColor: '#10B981',
   },
-  resourcesList: {
+  expandedSection: {
     borderTopWidth: 1,
     borderTopColor: '#F3F4F6',
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 12,
     paddingBottom: 12,
   },
-  resourceItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F9FAFB',
+  rationaleBlock: {
+    backgroundColor: '#FFF7ED',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
   },
-  resourceLeft: {
+  rationaleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  rationaleLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9A3412',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  rationaleText: {
+    fontSize: 13,
+    color: '#7C2D12',
+    lineHeight: 18,
+  },
+  analysisBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  analysisText: {
     flex: 1,
+    fontSize: 12,
+    color: '#0C4A6E',
+    lineHeight: 16,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  missingChip: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  missingChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#B91C1C',
+  },
+  hintsBlock: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  hintsHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  hintItem: {
+    fontSize: 12,
+    color: '#14532D',
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  hintStrong: {
+    fontWeight: '700',
+  },
+  fallbackNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#92400E',
+    marginBottom: 8,
+  },
+  resourcesList: {
+    marginTop: 4,
+  },
+  resourceItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  resourceTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 10,
   },
   resourceTextSection: {
@@ -496,34 +695,123 @@ const styles = StyleSheet.create({
   },
   resourceTitle: {
     fontSize: 14,
-    color: '#374151',
+    fontWeight: '600',
+    color: '#1F2937',
   },
   resourceTitleCompleted: {
     textDecorationLine: 'line-through',
     color: '#9CA3AF',
   },
-  resourceType: {
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 3,
+    marginTop: 3,
+  },
+  metaText: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  metaDot: {
     fontSize: 11,
     color: '#9CA3AF',
-    marginTop: 2,
+    marginHorizontal: 2,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 6,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pillText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#374151',
+    textTransform: 'capitalize',
+  },
+  pillFree: {
+    backgroundColor: '#DCFCE7',
+  },
+  pillFreeText: {
+    color: '#166534',
+  },
+  pillPaid: {
+    backgroundColor: '#FEF3C7',
+  },
+  pillPaidText: {
+    color: '#92400E',
+  },
+  pillBridge: {
+    backgroundColor: '#EDE9FE',
+  },
+  pillBridgeText: {
+    color: '#5B21B6',
+    textTransform: 'none',
+  },
+  whyBlock: {
+    marginTop: 8,
+    marginLeft: 30,
+    backgroundColor: '#FAFAFA',
+    borderLeftWidth: 2,
+    borderLeftColor: '#F97316',
+    paddingLeft: 10,
+    paddingVertical: 6,
+    paddingRight: 8,
+    borderRadius: 4,
+  },
+  whyLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#9A3412',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  whyText: {
+    fontSize: 12,
+    color: '#374151',
+    lineHeight: 16,
   },
   resourceActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 8,
+    marginLeft: 30,
   },
-  resourceLinkButton: {
-    padding: 4,
+  openButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 6,
+  },
+  openButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#3B82F6',
   },
   completeButton: {
     backgroundColor: '#F97316',
     borderRadius: 6,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   completeButtonText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   noResources: {
