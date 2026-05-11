@@ -2,10 +2,6 @@ const mongoose = require('mongoose');
 
 /**
  * Application (SDD Chapter 4, Table 4.11)
- * A worker's submission against an opportunity. matchScore is
- * returned by the matching-engine microservice at submission time
- * and cached here so employer review lists can be sorted without a
- * round-trip to the ML service.
  */
 const applicationSchema = new mongoose.Schema({
   profileId: {
@@ -50,6 +46,9 @@ const applicationSchema = new mongoose.Schema({
       fileType: String,
     },
   ],
+  // 🆕 Pin support – appears in "Pinned Applications" section on Messages tab
+  isPinned: { type: Boolean, default: false },
+  pinnedAt: { type: Date, default: null },
   submittedAt: { type: Date, default: Date.now },
 });
 
@@ -57,5 +56,7 @@ applicationSchema.index({ profileId: 1, opportunityId: 1 }, { unique: true });
 applicationSchema.index({ opportunityId: 1, status: 1 });
 applicationSchema.index({ opportunityId: 1, matchScore: -1 });
 applicationSchema.index({ profileId: 1, submittedAt: -1 });
+// 🆕 Index for efficient sorting of pinned applications
+applicationSchema.index({ profileId: 1, isPinned: -1, pinnedAt: -1 });
 
 module.exports = mongoose.model('Application', applicationSchema);

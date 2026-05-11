@@ -1,31 +1,36 @@
 const mongoose = require('mongoose');
 
-const notificationSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
+const notificationSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    type: {
+      type: String,
+      enum: [
+        'message',
+        'match',
+        'application_update',
+        'opportunity',
+        'learning',
+        'fraud_alert',
+        'system',
+        'connection_request',
+        'reminder',
+        'mention',
+        'job_alert'
+      ],
+      required: true,
+    },
+    title: { type: String, trim: true, maxlength: 100 },
+    content: { type: String, required: true, maxlength: 500 },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+    isRead: { type: Boolean, default: false },
+    readAt: { type: Date },
+    createdAt: { type: Date, default: Date.now, index: true },
   },
-  type: {
-    type: String,
-    required: true,
-    enum: [
-      'match',
-      'application_update',
-      'message',
-      'learning',
-      'fraud_alert',
-      'system',
-      'connection_request',
-    ],
-  },
-  content: { type: String, required: true },
-  isRead: { type: Boolean, default: false },
-  metadata: { type: mongoose.Schema.Types.Mixed },
-  createdAt: { type: Date, default: Date.now },
-});
+  { timestamps: true }
+);
 
-notificationSchema.index({ userId: 1, isRead: 1 });
-notificationSchema.index({ createdAt: -1 });
+// Index for efficient unread count queries
+notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

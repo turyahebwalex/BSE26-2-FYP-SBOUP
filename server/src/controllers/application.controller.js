@@ -38,6 +38,9 @@ exports.applyForOpportunity = async (req, res) => {
       matchScore,
       matchBreakdown,
       attachments: attachments || [],
+      // New fields: isPinned defaults to false, pinnedAt will be set later if needed
+      isPinned: false,
+      pinnedAt: null,
     });
 
     opportunity.applicationCount += 1;
@@ -67,7 +70,8 @@ exports.getMyApplications = async (req, res) => {
         path: 'opportunityId',
         populate: { path: 'companyId', select: 'name logoUrl' },
       })
-      .sort({ submittedAt: -1 });
+      // Sort: pinned first (by pinnedAt descending), then by submittedAt descending
+      .sort({ isPinned: -1, pinnedAt: -1, submittedAt: -1 });
     res.json({ applications });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch applications.' });
@@ -135,5 +139,33 @@ exports.withdrawApplication = async (req, res) => {
     res.json({ application });
   } catch (error) {
     res.status(500).json({ error: 'Failed to withdraw application.' });
+  }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// PIN / UNPIN APPLICATION
+// ────────────────────────────────────────────────────────────────────────────
+exports.togglePinApplication = async (req, res) => {
+  try {
+    const applicationId = req.params.id;
+    const userId = req.user._id;
+
+    // Ensure application belongs to the user
+    const application = await Application.findById(applicationId).populate('profileId');
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    if (application.profileId.userId.toString() !== userId.toString()) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    application.isPinned = !application.isPinned;
+    application.pinnedAt = application.isPinned ? new Date() : null;
+    await application.save();
+
+    res.json({ success: true, isPinned: application.isPinned });
+  } catch (error) {
+    console.error('Toggle pin error:', error);
+    res.status(500).json({ error: 'Failed to toggle pin' });
   }
 };

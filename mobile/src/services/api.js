@@ -4,13 +4,11 @@ import Constants from 'expo-constants';
 
 const API_PORT = 5000;
 
-// Auto-detect the backend host from Metro's dev-server address. When a phone
-// connects via LAN, hostUri looks like "10.70.1.222:8081" — using that same
-// IP for the backend means any collaborator on the same Wi-Fi as their phone
-// can run `docker compose up --build` without editing mobile/.env.
-// Set EXPO_PUBLIC_API_URL only to override (tunnels, deployed backend, etc).
+// Auto-detect the backend host from Metro's dev-server address.
 function resolveBaseUrl() {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
 
   const hostUri =
     Constants.expoConfig?.hostUri ||
@@ -27,10 +25,11 @@ function resolveBaseUrl() {
 }
 
 const BASE_URL = resolveBaseUrl();
+console.log('🔍 [API] BASE_URL =', BASE_URL);
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 300000,  // 5 minutes — needed for local Ollama on CPU
+  timeout: 300000, // 5 minutes — needed for local Ollama on CPU
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -54,8 +53,6 @@ const processQueue = (error, token = null) => {
 };
 
 // Endpoints where a 401 means "bad credentials", not "expired session".
-// Trying to refresh in those cases swallows the real error with a confusing
-// "No refresh token" message.
 const AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh'];
 
 api.interceptors.response.use(
@@ -65,6 +62,7 @@ api.interceptors.response.use(
     const isAuthEndpoint = AUTH_ENDPOINTS.some((path) =>
       originalRequest?.url?.endsWith(path)
     );
+
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
@@ -224,3 +222,4 @@ export const chatbotAPI = {
 };
 
 export default api;
+export { BASE_URL };

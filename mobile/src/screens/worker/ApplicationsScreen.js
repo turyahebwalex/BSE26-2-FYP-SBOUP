@@ -7,10 +7,11 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { applicationAPI } from '../../services/api';
+import api, { applicationAPI } from '../../services/api';
 
 const STATUS_CONFIG = {
   submitted: { label: 'Submitted', bg: '#F3F4F6', text: '#6B7280', icon: 'time-outline' },
@@ -50,10 +51,26 @@ const ApplicationsScreen = ({ navigation }) => {
     fetchApplications();
   };
 
+  const togglePin = async (applicationId) => {
+    try {
+      const response = await api.put(`/applications/${applicationId}/pin`);
+      if (response.data.success) {
+        fetchApplications(); // refresh list
+      } else {
+        Alert.alert('Error', 'Could not pin/unpin application.');
+      }
+    } catch (error) {
+      console.error('Toggle pin error:', error);
+      Alert.alert('Error', 'Failed to pin/unpin. Please try again.');
+    }
+  };
+
   const renderApplication = ({ item }) => {
-    const opportunity = item.opportunity || {};
+    const opportunity = item.opportunityId || item.opportunity || {};
     const status = item.status || 'submitted';
     const config = STATUS_CONFIG[status] || STATUS_CONFIG.submitted;
+    const isPinned = item.isPinned === true;
+    const appId = item._id;
 
     return (
       <TouchableOpacity
@@ -72,12 +89,24 @@ const ApplicationsScreen = ({ navigation }) => {
               {opportunity.title || 'Opportunity'}
             </Text>
             <Text style={styles.cardCompany} numberOfLines={1}>
-              {opportunity.company || opportunity.employer?.fullName || 'Company'}
+              {opportunity.companyName || opportunity.company || 'Company'}
             </Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: config.bg }]}>
-            <Ionicons name={config.icon} size={12} color={config.text} />
-            <Text style={[styles.statusText, { color: config.text }]}>{config.label}</Text>
+          <View style={styles.rightHeader}>
+            {/* Toggle button for pin/unpin */}
+            <TouchableOpacity
+              onPress={() => togglePin(appId)}
+              style={[styles.toggleButton, isPinned && styles.toggleButtonActive]}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.toggleButtonText, isPinned && styles.toggleButtonTextActive]}>
+                {isPinned ? 'Unpin' : 'Pin'}
+              </Text>
+            </TouchableOpacity>
+            <View style={[styles.statusBadge, { backgroundColor: config.bg }]}>
+              <Ionicons name={config.icon} size={12} color={config.text} />
+              <Text style={[styles.statusText, { color: config.text }]}>{config.label}</Text>
+            </View>
           </View>
         </View>
 
@@ -92,8 +121,8 @@ const ApplicationsScreen = ({ navigation }) => {
             <Ionicons name="calendar-outline" size={14} color="#9CA3AF" />
             <Text style={styles.metaText}>
               Applied{' '}
-              {item.createdAt
-                ? new Date(item.createdAt).toLocaleDateString('en-UG', {
+              {item.submittedAt
+                ? new Date(item.submittedAt).toLocaleDateString('en-UG', {
                     month: 'short',
                     day: 'numeric',
                     year: 'numeric',
@@ -108,7 +137,7 @@ const ApplicationsScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={22} color="#1F2937" />
@@ -124,7 +153,7 @@ const ApplicationsScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={22} color="#1F2937" />
@@ -240,6 +269,31 @@ const styles = StyleSheet.create({
   cardCompany: {
     fontSize: 13,
     color: '#6B7280',
+  },
+  rightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  toggleButton: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#F97316',
+    borderColor: '#F97316',
+  },
+  toggleButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  toggleButtonTextActive: {
+    color: '#FFFFFF',
   },
   statusBadge: {
     flexDirection: 'row',
