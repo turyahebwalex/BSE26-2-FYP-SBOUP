@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { opportunityAPI, applicationAPI, matchingAPI, profileAPI } from '../../services/api';
+import { opportunityAPI, applicationAPI, matchingAPI, profileAPI, learningAPI } from '../../services/api';
 import ReportBottomSheet from '../../components/ReportBottomSheet';
 
 // ── Signal row helper ─────────────────────────────────────────────────────────
@@ -46,6 +46,34 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [error, setError] = useState(null);
   const [profileId, setProfileId] = useState(null);
   const [showReport, setShowReport] = useState(false);
+  const [bridging, setBridging] = useState(false);
+
+  // Opportunity-driven pathway generation — engages the §6.0 matching-engine
+  // consistency contract on the AI service so the resulting pathway targets
+  // the exact same missing-skill names the breakdown card shows.
+  const handleBridgeSkillGap = async () => {
+    const oppId = opportunity?._id || opportunity?.id;
+    if (!oppId) return;
+    setBridging(true);
+    try {
+      const { data } = await learningAPI.generate({ opportunityId: oppId });
+      const path = data?.learningPath || data?.data?.learningPath || null;
+      if (path) {
+        Alert.alert('Learning path created', 'Tailored for the gaps on this role.', [
+          { text: 'View', onPress: () => navigation.navigate('Learning') },
+          { text: 'OK', style: 'cancel' },
+        ]);
+      } else {
+        Alert.alert('Created', 'Open Learning Paths to view it.');
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error ||
+        'Could not generate a learning path. The learning service may be unavailable.';
+      Alert.alert('Error', msg);
+    } finally {
+      setBridging(false);
+    }
+  };
 
   useEffect(() => {
     if (!passedHasFullDetails && resolvedId) {
@@ -362,9 +390,24 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                       ))}
                     </View>
                     <Text style={styles.missingHint}>
-                      Add these skills to your profile or complete a learning path to improve your
+                      Add these skills to your profile or bridge a learning path to improve your
                       score.
                     </Text>
+                    <TouchableOpacity
+                      style={[styles.bridgeButton, bridging && styles.bridgeButtonDisabled]}
+                      onPress={handleBridgeSkillGap}
+                      disabled={bridging}
+                      activeOpacity={0.8}
+                    >
+                      {bridging ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="sparkles" size={14} color="#FFFFFF" />
+                          <Text style={styles.bridgeButtonText}>Bridge a skill gap</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
@@ -853,6 +896,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     lineHeight: 17,
+  },
+  bridgeButton: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F97316',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  bridgeButtonDisabled: {
+    backgroundColor: '#FDBA74',
+  },
+  bridgeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
 
