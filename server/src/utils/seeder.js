@@ -57,6 +57,11 @@ const skills = [
   { skillName: 'Teaching', category: 'Communication' },
   { skillName: 'Tutoring', category: 'Communication' },
   { skillName: 'Translation', category: 'Communication' },
+  { skillName: 'Communication Skills', category: 'Communication' },
+  { skillName: 'Customer Service', category: 'Communication' },
+  // Marketing / business extras (these names align with curated catalog keys
+  // so the learning-engine fallback returns rich resources for them).
+  { skillName: 'Digital Marketing', category: 'Business' },
   // Other
   { skillName: 'Cleaning', category: 'Other' },
   { skillName: 'Cooking', category: 'Other' },
@@ -774,6 +779,180 @@ const seed = async () => {
         experienceLevel: 'mid',
         isRemote: false,
         applicationMethod: 'external',
+      }
+    );
+
+    // ====================================================================
+    // PARTIAL-MATCH OPPORTUNITIES (for demo worker JS+React+Mobile)
+    // ====================================================================
+    // The demo worker has JavaScript, React, and Mobile Development. The
+    // opportunities below each share 2 of these skills but additionally
+    // require 1-2 skills the worker lacks — producing recommendations with
+    // matchScore high enough to clear the dashboard-fit bucket pre-filter
+    // (>= 20 score) and aggregate to a 50-70% category mean, which makes
+    // the "Close Your Skill Gaps" rail populate with real gap chips.
+    // Missing-skill names deliberately align with curated catalog keys so
+    // the auto-generated LearningPaths return non-empty resource lists.
+    console.log('\n--- Seeding partial-match opportunities ---');
+
+    const [tsAnaSkill, uxSkill, dmkSkill, mktSkill, csSkill, commSkill,
+           pmSkill, gfxOnlySkill, cwSkill] = await Promise.all([
+      Skill.findOne({ skillName: 'Data Analysis' }),
+      Skill.findOne({ skillName: 'UI/UX Design' }),
+      Skill.findOne({ skillName: 'Digital Marketing' }),
+      Skill.findOne({ skillName: 'Marketing' }),
+      Skill.findOne({ skillName: 'Customer Service' }),
+      Skill.findOne({ skillName: 'Communication Skills' }),
+      Skill.findOne({ skillName: 'Project Management' }),
+      Skill.findOne({ skillName: 'Graphic Design' }),
+      Skill.findOne({ skillName: 'Content Writing' }),
+    ]);
+    const mobileSkill = await Skill.findOne({ skillName: 'Mobile Development' });
+
+    // 1. formal — UI/UX Engineer
+    await ensureOpportunity(
+      { title: 'UI/UX Engineer', postedByUserId: employer._id },
+      {
+        companyId: companyDocs['Kampala Tech Hub']._id,
+        postedByUserId: employer._id,
+        title: 'UI/UX Engineer',
+        category: 'formal',
+        requiredSkills: [jsSkill._id, reactSkill._id, uxSkill._id, tsAnaSkill._id],
+        description: 'Own the design-to-implementation pipeline for our flagship product. Pair with PMs to wireframe, prototype in Figma, then ship in React. Strong eye for accessibility and data-driven design decisions.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 1800000, max: 2800000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 8,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: false,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 2. formal — Full Stack Developer (React + Python)
+    await ensureOpportunity(
+      { title: 'Full Stack Developer', postedByUserId: employer._id },
+      {
+        companyId: companyDocs['Kampala Tech Hub']._id,
+        postedByUserId: employer._id,
+        title: 'Full Stack Developer',
+        category: 'formal',
+        requiredSkills: [jsSkill._id, reactSkill._id, pySkill._id, tsAnaSkill._id],
+        description: 'Build internal tools end-to-end: React frontend, Python (FastAPI) backend, light data-analysis dashboards on top of PostgreSQL.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 2200000, max: 3500000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 10,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: true,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 3. freelance — Mobile App Designer-Developer
+    await ensureOpportunity(
+      { title: 'Mobile App Designer-Developer', postedByUserId: nileEmployer._id },
+      {
+        companyId: companyDocs['Nile Media Group']._id,
+        postedByUserId: nileEmployer._id,
+        title: 'Mobile App Designer-Developer',
+        category: 'freelance',
+        requiredSkills: [mobileSkill._id, reactSkill._id, gfxOnlySkill._id, uxSkill._id],
+        description: 'Design and ship a 2-month MVP mobile app for a regional NGO. Own both the visual design (Figma) and the React Native implementation.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 800000, max: 1500000, currency: 'UGX', period: 'project' },
+        deadline: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 14,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: true,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 4. freelance — Marketing-Tech Builder
+    await ensureOpportunity(
+      { title: 'Marketing Landing Page Builder', postedByUserId: nileEmployer._id },
+      {
+        companyId: companyDocs['Nile Media Group']._id,
+        postedByUserId: nileEmployer._id,
+        title: 'Marketing Landing Page Builder',
+        category: 'freelance',
+        requiredSkills: [jsSkill._id, reactSkill._id, dmkSkill._id, cwSkill._id],
+        description: 'Build and A/B-test high-converting landing pages for our client campaigns. Comfortable wearing both engineer and marketer hats.',
+        location: 'Remote',
+        compensationRange: { min: 300000, max: 800000, currency: 'UGX', period: 'project' },
+        deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 18,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: true,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 5. contract — Customer Portal Web Developer (3-month)
+    await ensureOpportunity(
+      { title: 'Customer Portal Web Developer', postedByUserId: healthEmployer._id },
+      {
+        companyId: companyDocs['Equator Health Services']._id,
+        postedByUserId: healthEmployer._id,
+        title: 'Customer Portal Web Developer',
+        category: 'contract',
+        requiredSkills: [jsSkill._id, reactSkill._id, csSkill._id, commSkill._id],
+        description: '3-month contract to build the patient self-service portal. You will work directly with frontline customer-service staff and translate their needs into clean React UI.',
+        location: 'Jinja, Uganda',
+        compensationRange: { min: 1500000, max: 2200000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 18 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 11,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: false,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 6. contract — Frontend + Analytics Contractor
+    await ensureOpportunity(
+      { title: 'Frontend + Analytics Contractor', postedByUserId: employer._id },
+      {
+        companyId: companyDocs['Kampala Tech Hub']._id,
+        postedByUserId: employer._id,
+        title: 'Frontend + Analytics Contractor',
+        category: 'contract',
+        requiredSkills: [jsSkill._id, reactSkill._id, tsAnaSkill._id, mktSkill._id],
+        description: 'Build dashboards on top of our marketing-attribution data. Strong React + SQL + a marketer\'s instinct for the questions worth asking.',
+        location: 'Remote',
+        compensationRange: { min: 1700000, max: 2400000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 9,
+        status: 'published',
+        experienceLevel: 'mid',
+        isRemote: true,
+        applicationMethod: 'internal',
+      }
+    );
+
+    // 7. apprenticeship — Junior Web Developer Trainee
+    await ensureOpportunity(
+      { title: 'Junior Web Developer Trainee', postedByUserId: employer._id },
+      {
+        companyId: companyDocs['Kampala Tech Hub']._id,
+        postedByUserId: employer._id,
+        title: 'Junior Web Developer Trainee',
+        category: 'apprenticeship',
+        requiredSkills: [jsSkill._id, reactSkill._id, pmSkill._id],
+        description: '12-month apprenticeship pairing you with a senior engineer. You ship real features end-to-end with mentorship; you also pick up the project-management side of how feature work gets scoped.',
+        location: 'Kampala, Uganda',
+        compensationRange: { min: 600000, max: 900000, currency: 'UGX', period: 'monthly' },
+        deadline: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000),
+        fraudRiskScore: 5,
+        status: 'published',
+        experienceLevel: 'entry',
+        isRemote: false,
+        applicationMethod: 'internal',
       }
     );
 
