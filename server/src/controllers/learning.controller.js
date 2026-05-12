@@ -266,6 +266,35 @@ exports.autoSuggestPaths = async (req, res) => {
     const newPaths = results.filter((r) => r.path).map((r) => r.path);
     const failures = results.filter((r) => r.error);
 
+    // Per-path notification with kind:'suggested' so the worker has a
+    // bell-icon entry per new pathway and can Start each one with a
+    // single tap from the Notifications screen. Fire-and-forget — a
+    // notification failure shouldn't roll back the persisted paths.
+    for (const p of newPaths) {
+      const skillLabel = p.targetSkill || 'a missing skill';
+      const resourceCount = Array.isArray(p.resources) ? p.resources.length : 0;
+      const resPhrase = resourceCount === 1 ? '1 resource' : `${resourceCount} resources`;
+      notificationService.create({
+        userId: req.user._id,
+        type: 'learning',
+        title: `New pathway suggested — ${skillLabel}`,
+        content:
+          `We lined up a ${skillLabel} pathway from your top skill gaps. ` +
+          `${resPhrase} curated for you. Tap Start to begin.`,
+        metadata: {
+          // 'suggested' tells the mobile to label the action button
+          // 'Start' and navigate to LearningScreen with focusPathId
+          // auto-expanded so the worker lands on the new pathway.
+          kind: 'suggested',
+          learningPathId: String(p._id),
+          targetSkill: p.targetSkill,
+          resourceCount,
+        },
+      }).catch((err) =>
+        logger.warn(`autoSuggest notification: ${err.message}`)
+      );
+    }
+
     res.json({
       generated: newPaths.length,
       skipped,
@@ -433,6 +462,11 @@ exports.updateProgress = async (req, res) => {
           : 'Pathway complete',
         content,
         metadata: {
+          // 'completed' tells the mobile to label the action button
+          // "View" — the worker is reviewing a finished pathway, not
+          // starting a new one. The matching 'suggested' kind is set
+          // by autoSuggestPaths when fresh paths are generated.
+          kind: 'completed',
           learningPathId: String(path._id),
           opportunityId: path.opportunityId ? String(path.opportunityId) : null,
           bridgedSkill,
