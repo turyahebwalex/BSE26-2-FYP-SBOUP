@@ -25,11 +25,47 @@ const persistLearningPath = async ({ userId, targetSkill, opportunityId }, data)
   });
 };
 
+// Look up an existing path that would duplicate a /generate request, so
+// we can return it instead of inserting another row. Opportunity-driven
+// requests dedupe on opportunityId; freeform requests dedupe on the
+// normalised targetSkill string. This is what makes 'Bridge a skill gap'
+// idempotent — tapping the CTA twice doesn't leave the worker with two
+// identical Marketing paths cluttering the list.
+const findExistingPath = async ({ userId, targetSkill, opportunityId }) => {
+  if (opportunityId) {
+    return LearningPath.findOne({ userId, opportunityId });
+  }
+  if (targetSkill) {
+    const normalised = String(targetSkill).trim();
+    if (!normalised) return null;
+    // Case-insensitive exact match — anchored regex avoids substring
+    // collisions (e.g. 'React' would otherwise match 'React Native').
+    return LearningPath.findOne({
+      userId,
+      opportunityId: null,
+      targetSkill: new RegExp(`^${normalised.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    });
+  }
+  return null;
+};
+
 exports.generateLearningPath = async (req, res) => {
   try {
     const { targetSkill, opportunityId } = req.body;
     if (!targetSkill && !opportunityId) {
       return res.status(400).json({ error: 'Provide either targetSkill or opportunityId.' });
+    }
+
+    const existing = await findExistingPath({
+      userId: req.user._id,
+      targetSkill,
+      opportunityId,
+    });
+    if (existing) {
+      // Surface the existing path with a marker so the mobile UI can show
+      // a "you already have this — viewing it" toast instead of pretending
+      // a fresh one was created.
+      return res.status(200).json({ learningPath: existing, alreadyExists: true });
     }
 
     const result = await ml.generateLearningPath({
@@ -250,7 +286,9 @@ exports.updateProgress = async (req, res) => {
       return res.status(400).json({ error: 'Invalid resourceIndex.' });
     }
     const resource = path.resources[idx];
-    const newlyCompleted = Boolean(isCompleted) && !resource.isCompleted;
+    const wasCompleted = Boolean(resource.isCompleted);
+    const newlyCompleted = Boolean(isCompleted) && !wasCompleted;
+    const wasPathCompleted = path.progress === 100;
     resource.isCompleted = Boolean(isCompleted);
 
     const completed = path.resources.filter((r) => r.isCompleted).length;
@@ -261,20 +299,51 @@ exports.updateProgress = async (req, res) => {
 
     await path.save();
 
-    // Fire-and-forget: tell the AI service to upsert ProfileSkill for
-    // the bridged skill. Failure here is logged but does not affect the
-    // local LearningPath update — the worker still sees their progress.
-    // SDD §3.2.5 feedback loop closes via Mongo on the next match call.
+    // Close the SDD §3.2.5 feedback loop synchronously when the worker
+    // marks a resource done: upsert ProfileSkill via the AI service, then
+    // rescore the originating opportunity so the response carries the
+    // fresh match score. Awaiting (rather than fire-and-forget) lets us
+    // tell the worker exactly how much their match improved — without it,
+    // the mobile alert would show stale data and the worker has no way
+    // to know whether their effort moved the needle.
+    let newMatchScore = null;
+    let bridgedSkill = null;
     if (newlyCompleted && resource.url) {
-      ml.markLearningProgress({
+      bridgedSkill = resource.bridgesSkill || path.targetSkill || null;
+      const hookResult = await ml.markLearningProgress({
         userId: req.user._id,
         learningPathId: path._id,
         resourceUrl: resource.url,
         isCompleted: true,
-      }).catch((err) => logger.warn(`learning-engine progress hook: ${err.message}`));
+      });
+      if (!hookResult.ok) {
+        logger.warn(`learning-engine progress hook: ${hookResult.error}`);
+      }
+
+      if (path.opportunityId) {
+        const profile = await Profile.findOne({ userId: req.user._id })
+          .select('_id')
+          .lean();
+        if (profile) {
+          const scoreResult = await ml.scoreMatch({
+            profileId: profile._id,
+            opportunityId: path.opportunityId,
+          });
+          if (scoreResult.ok) {
+            const payload = scoreResult.data || {};
+            const raw = payload.matchScore ?? payload.score ?? payload.data?.matchScore;
+            if (typeof raw === 'number') newMatchScore = Math.round(raw);
+          }
+        }
+      }
     }
 
-    res.json({ learningPath: path });
+    res.json({
+      learningPath: path,
+      pathJustCompleted: path.progress === 100 && !wasPathCompleted,
+      bridgedSkill,
+      newMatchScore,
+    });
   } catch (error) {
     logger.warn(`updateProgress: ${error.message}`);
     res.status(500).json({ error: 'Failed to update progress.' });
