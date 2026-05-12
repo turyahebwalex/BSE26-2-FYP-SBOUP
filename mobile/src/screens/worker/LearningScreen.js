@@ -176,28 +176,55 @@ const LearningScreen = ({ navigation, route }) => {
   const handleUpdateProgress = async (pathId, resourceIndex) => {
     try {
       const { data } = await learningAPI.updateProgress(pathId, resourceIndex, true);
-      // The server returns three useful flags after a mark-done:
-      //   - bridgedSkill: which skill the resource was tagged to bridge
-      //   - newMatchScore: the recomputed match for the path's opportunity
-      //   - pathJustCompleted: true on the transition to 100%
-      // Surfacing them in the alert closes the SDD §3.2.5 feedback loop
-      // from the worker's perspective — they see *why* marking a resource
-      // mattered, not just "OK".
+      // Server response carries everything needed for a comprehensive
+      // completion message:
+      //   - bridgedSkill: which gap closed
+      //   - previousMatchScore / newMatchScore: pre vs post bridge
+      //   - opportunityTitle: the role the path is bound to (if any)
+      //   - pathJustCompleted: true only on the 0->100 transition
       const bridged = data?.bridgedSkill;
+      const prevScore = data?.previousMatchScore;
       const newScore = data?.newMatchScore;
+      const oppTitle = data?.opportunityTitle;
       const justCompleted = data?.pathJustCompleted;
+
       let title = 'Resource completed';
-      let body = bridged
-        ? `Nice — your ${bridged} skill is now closer to filling that gap.`
-        : 'Marked as completed.';
+      let body;
       if (justCompleted) {
-        title = 'Pathway complete!';
+        title = oppTitle
+          ? `Pathway complete — ${oppTitle}`
+          : 'Pathway complete!';
+        const intro = oppTitle
+          ? `You finished every resource in the ${oppTitle} pathway`
+          : `You finished every resource in this pathway`;
+        const closes = bridged
+          ? `, closing your ${bridged} gap.`
+          : '.';
+        body = intro + closes;
+        if (oppTitle && typeof newScore === 'number') {
+          if (typeof prevScore === 'number' && newScore !== prevScore) {
+            const delta = newScore - prevScore;
+            const sign = delta > 0 ? '+' : '';
+            body += `\n\nMatch for ${oppTitle}: ${prevScore}% → ${newScore}% (${sign}${delta} pts).`;
+          } else {
+            body += `\n\nMatch for ${oppTitle} is now ${newScore}%.`;
+          }
+        }
+        body += `\n\nYou'll find this milestone in your notifications.`;
+      } else {
+        // Mid-path mark-done — keep the alert short.
         body = bridged
-          ? `You've finished the ${bridged} pathway. Great work.`
-          : 'You\'ve finished this pathway. Great work.';
-      }
-      if (typeof newScore === 'number') {
-        body += `\n\nMatch for this role is now ${newScore}%.`;
+          ? `Nice — your ${bridged} skill is now closer to filling that gap.`
+          : 'Marked as completed.';
+        if (typeof newScore === 'number' && oppTitle) {
+          if (typeof prevScore === 'number' && newScore !== prevScore) {
+            const delta = newScore - prevScore;
+            const sign = delta > 0 ? '+' : '';
+            body += `\n\nMatch for ${oppTitle}: ${prevScore}% → ${newScore}% (${sign}${delta} pts).`;
+          } else {
+            body += `\n\nMatch for ${oppTitle} is now ${newScore}%.`;
+          }
+        }
       }
       Alert.alert(title, body);
       fetchPaths();
