@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,9 +33,16 @@ const LearningScreen = ({ navigation, route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedPath, setExpandedPath] = useState(focusPathId);
   const [error, setError] = useState(null);
-  const [generateModalVisible, setGenerateModalVisible] = useState(Boolean(prefillSkill));
+  // Modal starts closed; the prefillSkill effect below opens it only when
+  // no existing path covers that skill. Previously we opened it eagerly
+  // which made the dashboard's "Close Your Skill Gaps" card pop the
+  // generate modal even when auto-suggest had already produced a path.
+  const [generateModalVisible, setGenerateModalVisible] = useState(false);
   const [targetSkill, setTargetSkill] = useState(prefillSkill || '');
   const [generating, setGenerating] = useState(false);
+  // Tracks which prefillSkill value we've already resolved so re-renders
+  // don't repeatedly open/close the modal as `paths` updates.
+  const resolvedPrefillRef = useRef(null);
   // autoSuggesting is shown as a small inline banner while the server is
   // composing paths from the worker's matching-engine recommendations.
   // The banner stays out of the empty-state CTA so the user can still
@@ -100,12 +107,30 @@ const LearningScreen = ({ navigation, route }) => {
     if (focusPathId) setExpandedPath(focusPathId);
   }, [focusPathId]);
 
+  // Resolve a prefillSkill request from the dashboard:
+  //   - if a path with that target already exists, auto-expand it so the
+  //     worker sees the ready-made plan (auto-suggest usually pre-creates
+  //     these, so the modal would just be redundant friction);
+  //   - otherwise, open the generate modal with the skill pre-filled.
+  // We wait until paths have loaded to make the call, and we key the
+  // resolution on the specific prefillSkill value so tapping a different
+  // dashboard card re-runs the lookup.
   useEffect(() => {
-    if (prefillSkill) {
+    if (!prefillSkill || loading) return;
+    if (resolvedPrefillRef.current === prefillSkill) return;
+    const norm = String(prefillSkill).trim().toLowerCase();
+    const match = paths.find(
+      (p) => String(p.targetSkill || '').trim().toLowerCase() === norm
+    );
+    if (match) {
+      setExpandedPath(match._id || match.id);
+      setGenerateModalVisible(false);
+    } else {
       setTargetSkill(prefillSkill);
       setGenerateModalVisible(true);
     }
-  }, [prefillSkill]);
+    resolvedPrefillRef.current = prefillSkill;
+  }, [prefillSkill, paths, loading]);
 
   // Refetch when the screen comes back into focus — covers the
   // OpportunityDetail 'Bridge a skill gap' flow, which generates a
