@@ -101,7 +101,11 @@ const DiscoverScreen = ({ navigation, route }) => {
       const list = data.opportunities || data.data || data || [];
       const opps = Array.isArray(list) ? list : [];
 
-      // Fetch match scores in parallel if we have a profileId
+      // Fetch match scores in parallel if we have a profileId, then sort
+      // by score desc so the worker sees the best fit at the top. Without
+      // this the API order (createdAt desc) wins, which leaves a low-fit
+      // opportunity at the top of the 'All opportunities' list and gives
+      // the impression the screen is unranked.
       if (profileId && opps.length > 0) {
         const scoreResults = await Promise.allSettled(
           opps.map((opp) =>
@@ -118,12 +122,13 @@ const DiscoverScreen = ({ navigation, route }) => {
           }
         });
 
-        setOpportunities(
-          opps.map((opp) => ({
+        const scored = opps
+          .map((opp) => ({
             ...opp,
             matchScore: scoreMap[opp._id || opp.id] ?? 0,
           }))
-        );
+          .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+        setOpportunities(scored);
       } else {
         setOpportunities(opps);
       }
@@ -206,28 +211,56 @@ const DiscoverScreen = ({ navigation, route }) => {
         )}
       />
 
-      {/* Matches-only banner — appears when DiscoverScreen was opened
-          from the dashboard's Matches stat card. Gives the worker a
-          clear toggle back to the full catalogue without leaving the
-          screen. */}
-      {showMatchesOnly && (
-        <View style={styles.matchesBanner}>
-          <Ionicons name="star" size={14} color="#1D4ED8" />
-          <Text style={styles.matchesBannerText}>
-            Showing your matches only
-          </Text>
-          <TouchableOpacity
-            onPress={() => {
-              setShowMatchesOnly(false);
-              setLoading(true);
-            }}
-            style={styles.matchesBannerClear}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      {/* Bidirectional toggle: lets the worker flip between 'all
+          published opportunities' and 'only the matching-engine
+          recommendations'. Both modes order by matchScore desc so the
+          ranking stays consistent however the worker arrived here. */}
+      <View style={styles.toggleRow}>
+        <TouchableOpacity
+          onPress={() => {
+            if (showMatchesOnly) return;
+            setShowMatchesOnly(true);
+            setLoading(true);
+          }}
+          style={[styles.togglePill, showMatchesOnly && styles.togglePillActive]}
+        >
+          <Ionicons
+            name="star"
+            size={13}
+            color={showMatchesOnly ? '#FFFFFF' : '#1D4ED8'}
+          />
+          <Text
+            style={[
+              styles.togglePillText,
+              showMatchesOnly && styles.togglePillTextActive,
+            ]}
           >
-            <Text style={styles.matchesBannerClearText}>Show all</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+            Matches only
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            if (!showMatchesOnly) return;
+            setShowMatchesOnly(false);
+            setLoading(true);
+          }}
+          style={[styles.togglePill, !showMatchesOnly && styles.togglePillActive]}
+        >
+          <Ionicons
+            name="grid-outline"
+            size={13}
+            color={!showMatchesOnly ? '#FFFFFF' : '#1D4ED8'}
+          />
+          <Text
+            style={[
+              styles.togglePillText,
+              !showMatchesOnly && styles.togglePillTextActive,
+            ]}
+          >
+            All opportunities
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Results count */}
       <Text style={styles.resultsCount}>
@@ -384,32 +417,33 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     marginBottom: 12,
   },
-  matchesBanner: {
+  toggleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-    backgroundColor: '#EFF6FF',
-    borderColor: '#BFDBFE',
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
     marginBottom: 10,
   },
-  matchesBannerText: {
-    flex: 1,
+  togglePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    backgroundColor: '#EFF6FF',
+  },
+  togglePillActive: {
+    backgroundColor: '#1D4ED8',
+    borderColor: '#1D4ED8',
+  },
+  togglePillText: {
     fontSize: 12,
-    color: '#1E40AF',
     fontWeight: '600',
-  },
-  matchesBannerClear: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  matchesBannerClearText: {
-    fontSize: 12,
     color: '#1D4ED8',
-    fontWeight: '700',
+  },
+  togglePillTextActive: {
+    color: '#FFFFFF',
   },
   listContent: {
     paddingHorizontal: 20,
