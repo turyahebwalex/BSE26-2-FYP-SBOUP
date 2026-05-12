@@ -177,6 +177,12 @@ export const learningAPI = {
     api.post('/learning/skill-gaps', { opportunityId }),
   // Drives the §6.2.4 'Close Your Skill Gaps' dashboard section.
   dashboardFit: () => api.post('/learning/dashboard-fit', {}),
+  // Auto-suggest: server picks the worker's most-impactful missing skills
+  // (from dashboard-fit) and generates LearningPaths for ones not already
+  // present. Called on LearningScreen mount so the worker doesn't have to
+  // type a skill to get started.
+  autoSuggest: ({ max = 3, force = false } = {}) =>
+    api.post('/learning/auto-suggest', { max, force }),
   updateProgress: (pathId, resourceIndex, isCompleted) =>
     api.put(`/learning/${pathId}/progress`, { resourceIndex, isCompleted }),
 };

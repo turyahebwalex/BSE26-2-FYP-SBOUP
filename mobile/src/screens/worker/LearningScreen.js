@@ -36,6 +36,12 @@ const LearningScreen = ({ navigation, route }) => {
   const [generateModalVisible, setGenerateModalVisible] = useState(Boolean(prefillSkill));
   const [targetSkill, setTargetSkill] = useState(prefillSkill || '');
   const [generating, setGenerating] = useState(false);
+  // autoSuggesting is shown as a small inline banner while the server is
+  // composing paths from the worker's matching-engine recommendations.
+  // The banner stays out of the empty-state CTA so the user can still
+  // generate manually if they prefer.
+  const [autoSuggesting, setAutoSuggesting] = useState(false);
+  const [autoSuggestTried, setAutoSuggestTried] = useState(false);
 
   const fetchPaths = useCallback(async () => {
     try {
@@ -43,17 +49,49 @@ const LearningScreen = ({ navigation, route }) => {
       const { data } = await learningAPI.getMine();
       const list = data.learningPaths || data.paths || data.data || data || [];
       setPaths(Array.isArray(list) ? list : []);
+      return Array.isArray(list) ? list : [];
     } catch (err) {
       setError('Failed to load learning paths.');
+      return [];
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
+  // Auto-suggest is best-effort: it generates paths from the worker's top
+  // missing skills (matching-engine recommendations → dashboard-fit). We
+  // only trigger it once per mount when the worker has fewer than 3 paths,
+  // so revisiting a populated list doesn't keep churning the AI service.
+  const runAutoSuggest = useCallback(async () => {
+    if (autoSuggestTried) return;
+    setAutoSuggestTried(true);
+    setAutoSuggesting(true);
+    try {
+      const { data } = await learningAPI.autoSuggest({ max: 3 });
+      if (data?.generated > 0) {
+        await fetchPaths();
+      }
+    } catch (err) {
+      // Silent: the manual generate flow still works, and the empty state
+      // CTA tells the worker what to do next.
+    } finally {
+      setAutoSuggesting(false);
+    }
+  }, [autoSuggestTried, fetchPaths]);
+
   useEffect(() => {
-    fetchPaths();
-  }, [fetchPaths]);
+    (async () => {
+      const list = await fetchPaths();
+      if (list.length < 3) {
+        runAutoSuggest();
+      }
+    })();
+    // Intentionally run only on mount. fetchPaths/runAutoSuggest identities
+    // change with state but we don't want to re-trigger auto-suggest each
+    // time — useFocusEffect below handles refetch on screen focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // React to navigation params changing between visits — e.g. worker
   // bridges path A, navigates back, bridges path B; React Navigation
@@ -401,6 +439,15 @@ const LearningScreen = ({ navigation, route }) => {
         </View>
       )}
 
+      {autoSuggesting && (
+        <View style={styles.autoBanner}>
+          <ActivityIndicator size="small" color="#F97316" />
+          <Text style={styles.autoBannerText}>
+            Personalising paths from your top skill gaps…
+          </Text>
+        </View>
+      )}
+
       <FlatList
         data={paths}
         keyExtractor={(item) => item._id || item.id || Math.random().toString()}
@@ -537,6 +584,23 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: '#EF4444',
+  },
+  autoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF7ED',
+    marginHorizontal: 20,
+    marginBottom: 8,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  autoBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#9A3412',
+    fontWeight: '500',
   },
   listContent: {
     paddingHorizontal: 20,
