@@ -110,6 +110,135 @@ exports.getDashboardFit = async (req, res) => {
   }
 };
 
+// Auto-suggest: pick the worker's most-impactful missing skills from the
+// dashboard-fit response (which is the matching-engine's view of their
+// gaps) and generate LearningPaths for those they don't already have. This
+// is what makes upskilling feel "always-on" — the worker opens the screen
+// and the system has already lined up paths for them, on top of the manual
+// "Generate" button. We pre-filter against existing paths so repeated calls
+// don't spam the worker with duplicates.
+const SUGGEST_DEFAULT_MAX = 3;
+const SUGGEST_MAX_CANDIDATES = 12; // safety cap before per-skill scoring
+
+exports.autoSuggestPaths = async (req, res) => {
+  try {
+    const max = Number(req.body?.max) || SUGGEST_DEFAULT_MAX;
+    const force = Boolean(req.body?.force);
+
+    // Existing paths — used to skip skills already covered (unless `force`).
+    const existing = await LearningPath.find({ userId: req.user._id })
+      .select('targetSkill')
+      .lean();
+    const haveSkill = new Set(
+      existing
+        .map((p) => String(p.targetSkill || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    // Get the worker's per-category fit + frequency-ranked missing skills.
+    // This is the same data the dashboard rail renders, so the auto-paths
+    // map directly to the chips the worker can see.
+    const fitResult = await ml.getDashboardFit({ userId: req.user._id });
+    if (!fitResult.ok) {
+      return res.status(503).json({
+        error: 'Learning service unavailable.',
+        generated: 0,
+        paths: [],
+      });
+    }
+    const fitData = fitResult.data?.data || fitResult.data || {};
+    const categories = Array.isArray(fitData.fittingCategories)
+      ? fitData.fittingCategories
+      : [];
+
+    if (categories.length === 0) {
+      return res.json({ generated: 0, skipped: 0, paths: [], reason: 'no-fitting-categories' });
+    }
+
+    // Score each candidate missing skill: higher fit categories contribute
+    // more, and earlier-listed (frequency-ranked) skills within a category
+    // score higher. This bubbles up the gaps that block the most matches.
+    const scores = new Map();
+    for (const cat of categories) {
+      const fit = Number(cat.fitScore || 0);
+      const missing = Array.isArray(cat.missingSkills) ? cat.missingSkills : [];
+      missing.forEach((skill, idx) => {
+        const key = String(skill || '').trim();
+        if (!key) return;
+        // List position weight (1.0 → 0.1) — earlier = more frequent.
+        const positionWeight = Math.max(0.1, 1 - idx * 0.15);
+        const score = fit * positionWeight;
+        scores.set(key, (scores.get(key) || 0) + score);
+      });
+    }
+
+    const ranked = [...scores.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, SUGGEST_MAX_CANDIDATES)
+      .map(([skill]) => skill);
+
+    const targets = [];
+    let skipped = 0;
+    for (const skill of ranked) {
+      if (targets.length >= max) break;
+      if (!force && haveSkill.has(skill.toLowerCase())) {
+        skipped += 1;
+        continue;
+      }
+      targets.push(skill);
+    }
+
+    if (targets.length === 0) {
+      return res.json({
+        generated: 0,
+        skipped,
+        paths: [],
+        reason: 'no-new-targets',
+      });
+    }
+
+    // Sequential generate. Flan-T5 inference is CPU-bound on the AI side
+    // and 3 parallel requests starve each other badly — sequential lets
+    // each call complete in 15-30s instead of all hitting the 150s ceiling.
+    // One failure shouldn't block the rest, so we keep going on errors.
+    const results = [];
+    for (const targetSkill of targets) {
+      try {
+        const result = await ml.generateLearningPath({
+          userId: req.user._id,
+          targetSkill,
+        });
+        if (!result.ok) {
+          results.push({ targetSkill, error: result.error });
+          continue;
+        }
+        const payload = result.data?.data || result.data || {};
+        const path = await persistLearningPath(
+          { userId: req.user._id, targetSkill, opportunityId: null },
+          payload
+        );
+        results.push({ targetSkill, path });
+      } catch (err) {
+        logger.warn(`autoSuggest generate failed for ${targetSkill}: ${err.message}`);
+        results.push({ targetSkill, error: err.message });
+      }
+    }
+
+    const newPaths = results.filter((r) => r.path).map((r) => r.path);
+    const failures = results.filter((r) => r.error);
+
+    res.json({
+      generated: newPaths.length,
+      skipped,
+      paths: newPaths,
+      failures: failures.length > 0 ? failures.map((f) => ({ targetSkill: f.targetSkill })) : undefined,
+    });
+  } catch (error) {
+    logger.warn(`autoSuggestPaths: ${error.message}`);
+    res.status(500).json({ error: 'Failed to auto-suggest learning paths.' });
+  }
+};
+
 exports.updateProgress = async (req, res) => {
   try {
     const { resourceIndex, isCompleted } = req.body;

@@ -210,6 +210,15 @@ const analyseSkillGaps = Joi.object({
   opportunityId: Joi.string().hex().length(24).required(),
 });
 
+// Auto-suggest: server picks the targets, so the body only carries optional
+// tuning knobs. `max` caps how many paths get generated in one batch — we
+// default to 3 because each generation walks Flan-T5 + external providers
+// and a worker doesn't need more than a handful of fresh suggestions at once.
+const autoSuggestLearning = Joi.object({
+  max: Joi.number().integer().min(1).max(5).default(3),
+  force: Joi.boolean().default(false),
+});
+
 // Combine all schemas into an object
 const schemas = {
   register,
@@ -236,6 +245,7 @@ const schemas = {
   generateCV,
   generateLearningPath,
   analyseSkillGaps,
+  autoSuggestLearning,
 };
 
 /**
