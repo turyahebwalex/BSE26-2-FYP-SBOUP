@@ -150,8 +150,31 @@ const LearningScreen = ({ navigation, route }) => {
 
   const handleUpdateProgress = async (pathId, resourceIndex) => {
     try {
-      await learningAPI.updateProgress(pathId, resourceIndex, true);
-      Alert.alert('Progress Updated', 'Resource marked as completed!');
+      const { data } = await learningAPI.updateProgress(pathId, resourceIndex, true);
+      // The server returns three useful flags after a mark-done:
+      //   - bridgedSkill: which skill the resource was tagged to bridge
+      //   - newMatchScore: the recomputed match for the path's opportunity
+      //   - pathJustCompleted: true on the transition to 100%
+      // Surfacing them in the alert closes the SDD §3.2.5 feedback loop
+      // from the worker's perspective — they see *why* marking a resource
+      // mattered, not just "OK".
+      const bridged = data?.bridgedSkill;
+      const newScore = data?.newMatchScore;
+      const justCompleted = data?.pathJustCompleted;
+      let title = 'Resource completed';
+      let body = bridged
+        ? `Nice — your ${bridged} skill is now closer to filling that gap.`
+        : 'Marked as completed.';
+      if (justCompleted) {
+        title = 'Pathway complete!';
+        body = bridged
+          ? `You've finished the ${bridged} pathway. Great work.`
+          : 'You\'ve finished this pathway. Great work.';
+      }
+      if (typeof newScore === 'number') {
+        body += `\n\nMatch for this role is now ${newScore}%.`;
+      }
+      Alert.alert(title, body);
       fetchPaths();
     } catch (err) {
       Alert.alert('Error', 'Failed to update progress.');
@@ -169,10 +192,17 @@ const LearningScreen = ({ navigation, route }) => {
   };
 
   const getProgressPercentage = (path) => {
+    // Server already maintains path.progress on every mark-done — prefer it
+    // so the bar matches what the server thinks. Fall back to per-resource
+    // counting if the field is absent (older docs created before the rich
+    // schema landed).
+    if (typeof path.progress === 'number') return path.progress;
     const resources = path.resources || [];
     if (resources.length === 0) return 0;
+    // Field name on the schema is `isCompleted` — the old `r.completed`
+    // check always evaluated false and silently kept the bar at 0%.
     const completed = resources.filter(
-      (r) => r.completed || r.progress === 100
+      (r) => r.isCompleted || r.completed || r.progress === 100
     ).length;
     return Math.round((completed / resources.length) * 100);
   };
@@ -197,11 +227,22 @@ const LearningScreen = ({ navigation, route }) => {
           activeOpacity={0.7}
         >
           <View style={styles.cardInfo}>
-            <View style={styles.skillBadge}>
-              <Ionicons name="school-outline" size={16} color="#F97316" />
+            <View style={[styles.skillBadge, progress === 100 && styles.skillBadgeDone]}>
+              <Ionicons
+                name={progress === 100 ? 'checkmark-circle' : 'school-outline'}
+                size={16}
+                color={progress === 100 ? '#10B981' : '#F97316'}
+              />
             </View>
             <View style={styles.cardTextSection}>
-              <Text style={styles.cardTitle}>{skillName}</Text>
+              <View style={styles.titleRow}>
+                <Text style={styles.cardTitle}>{skillName}</Text>
+                {progress === 100 && (
+                  <View style={styles.completePill}>
+                    <Text style={styles.completePillText}>100% complete</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.cardSubtitle}>
                 {resources.length} {resources.length === 1 ? 'resource' : 'resources'}
                 {criticalGapCount > 0 && ` • ${criticalGapCount} critical ${criticalGapCount === 1 ? 'gap' : 'gaps'}`}
@@ -209,7 +250,9 @@ const LearningScreen = ({ navigation, route }) => {
             </View>
           </View>
           <View style={styles.cardRight}>
-            <Text style={styles.progressLabel}>{progress}%</Text>
+            <Text style={[styles.progressLabel, progress === 100 && styles.progressLabelDone]}>
+              {progress}%
+            </Text>
             <Ionicons
               name={isExpanded ? 'chevron-up' : 'chevron-down'}
               size={18}
@@ -638,13 +681,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  skillBadgeDone: {
+    backgroundColor: '#DCFCE7',
+  },
   cardTextSection: {
     flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
   cardTitle: {
     fontSize: 15,
     fontWeight: '600',
     color: '#1F2937',
+  },
+  completePill: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  completePillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#166534',
+    letterSpacing: 0.3,
   },
   cardSubtitle: {
     fontSize: 12,
@@ -660,6 +724,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#F97316',
+  },
+  progressLabelDone: {
+    color: '#10B981',
   },
   progressBarContainer: {
     paddingHorizontal: 16,

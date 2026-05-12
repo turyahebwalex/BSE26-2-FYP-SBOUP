@@ -61,8 +61,16 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       const { data } = await learningAPI.generate({ opportunityId: oppId });
       const path = data?.learningPath || data?.data?.learningPath || null;
       const pathId = path?._id || path?.id || null;
+      const alreadyExists = Boolean(data?.alreadyExists || data?.data?.alreadyExists);
       if (path) {
-        Alert.alert('Learning path created', 'Tailored for the gaps on this role.', [
+        // Server-side dedup: if a path for this opportunity already exists
+        // we get the same one back instead of a duplicate. Tell the worker
+        // so they don't think nothing happened.
+        const title = alreadyExists ? 'Learning path already exists' : 'Learning path created';
+        const body = alreadyExists
+          ? 'You already have a pathway for this role. Open it to keep going.'
+          : 'Tailored for the gaps on this role.';
+        Alert.alert(title, body, [
           {
             text: 'View',
             // Pass the new path id so LearningScreen auto-expands it
