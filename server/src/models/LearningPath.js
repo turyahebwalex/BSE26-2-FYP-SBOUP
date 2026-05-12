@@ -33,7 +33,10 @@ const resourceSchema = new mongoose.Schema(
     cost: { type: Number, default: 0 },
     priceLabel: { type: String },
     estimatedDuration: { type: String },
-    type: { type: String, enum: ['video', 'course', 'article', 'tutorial'] },
+    // 'book' covers free e-book references in the curated catalog
+    // (e.g. Scrum Guide, Don't Make Me Think) — valuable upskilling
+    // resources that don't fit course/video/article/tutorial.
+    type: { type: String, enum: ['video', 'course', 'article', 'tutorial', 'book'] },
     rating: { type: Number },
     difficultyLevel: { type: String, enum: ['beginner', 'intermediate', 'advanced'] },
     relevanceScore: { type: Number },
