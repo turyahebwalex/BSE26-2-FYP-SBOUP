@@ -483,28 +483,25 @@ const PostOpportunityPage = () => {
             }
           `}</style>
         <div
-          className="fixed inset-0 bg-black/60 flex items-start sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto"
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-2 sm:p-4"
           onClick={() => !pdfLoading && setPreviewOpen(false)}
         >
           <div
-            className="bg-gray-100 rounded-lg max-w-2xl w-full my-8"
+            className="relative bg-gray-100 rounded-lg max-w-2xl w-full flex flex-col"
+            style={{ maxHeight: 'calc(100vh - 2rem)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal chrome (not captured in PDF) — sticky so the close button stays reachable as the user scrolls a long preview. */}
-            <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-white rounded-t-lg shadow-sm">
-              <span className="text-sm font-semibold text-gray-700">Opportunity Preview</span>
-              <button
-                onClick={() => setPreviewOpen(false)}
-                disabled={pdfLoading}
-                className="text-gray-400 hover:text-gray-700 text-2xl leading-none disabled:opacity-50"
-                aria-label="Close preview"
-              >
-                ×
-              </button>
-            </div>
+            <button
+              onClick={() => setPreviewOpen(false)}
+              disabled={pdfLoading}
+              className="absolute top-2 right-2 z-20 w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white hover:bg-black shadow-lg text-xl leading-none disabled:opacity-50"
+              aria-label="Close preview"
+            >
+              ×
+            </button>
 
             {/* Printable A4-style document */}
-            <div className="p-4 sm:p-6">
+            <div className="p-4 sm:p-6 overflow-y-auto">
               <div
                 className="pdf-printable bg-white shadow-sm border border-gray-200 mx-auto"
                 style={{ maxWidth: '720px', padding: '64px 48px 48px' }}
