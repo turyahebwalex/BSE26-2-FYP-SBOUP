@@ -20,10 +20,16 @@ import OpportunityCard from '../../components/OpportunityCard';
 const AVATAR_KEY = (userId) => `user_avatar_uri_${userId}`;
 
 const WorkerDashboardScreen = ({ navigation }) => {
-  const { user } = useAuth();
+  // Unread counts come from AuthContext so they stay in sync with the
+  // Messages tab badge, Socket.IO new-notification events, and the
+  // NotificationsScreen mark-as-read calls. The dashboard used to keep
+  // its own local unreadCount that was only refreshed on mount, which
+  // is why marking notifications as read on the Notifications screen
+  // didn't clear the red badge here.
+  const { user, unreadNotificationCount, refreshUnreadCounts } = useAuth();
+  const unreadCount = unreadNotificationCount;
   const [recommendations, setRecommendations] = useState([]);
   const [applicationCount, setApplicationCount] = useState(0);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [fittingCategories, setFittingCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,13 +61,25 @@ const WorkerDashboardScreen = ({ navigation }) => {
     }, [user])
   );
 
+  // Refetch unread counts every time the dashboard regains focus —
+  // covers the worker reading notifications/messages on another tab
+  // and returning here expecting the red badges to clear.
+  useFocusEffect(
+    useCallback(() => {
+      if (refreshUnreadCounts) refreshUnreadCounts();
+    }, [refreshUnreadCounts])
+  );
+
   const fetchDashboardData = useCallback(async () => {
     try {
       setError(null);
-      const [recsRes, appsRes, notifRes, fitRes] = await Promise.allSettled([
+      // Unread counts live in AuthContext now (kept in sync via socket
+      // events + mark-as-read setters), so we don't fetch them here.
+      // refreshUnreadCounts() is still called on focus to catch any
+      // out-of-band changes that happened while the screen was blurred.
+      const [recsRes, appsRes, fitRes] = await Promise.allSettled([
         matchingAPI.getRecommendations(),
         applicationAPI.getMyApplications(),
-        notificationAPI.getUnreadCount(),
         learningAPI.dashboardFit(),
       ]);
 
@@ -82,10 +100,6 @@ const WorkerDashboardScreen = ({ navigation }) => {
         const data = appsRes.value.data;
         const apps = data.applications || data || [];
         setApplicationCount(Array.isArray(apps) ? apps.length : 0);
-      }
-      if (notifRes.status === 'fulfilled') {
-        const data = notifRes.value.data;
-        setUnreadCount(data.count || data.unreadCount || 0);
       }
       if (fitRes.status === 'fulfilled') {
         const data = fitRes.value.data || {};

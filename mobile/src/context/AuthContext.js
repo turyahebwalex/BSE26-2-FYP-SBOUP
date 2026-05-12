@@ -29,14 +29,15 @@ export const AuthProvider = ({ children }) => {
   };
 
   const fetchUnreadNotificationCount = async () => {
-  try {
-    // Fetch only the first page with a small limit to get the unreadCount
-    const { data } = await api.get('/notifications', { params: { page: 1, limit: 1 } });
-    setUnreadNotificationCount(data.unreadCount || 0);
-  } catch (error) {
-    console.error('Failed to fetch unread notification count', error);
-  }
-};
+    try {
+      // Dedicated cheap endpoint: returns just {unreadCount} so the
+      // poll doesn't pay for a full notification page load.
+      const { data } = await api.get('/notifications/unread-count');
+      setUnreadNotificationCount(data.unreadCount || 0);
+    } catch (error) {
+      console.error('Failed to fetch unread notification count', error);
+    }
+  };
 
   const refreshUnreadCounts = () => {
     if (user) {
@@ -193,6 +194,13 @@ export const AuthProvider = ({ children }) => {
         loadUser,
         unreadMessageCount,
         unreadNotificationCount,
+        // Setters are exposed so screens that mark items as read can
+        // update the badge optimistically without waiting for the next
+        // socket event or focus refetch — NotificationsScreen already
+        // relies on this, but the destructure was previously a no-op
+        // (context never exported the setters).
+        setUnreadMessageCount,
+        setUnreadNotificationCount,
         refreshUnreadCounts,
       }}
     >
