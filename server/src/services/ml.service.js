@@ -121,11 +121,17 @@ const getDashboardFit = ({ userId }) =>
 // The matching-engine reads profileskills fresh on every score call, so
 // any successful upsert here closes the SDD §3.2.5 feedback loop on the
 // next match request.
-const markLearningProgress = ({ userId, learningPathId, resourceUrl, isCompleted }) =>
+// bridgesSkill MUST be forwarded — the AI service's progress_tracker
+// only upserts ProfileSkill when this field is non-null. Without it the
+// completed resource gets audit-logged but the worker's skill state
+// never advances, which keeps the gap visible on the dashboard and
+// freezes the match score.
+const markLearningProgress = ({ userId, learningPathId, resourceUrl, bridgesSkill, isCompleted }) =>
   tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/progress`, {
     userId: String(userId),
-    learningPathId: String(learningPathId),
+    learningPathId: learningPathId ? String(learningPathId) : null,
     resourceUrl: String(resourceUrl),
+    bridgesSkill: bridgesSkill ? String(bridgesSkill) : null,
     isCompleted: Boolean(isCompleted),
   });
 

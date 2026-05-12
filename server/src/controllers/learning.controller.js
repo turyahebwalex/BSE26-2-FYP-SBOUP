@@ -314,6 +314,12 @@ exports.updateProgress = async (req, res) => {
         userId: req.user._id,
         learningPathId: path._id,
         resourceUrl: resource.url,
+        // Without bridgesSkill the AI service audit-logs the resource
+        // but skips the ProfileSkill upsert — which means the matching
+        // engine still sees the gap, the dashboard still shows the
+        // skill as missing, and the match score never moves. This was
+        // the root cause of 'I finished the path but nothing updated'.
+        bridgesSkill: bridgedSkill,
         isCompleted: true,
       });
       if (!hookResult.ok) {
