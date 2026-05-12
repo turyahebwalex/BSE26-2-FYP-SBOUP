@@ -3,115 +3,108 @@ const User = require('../models/User');
 const Company = require('../models/Company');
 const Profile = require('../models/Profile');
 const Application = require('../models/Application');
+const FraudLog = require('../models/FraudLog');
 const mlService = require('../services/ml.service');
 const notify = require('../services/notification.service');
 const logger = require('../utils/logger');
 
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
 const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
+const FRAUD_THRESHOLDS = { low: FRAUD_LOW, high: FRAUD_HIGH };
 
-// Match-score bands used by onOpportunityPublished. Strong matches get
-// a 'match' notification (Apply CTA); partial matches with non-empty
-// skill gaps get a 'learning' notification (Start a pathway CTA). Below
-// PARTIAL_MIN the worker isn't a meaningful match and we stay silent
-// to avoid notification fatigue.
-const STRONG_MATCH_MIN = 60;
-const PARTIAL_MATCH_MIN = 25;
+const buildFraudSignals = (features = {}) => {
+  const signals = [];
+  const patternCount = Number(features.fraud_pattern_count || 0);
+  const wordCount = Number(features.word_count || 0);
+  const exclamationCount = Number(features.exclamation_count || 0);
+  const uppercaseRatio = Number(features.uppercase_ratio || 0);
+  const urlCount = Number(features.url_count || 0);
 
-/**
- * Fan out post-publish notifications when an opportunity transitions to
- * status='published'. Splits the worker base into three bands:
- *   - matchScore >= STRONG_MATCH_MIN  → 'match' notification
- *   - matchScore >= PARTIAL_MATCH_MIN → 'learning' notification with
- *     metadata.kind:'suggested' so the mobile renders a Start CTA, and
- *     metadata.opportunityId + missingSkills so LearningScreen can
- *     surface the right context.
- *   - below → no notification (signal-to-noise).
- *
- * Also fires the matching-engine's recompute hook so dashboard-fit,
- * /matching/recommendations, and Discover's match scores all reflect
- * the new opportunity on the next fetch — that's what populates the
- * 'Close Your Skill Gaps' rail for workers with relevant gaps.
- *
- * Runs sequentially per worker. For a ~6-worker demo this is ~6 score
- * calls (≈2-6s total) — acceptable for an admin action. If the dataset
- * grows we can switch to the matching engine's batch endpoints later.
- */
-const onOpportunityPublished = async (opportunity) => {
-  try {
-    await mlService.triggerOpportunityMatch(opportunity._id);
-  } catch (err) {
-    logger.warn(`triggerOpportunityMatch failed: ${err.message}`);
+  if (patternCount > 0) {
+    signals.push({
+      signal: `${patternCount} fraud indicator pattern${patternCount === 1 ? '' : 's'} matched`,
+      weight: patternCount * 20,
+    });
+  }
+  if (Number(features.has_unrealistic_pay || 0)) {
+    signals.push({ signal: 'Compensation exceeds the realistic pay threshold', weight: 25 });
+  }
+  if (wordCount > 0 && wordCount < 10) {
+    signals.push({ signal: 'Posting description is unusually short', weight: 15 });
+  }
+  if (exclamationCount > 5) {
+    signals.push({ signal: 'Excessive exclamation marks', weight: 10 });
+  }
+  if (uppercaseRatio > 0.3) {
+    signals.push({ signal: 'Excessive uppercase text', weight: 10 });
+  }
+  if (urlCount > 3) {
+    signals.push({ signal: 'Suspicious number of external URLs', weight: 10 });
   }
 
-  const workers = await User.find({
-    role: 'skilled_worker',
-    accountStatus: 'active',
-  })
-    .select('_id')
-    .lean();
-
-  for (const w of workers) {
-    try {
-      const profile = await Profile.findOne({ userId: w._id }).select('_id').lean();
-      if (!profile) continue;
-      const scoreResult = await mlService.scoreMatch({
-        profileId: profile._id,
-        opportunityId: opportunity._id,
-      });
-      if (!scoreResult.ok) continue;
-      const payload = scoreResult.data || {};
-      const score = Math.round(
-        payload.matchScore ?? payload.score ?? payload.data?.matchScore ?? 0
-      );
-      const missing = Array.isArray(payload.missingSkills)
-        ? payload.missingSkills
-        : Array.isArray(payload.data?.missingSkills)
-          ? payload.data.missingSkills
-          : [];
-
-      if (score >= STRONG_MATCH_MIN) {
-        await notify.create({
-          userId: w._id,
-          type: 'match',
-          title: `New match — ${opportunity.title}`,
-          content:
-            `${opportunity.title} just went live and matches you at ${score}%. Tap View to open the role.`,
-          metadata: {
-            opportunityId: String(opportunity._id),
-            opportunityTitle: opportunity.title,
-            matchScore: score,
-          },
-        });
-      } else if (score >= PARTIAL_MATCH_MIN && missing.length > 0) {
-        const top = missing[0];
-        const others = missing.length > 1 ? `, ${missing.slice(1, 3).join(', ')}` : '';
-        await notify.create({
-          userId: w._id,
-          type: 'learning',
-          title: `Bridge a gap for ${opportunity.title}`,
-          content:
-            `${opportunity.title} just went live (${score}% match). Bridge ${top}${others} to lift your fit. Tap Start to generate a pathway.`,
-          metadata: {
-            // kind:'suggested' triggers the Start CTA in the mobile
-            // notification list. opportunityId lets the worker land on
-            // the role after they complete the pathway.
-            kind: 'suggested',
-            opportunityId: String(opportunity._id),
-            opportunityTitle: opportunity.title,
-            targetSkill: top,
-            missingSkills: missing,
-            matchScore: score,
-          },
-        });
-      }
-    } catch (err) {
-      logger.warn(`publish fan-out for worker ${w._id} failed: ${err.message}`);
-    }
-  }
+  return signals;
 };
 
-exports.onOpportunityPublished = onOpportunityPublished;
+const buildFraudExplanation = ({ classification, fraudScore, decisionReason, signals }) => {
+  const explanationParts = [];
+  if (decisionReason) {
+    explanationParts.push(decisionReason);
+  }
+  if (Array.isArray(signals) && signals.length > 0) {
+    explanationParts.push(`Key signals: ${signals.map((item) => item.signal).join('; ')}`);
+  }
+  if (typeof fraudScore === 'number') {
+    explanationParts.push(`Fraud score ${fraudScore}.`);
+  }
+  if (classification) {
+    explanationParts.push(`Classification: ${classification}.`);
+  }
+  return explanationParts.join(' ');
+};
+
+const evaluateFraudDecision = ({ fraudScore, fraudAvailable }) => {
+  if (!fraudAvailable) {
+    return {
+      status: 'under_review',
+      classification: 'Unknown',
+      decisionOutcome: 'under_review',
+      decisionReason: 'Fraud service unavailable; posting sent for manual review.',
+    };
+  }
+
+  if (fraudScore < FRAUD_LOW) {
+    return {
+      status: 'published',
+      classification: 'Low Risk',
+      decisionOutcome: 'published',
+      decisionReason: `Fraud score ${fraudScore} is below the auto-approval threshold (${FRAUD_LOW}).`,
+    };
+  }
+
+  if (fraudScore >= FRAUD_HIGH) {
+    return {
+      status: 'blocked',
+      classification: 'High Risk',
+      decisionOutcome: 'blocked',
+      decisionReason: `Fraud score ${fraudScore} is at or above the auto-rejection threshold (${FRAUD_HIGH}).`,
+    };
+  }
+
+  return {
+    status: 'under_review',
+    classification: 'Medium Risk',
+    decisionOutcome: 'under_review',
+    decisionReason: `Fraud score ${fraudScore} falls within the manual review band (${FRAUD_LOW}-${FRAUD_HIGH - 1}).`,
+  };
+};
+
+const logFraudEvent = async (payload) => {
+  try {
+    await FraudLog.create(payload);
+  } catch (error) {
+    logger.warn(`Fraud log write failed: ${error.message}`);
+  }
+};
 
 /**
  * POST /api/opportunities
@@ -131,20 +124,50 @@ exports.createOpportunity = async (req, res) => {
     });
 
     const fraudResult = await mlService.detectFraud(opportunity);
-    if (fraudResult.ok) {
-      const { fraudScore, signals } = fraudResult.data;
-      opportunity.fraudRiskScore = fraudScore || 0;
-      opportunity.fraudSignals = signals || [];
-    }
+    let fraudScore = 0;
+    let fraudSignals = [];
+    let fraudFeatures = {};
+    let fraudClassification = 'Unknown';
+    let fraudDecision = evaluateFraudDecision({ fraudAvailable: false });
 
-    // Every newly-posted opportunity must be admin-approved before going live.
-    // Only outright block postings whose fraud score crosses the high threshold.
-    if (opportunity.fraudRiskScore >= FRAUD_HIGH) {
-      opportunity.status = 'blocked';
+    if (fraudResult.ok) {
+      fraudScore = Number(fraudResult.data.fraudScore) || 0;
+      fraudFeatures = fraudResult.data.features || {};
+      fraudSignals = Array.isArray(fraudResult.data.signals) && fraudResult.data.signals.length > 0
+        ? fraudResult.data.signals
+        : buildFraudSignals(fraudFeatures);
+      fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true }).classification;
+      fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true });
+
+      opportunity.fraudRiskScore = fraudScore;
+      opportunity.fraudSignals = fraudSignals;
+      opportunity.status = fraudDecision.status;
     } else {
+      opportunity.fraudRiskScore = 0;
+      opportunity.fraudSignals = [];
       opportunity.status = 'under_review';
     }
+
     await opportunity.save();
+
+    await logFraudEvent({
+      opportunityId: opportunity._id,
+      source: 'workflow',
+      stage: 'create',
+      fraudScore,
+      classification: fraudClassification,
+      decisionOutcome: opportunity.status,
+      decisionReason: fraudDecision.decisionReason,
+      thresholds: FRAUD_THRESHOLDS,
+      features: fraudFeatures,
+      signals: fraudSignals,
+      explanation: buildFraudExplanation({
+        classification: fraudClassification,
+        fraudScore,
+        decisionReason: fraudDecision.decisionReason,
+        signals: fraudSignals,
+      }),
+    });
 
     if (opportunity.status === 'under_review') {
       const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
@@ -183,16 +206,13 @@ exports.getOpportunities = async (req, res) => {
       minPay,
       maxPay,
       sortBy = 'createdAt',
-      companyId,                                     // ← ADD THIS LINE
+      companyId,
     } = req.query;
 
     const filter = { status: 'published', deadline: { $gte: new Date() } };
-
-    // ← ADD THIS BLOCK
     if (companyId) {
       filter.companyId = companyId;
     }
-
     if (category) filter.category = category;
     if (location) filter.location = { $regex: location, $options: 'i' };
     if (experienceLevel) filter.experienceLevel = experienceLevel;
@@ -280,12 +300,46 @@ exports.updateOpportunity = async (req, res) => {
 
     if (fraudFieldsChanged && opportunity.status === 'published') {
       const fraudResult = await mlService.detectFraud(opportunity);
+      let fraudScore = opportunity.fraudRiskScore || 0;
+      let fraudSignals = opportunity.fraudSignals || [];
+      let fraudFeatures = {};
+      let fraudClassification = 'Unknown';
+      let fraudDecision = evaluateFraudDecision({ fraudAvailable: false });
+
       if (fraudResult.ok) {
-        opportunity.fraudRiskScore = fraudResult.data.fraudScore || 0;
-        opportunity.fraudSignals = fraudResult.data.signals || [];
-        if (opportunity.fraudRiskScore >= FRAUD_HIGH) opportunity.status = 'blocked';
-        else if (opportunity.fraudRiskScore >= FRAUD_LOW) opportunity.status = 'under_review';
+        fraudScore = Number(fraudResult.data.fraudScore) || 0;
+        fraudFeatures = fraudResult.data.features || {};
+        fraudSignals = Array.isArray(fraudResult.data.signals) && fraudResult.data.signals.length > 0
+          ? fraudResult.data.signals
+          : buildFraudSignals(fraudFeatures);
+        fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true }).classification;
+        fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true });
+
+        opportunity.fraudRiskScore = fraudScore;
+        opportunity.fraudSignals = fraudSignals;
+        opportunity.status = fraudDecision.status;
+      } else {
+        opportunity.status = 'under_review';
       }
+
+      await logFraudEvent({
+        opportunityId: opportunity._id,
+        source: 'workflow',
+        stage: 'update',
+        fraudScore,
+        classification: fraudClassification,
+        decisionOutcome: opportunity.status,
+        decisionReason: fraudDecision.decisionReason,
+        thresholds: FRAUD_THRESHOLDS,
+        features: fraudFeatures,
+        signals: fraudSignals,
+        explanation: buildFraudExplanation({
+          classification: fraudClassification,
+          fraudScore,
+          decisionReason: fraudDecision.decisionReason,
+          signals: fraudSignals,
+        }),
+      });
     }
     await opportunity.save();
     res.json({ opportunity });
@@ -310,20 +364,13 @@ exports.archiveOpportunity = async (req, res) => {
 
 exports.getMyOpportunities = async (req, res) => {
   try {
-    // Get the employer's companyId from their user document
-    const user = await User.findById(req.user._id).select('companyId');
-    if (!user.companyId) {
-      return res.status(400).json({ error: 'No company associated with your account.' });
-    }
-
-    // Find opportunities belonging to that company
-    const opportunities = await Opportunity.find({ companyId: user.companyId })
+    const opportunities = await Opportunity.find({ postedByUserId: req.user._id })
       .populate('requiredSkills', 'skillName category')
       .populate('companyId', 'name logoUrl')
-      .populate('postedByUserId', 'fullName email') // optional
       .sort({ createdAt: -1 });
 
-    // (Keep the aggregation for match scores and applicant counts as is)
+    // Enrich each posting with applicant match-score aggregates so the
+    // "My Opportunities" page can show real matching percentages.
     const ids = opportunities.map((o) => o._id);
     const aggregates = ids.length
       ? await Application.aggregate([

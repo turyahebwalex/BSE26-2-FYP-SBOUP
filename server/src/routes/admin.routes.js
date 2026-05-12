@@ -7,6 +7,7 @@ router.get('/dashboard/trends', authenticate, authorize('admin'), ctrl.getRegist
 router.get('/dashboard/user-distribution', authenticate, authorize('admin'), ctrl.getUserTypeDistribution);
 router.get('/dashboard/alerts', authenticate, authorize('admin'), ctrl.getUrgentAlerts);
 router.get('/dashboard/user-density', authenticate, authorize('admin'), ctrl.getUserDensity);
+router.get('/fraud-insights', authenticate, authorize('admin'), ctrl.getFraudInsights);
 router.get('/flagged', authenticate, authorize('admin'), ctrl.getFlaggedContent);
 router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent);
 router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);

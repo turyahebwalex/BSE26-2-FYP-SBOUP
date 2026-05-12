@@ -3,8 +3,12 @@ const Opportunity = require('../models/Opportunity');
 const Application = require('../models/Application');
 const Report = require('../models/Report');
 const Profile = require('../models/Profile');
-const logger = require('../utils/logger');
+const FraudLog = require('../models/FraudLog');
 const opportunityController = require('./opportunity.controller');
+const logger = require('../utils/logger');
+
+const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
+const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -53,31 +57,149 @@ exports.getFlaggedContent = async (req, res) => {
   }
 };
 
+exports.getFraudInsights = async (req, res) => {
+  try {
+    const { range = '30d', granularity = 'day' } = req.query;
+    const days = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const fmt = granularity === 'week' ? '%G-W%V' : '%Y-%m-%d';
+
+    const [summary, breakdown, trends, recentLogs] = await Promise.all([
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: null,
+            totalLogs: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+            autoPublished: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] },
+            },
+            underReview: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] },
+            },
+            blocked: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] },
+            },
+            modelPredictions: {
+              $sum: { $cond: [{ $eq: ['$source', 'model'] }, 1, 0] },
+            },
+            workflowDecisions: {
+              $sum: { $cond: [{ $eq: ['$source', 'workflow'] }, 1, 0] },
+            },
+            adminActions: {
+              $sum: { $cond: [{ $eq: ['$source', 'admin'] }, 1, 0] },
+            },
+          },
+        },
+      ]),
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: '$decisionOutcome',
+            count: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: {
+              period: { $dateToString: { format: fmt, date: '$createdAt' } },
+              decisionOutcome: '$decisionOutcome',
+            },
+            count: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.period',
+            byDecision: { $push: { decisionOutcome: '$_id.decisionOutcome', count: '$count' } },
+            total: { $sum: '$count' },
+            averageScore: { $avg: '$averageScore' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      FraudLog.find({ createdAt: { $gte: since } })
+        .populate('opportunityId', 'title status')
+        .populate('adminId', 'fullName email')
+        .sort({ createdAt: -1 })
+        .limit(25),
+    ]);
+
+    const totals = summary[0] || {
+      totalLogs: 0,
+      averageScore: 0,
+      autoPublished: 0,
+      underReview: 0,
+      blocked: 0,
+      modelPredictions: 0,
+      workflowDecisions: 0,
+      adminActions: 0,
+    };
+
+    res.json({
+      range,
+      granularity,
+      thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+      summary: totals,
+      breakdown,
+      trends,
+      recentLogs,
+    });
+  } catch (error) {
+    logger.error('Fraud insights error:', error);
+    res.status(500).json({ error: 'Failed to fetch fraud insights.' });
+  }
+};
+
 exports.moderateContent = async (req, res) => {
   try {
-    const { contentId, action, contentType } = req.body; // action: approve, remove, ban
+    const { contentId, action, contentType, feedback } = req.body; // action: approve, remove, ban
 
     let publishedOpportunity = null;
     if (contentType === 'opportunity') {
-      // Fetch the pre-approval state so we can detect the
-      // not-published → published transition. Re-approving an
-      // already-published opp shouldn't re-fan-out notifications.
       const existing = await Opportunity.findById(contentId).select('status');
       const wasPublished = existing && existing.status === 'published';
-
       const update = action === 'approve' ? { status: 'published' } : { status: 'blocked' };
-      const updated = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
-      if (action === 'approve' && !wasPublished && updated) {
-        publishedOpportunity = updated;
+      const opportunity = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
+      if (opportunity) {
+        await FraudLog.create({
+          opportunityId: opportunity._id,
+          source: 'admin',
+          stage: 'moderation',
+          fraudScore: opportunity.fraudRiskScore || 0,
+          classification:
+            opportunity.fraudRiskScore >= FRAUD_HIGH
+              ? 'High Risk'
+              : opportunity.fraudRiskScore >= FRAUD_LOW
+                ? 'Medium Risk'
+                : 'Low Risk',
+          decisionOutcome: opportunity.status,
+          decisionReason: `Admin ${action === 'approve' ? 'approved' : 'rejected'} opportunity during manual review.`,
+          thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+          features: { fraudSignals: opportunity.fraudSignals || [] },
+          signals: opportunity.fraudSignals || [],
+          adminId: req.user._id,
+          adminAction: action === 'approve' ? 'approve' : 'reject',
+          adminFeedback: feedback || '',
+          explanation: feedback || '',
+        });
+        if (action === 'approve' && !wasPublished) {
+          publishedOpportunity = opportunity;
+        }
       }
     }
 
     // Log admin action
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
 
-    // Respond immediately — the worker fan-out runs in the background so
-    // the admin doesn't wait on per-worker scoring. setImmediate keeps it
-    // out of this request's lifecycle without blocking the event loop.
     if (publishedOpportunity) {
       const oppForFanout = publishedOpportunity;
       setImmediate(async () => {
