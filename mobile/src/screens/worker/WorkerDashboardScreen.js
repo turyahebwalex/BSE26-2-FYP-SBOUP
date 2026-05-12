@@ -189,13 +189,16 @@ const WorkerDashboardScreen = ({ navigation }) => {
             <Text style={styles.statNumber}>{applicationCount}</Text>
             <Text style={styles.statLabel}>Applications</Text>
           </TouchableOpacity>
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={() => navigation.navigate('Discover')}
+          >
             <Ionicons name="star-outline" size={22} color="#3B82F6" />
             <Text style={styles.statNumber}>
               {Array.isArray(recommendations) ? recommendations.length : 0}
             </Text>
             <Text style={styles.statLabel}>Matches</Text>
-          </View>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.statCard}
             onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
