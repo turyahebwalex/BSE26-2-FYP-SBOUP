@@ -8,10 +8,15 @@ const logger = require('../utils/logger');
  */
 
 const TIMEOUT_MS = 15_000;
+// Learning generation walks Flan-T5 (CPU inference) + external resource
+// providers + semantic ranking. A single call is 15-60s warm and can creep
+// past 90s on cold/contended CPUs. 150s headroom prevents the gateway
+// from killing a still-running AI request on slower machines.
+const LEARNING_GENERATE_TIMEOUT_MS = 150_000;
 
-const tryPost = async (url, body) => {
+const tryPost = async (url, body, opts = {}) => {
   try {
-    const { data } = await axios.post(url, body, { timeout: TIMEOUT_MS });
+    const { data } = await axios.post(url, body, { timeout: opts.timeout || TIMEOUT_MS });
     return { ok: true, data };
   } catch (err) {
     logger.warn(`ML call failed ${url}: ${err.message}`);
@@ -87,11 +92,15 @@ const generateCV = ({ userId, profileId, templateType, opportunityId, selectedDa
 
 // ─── Learning Engine ─────────────────────────────────────────────
 const generateLearningPath = ({ userId, targetSkill, opportunityId }) =>
-  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/generate`, {
-    userId: String(userId),
-    targetSkill: targetSkill || undefined,
-    opportunityId: opportunityId ? String(opportunityId) : undefined,
-  });
+  tryPost(
+    `${process.env.LEARNING_SERVICE_URL}/api/learning/generate`,
+    {
+      userId: String(userId),
+      targetSkill: targetSkill || undefined,
+      opportunityId: opportunityId ? String(opportunityId) : undefined,
+    },
+    { timeout: LEARNING_GENERATE_TIMEOUT_MS }
+  );
 
 const analyseSkillGaps = ({ profileId, opportunityId }) =>
   tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/skill-gaps`, {
@@ -100,9 +109,13 @@ const analyseSkillGaps = ({ profileId, opportunityId }) =>
   });
 
 const getDashboardFit = ({ userId }) =>
-  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/dashboard-fit`, {
-    userId: String(userId),
-  });
+  tryPost(
+    `${process.env.LEARNING_SERVICE_URL}/api/learning/dashboard-fit`,
+    { userId: String(userId) },
+    // First call after cold start triggers MiniLM warm-up inside the
+    // AI service's fallback path. Give it more headroom than the default.
+    { timeout: 30_000 }
+  );
 
 // Best-effort: failure here does not block the local LearningPath update.
 // The matching-engine reads profileskills fresh on every score call, so
