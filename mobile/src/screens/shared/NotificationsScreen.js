@@ -77,7 +77,16 @@ const getActions = (notif) => {
     case 'opportunity':       return { primary: { label: 'View',   nav: 'Discover' } };
     case 'application_update':
     case 'application':       return { primary: { label: 'Open',   nav: 'ApplicationDetails' } };
-    case 'learning':          return { primary: { label: 'Start',  nav: 'Learning' } };
+    case 'learning':
+      // Two distinct learning notifications:
+      //   - kind:'completed' — worker finished a pathway, label 'View'
+      //     so the action reads as 'review what I just finished'.
+      //   - kind:'suggested' (or unset/legacy) — auto-generated path
+      //     the worker hasn't opened yet, label 'Start' so the action
+      //     reads as 'begin this new pathway'.
+      return meta.kind === 'completed'
+        ? { primary: { label: 'View',  nav: 'Learning' } }
+        : { primary: { label: 'Start', nav: 'Learning' } };
     case 'fraud_alert':       return { primary: { label: 'Report', nav: 'FraudReport' } };
     case 'connection_request':
       return {
