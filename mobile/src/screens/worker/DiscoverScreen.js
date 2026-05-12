@@ -15,8 +15,10 @@ import { opportunityAPI, matchingAPI, profileAPI } from '../../services/api';
 import OpportunityCard from '../../components/OpportunityCard';
 import ChatbotWidget from '../../components/ChatbotWidget';
 
+// 'All' is intentionally omitted — the "All opportunities" toggle below
+// already provides the unfiltered view, so a duplicate chip would be
+// noise. Tapping the currently-selected chip clears the filter.
 const CATEGORIES = [
-  { key: 'all', label: 'All' },
   { key: 'formal', label: 'Formal' },
   { key: 'contract', label: 'Contract' },
   { key: 'freelance', label: 'Freelance' },
@@ -211,7 +213,8 @@ const DiscoverScreen = ({ navigation, route }) => {
               selectedCategory === item.key && styles.chipActive,
             ]}
             onPress={() => {
-              setSelectedCategory(item.key);
+              // Tapping the active chip clears the filter back to 'all'.
+              setSelectedCategory((prev) => (prev === item.key ? 'all' : item.key));
               setLoading(true);
             }}
           >
