@@ -10,6 +10,109 @@ const logger = require('../utils/logger');
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
 const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
 
+// Match-score bands used by onOpportunityPublished. Strong matches get
+// a 'match' notification (Apply CTA); partial matches with non-empty
+// skill gaps get a 'learning' notification (Start a pathway CTA). Below
+// PARTIAL_MIN the worker isn't a meaningful match and we stay silent
+// to avoid notification fatigue.
+const STRONG_MATCH_MIN = 60;
+const PARTIAL_MATCH_MIN = 25;
+
+/**
+ * Fan out post-publish notifications when an opportunity transitions to
+ * status='published'. Splits the worker base into three bands:
+ *   - matchScore >= STRONG_MATCH_MIN  → 'match' notification
+ *   - matchScore >= PARTIAL_MATCH_MIN → 'learning' notification with
+ *     metadata.kind:'suggested' so the mobile renders a Start CTA, and
+ *     metadata.opportunityId + missingSkills so LearningScreen can
+ *     surface the right context.
+ *   - below → no notification (signal-to-noise).
+ *
+ * Also fires the matching-engine's recompute hook so dashboard-fit,
+ * /matching/recommendations, and Discover's match scores all reflect
+ * the new opportunity on the next fetch — that's what populates the
+ * 'Close Your Skill Gaps' rail for workers with relevant gaps.
+ *
+ * Runs sequentially per worker. For a ~6-worker demo this is ~6 score
+ * calls (≈2-6s total) — acceptable for an admin action. If the dataset
+ * grows we can switch to the matching engine's batch endpoints later.
+ */
+const onOpportunityPublished = async (opportunity) => {
+  try {
+    await mlService.triggerOpportunityMatch(opportunity._id);
+  } catch (err) {
+    logger.warn(`triggerOpportunityMatch failed: ${err.message}`);
+  }
+
+  const workers = await User.find({
+    role: 'skilled_worker',
+    accountStatus: 'active',
+  })
+    .select('_id')
+    .lean();
+
+  for (const w of workers) {
+    try {
+      const profile = await Profile.findOne({ userId: w._id }).select('_id').lean();
+      if (!profile) continue;
+      const scoreResult = await mlService.scoreMatch({
+        profileId: profile._id,
+        opportunityId: opportunity._id,
+      });
+      if (!scoreResult.ok) continue;
+      const payload = scoreResult.data || {};
+      const score = Math.round(
+        payload.matchScore ?? payload.score ?? payload.data?.matchScore ?? 0
+      );
+      const missing = Array.isArray(payload.missingSkills)
+        ? payload.missingSkills
+        : Array.isArray(payload.data?.missingSkills)
+          ? payload.data.missingSkills
+          : [];
+
+      if (score >= STRONG_MATCH_MIN) {
+        await notify.create({
+          userId: w._id,
+          type: 'match',
+          title: `New match — ${opportunity.title}`,
+          content:
+            `${opportunity.title} just went live and matches you at ${score}%. Tap View to open the role.`,
+          metadata: {
+            opportunityId: String(opportunity._id),
+            opportunityTitle: opportunity.title,
+            matchScore: score,
+          },
+        });
+      } else if (score >= PARTIAL_MATCH_MIN && missing.length > 0) {
+        const top = missing[0];
+        const others = missing.length > 1 ? `, ${missing.slice(1, 3).join(', ')}` : '';
+        await notify.create({
+          userId: w._id,
+          type: 'learning',
+          title: `Bridge a gap for ${opportunity.title}`,
+          content:
+            `${opportunity.title} just went live (${score}% match). Bridge ${top}${others} to lift your fit. Tap Start to generate a pathway.`,
+          metadata: {
+            // kind:'suggested' triggers the Start CTA in the mobile
+            // notification list. opportunityId lets the worker land on
+            // the role after they complete the pathway.
+            kind: 'suggested',
+            opportunityId: String(opportunity._id),
+            opportunityTitle: opportunity.title,
+            targetSkill: top,
+            missingSkills: missing,
+            matchScore: score,
+          },
+        });
+      }
+    } catch (err) {
+      logger.warn(`publish fan-out for worker ${w._id} failed: ${err.message}`);
+    }
+  }
+};
+
+exports.onOpportunityPublished = onOpportunityPublished;
+
 /**
  * POST /api/opportunities
  * Create + run fraud screen (30/70 risk gate) + notify matching engine.

@@ -4,6 +4,7 @@ const Application = require('../models/Application');
 const Report = require('../models/Report');
 const Profile = require('../models/Profile');
 const logger = require('../utils/logger');
+const opportunityController = require('./opportunity.controller');
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -56,13 +57,37 @@ exports.moderateContent = async (req, res) => {
   try {
     const { contentId, action, contentType } = req.body; // action: approve, remove, ban
 
+    let publishedOpportunity = null;
     if (contentType === 'opportunity') {
+      // Fetch the pre-approval state so we can detect the
+      // not-published → published transition. Re-approving an
+      // already-published opp shouldn't re-fan-out notifications.
+      const existing = await Opportunity.findById(contentId).select('status');
+      const wasPublished = existing && existing.status === 'published';
+
       const update = action === 'approve' ? { status: 'published' } : { status: 'blocked' };
-      await Opportunity.findByIdAndUpdate(contentId, update);
+      const updated = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
+      if (action === 'approve' && !wasPublished && updated) {
+        publishedOpportunity = updated;
+      }
     }
 
     // Log admin action
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
+
+    // Respond immediately — the worker fan-out runs in the background so
+    // the admin doesn't wait on per-worker scoring. setImmediate keeps it
+    // out of this request's lifecycle without blocking the event loop.
+    if (publishedOpportunity) {
+      const oppForFanout = publishedOpportunity;
+      setImmediate(async () => {
+        try {
+          await opportunityController.onOpportunityPublished(oppForFanout);
+        } catch (err) {
+          logger.warn(`onOpportunityPublished fan-out: ${err.message}`);
+        }
+      });
+    }
 
     res.json({ message: `Content ${action}d successfully.` });
   } catch (error) {
