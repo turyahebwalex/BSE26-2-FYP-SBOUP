@@ -263,112 +263,79 @@ const WorkerDashboardScreen = ({ navigation }) => {
           ))}
         </View>
 
-        {/* Close Your Skill Gaps — drives the §6.2.4 dashboard section */}
-        {fittingCategories.length > 0 && (
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Close Your Skill Gaps</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Learning')}>
-                <Text style={styles.seeAll}>View Paths</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.fitScrollContent}
-            >
-              {fittingCategories.slice(0, 6).map((cat, idx) => {
-                const pct = Math.round((Number(cat.fitScore) || 0) * 100);
-                const missing = Array.isArray(cat.missingSkills) ? cat.missingSkills : [];
-                const top = missing[0];
-                const oppCount = Number(cat.matchingOpportunityCount) || 0;
-                // Two distinct CTAs: when there are still gaps the tap
-                // jumps to Learning with a prefilled skill; when the
-                // worker has closed every gap in the bucket, the tap
-                // jumps to Discover filtered to that opportunity
-                // category so they can review and apply.
-                const onTap = () => {
-                  if (top) {
-                    navigation.navigate('Learning', { prefillSkill: top });
-                  } else {
-                    navigation.navigate('Discover', {
-                      screen: 'DiscoverMain',
-                      params: { showMatches: true, category: cat.category },
-                    });
-                  }
-                };
-                return (
-                  <TouchableOpacity
-                    key={cat.category || idx}
-                    style={styles.fitCard}
-                    activeOpacity={0.85}
-                    onPress={onTap}
-                  >
-                    <View style={styles.fitCardHeader}>
-                      <View style={styles.fitBadge}>
-                        <Text style={styles.fitBadgeText}>{pct}%</Text>
+        {/* Close Your Skill Gaps — drives the §6.2.4 dashboard section.
+            Only buckets with at least one outstanding missing skill
+            belong here; gap-free buckets aren't "skill gaps", they're
+            ready-to-apply roles and surface elsewhere (Matches stat,
+            Recommended list, notifications). Keeping the rail
+            skill-gap-only keeps the section honest about its purpose. */}
+        {(() => {
+          const gapsOnly = fittingCategories.filter(
+            (c) => Array.isArray(c.missingSkills) && c.missingSkills.length > 0
+          );
+          if (gapsOnly.length === 0) return null;
+          return (
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Close Your Skill Gaps</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Learning')}>
+                  <Text style={styles.seeAll}>View Paths</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.fitScrollContent}
+              >
+                {gapsOnly.slice(0, 6).map((cat, idx) => {
+                  const pct = Math.round((Number(cat.fitScore) || 0) * 100);
+                  const missing = cat.missingSkills;
+                  const top = missing[0];
+                  return (
+                    <TouchableOpacity
+                      key={cat.category || idx}
+                      style={styles.fitCard}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        navigation.navigate('Learning', { prefillSkill: top })
+                      }
+                    >
+                      <View style={styles.fitCardHeader}>
+                        <View style={styles.fitBadge}>
+                          <Text style={styles.fitBadgeText}>{pct}%</Text>
+                        </View>
+                        <Text style={styles.fitCategory} numberOfLines={1}>
+                          {cat.category || 'Category'}
+                        </Text>
                       </View>
-                      <Text style={styles.fitCategory} numberOfLines={1}>
-                        {cat.category || 'Category'}
+                      <Text style={styles.fitMissingLabel}>
+                        {missing.length === 1
+                          ? '1 gap to bridge'
+                          : `${missing.length} gaps to bridge`}
                       </Text>
-                    </View>
-                    {missing.length > 0 ? (
-                      <>
-                        <Text style={styles.fitMissingLabel}>
-                          {missing.length === 1 ? '1 gap to bridge' : `${missing.length} gaps to bridge`}
-                        </Text>
-                        <View style={styles.fitChipRow}>
-                          {missing.slice(0, 2).map((s, i) => (
-                            <View key={`${cat.category}-${i}`} style={styles.fitChip}>
-                              <Text style={styles.fitChipText} numberOfLines={1}>
-                                {s}
-                              </Text>
-                            </View>
-                          ))}
-                          {missing.length > 2 && (
-                            <Text style={styles.fitChipMore}>+{missing.length - 2}</Text>
-                          )}
-                        </View>
-                      </>
-                    ) : (
-                      // Gap-free bucket: worker has every required skill
-                      // for at least one role here. Show the count + a
-                      // 'Ready to apply' marker so the next action is
-                      // obvious — applying — not generating another
-                      // pathway they don't need.
-                      <>
-                        <Text style={styles.fitReadyLabel}>
-                          {oppCount === 1
-                            ? '1 role ready to apply'
-                            : `${oppCount || 'A few'} roles ready to apply`}
-                        </Text>
-                        <View style={styles.fitChipRow}>
-                          <View style={styles.fitReadyChip}>
-                            <Ionicons name="checkmark-circle" size={11} color="#166534" />
-                            <Text style={styles.fitReadyChipText}>All skills covered</Text>
+                      <View style={styles.fitChipRow}>
+                        {missing.slice(0, 2).map((s, i) => (
+                          <View key={`${cat.category}-${i}`} style={styles.fitChip}>
+                            <Text style={styles.fitChipText} numberOfLines={1}>
+                              {s}
+                            </Text>
                           </View>
-                        </View>
-                      </>
-                    )}
-                    {!!top ? (
+                        ))}
+                        {missing.length > 2 && (
+                          <Text style={styles.fitChipMore}>+{missing.length - 2}</Text>
+                        )}
+                      </View>
                       <View style={styles.fitFooter}>
                         <Ionicons name="sparkles" size={11} color="#F97316" />
                         <Text style={styles.fitFooterText}>Bridge {top}</Text>
                       </View>
-                    ) : (
-                      <View style={styles.fitFooter}>
-                        <Ionicons name="arrow-forward-circle" size={11} color="#10B981" />
-                        <Text style={[styles.fitFooterText, styles.fitFooterTextReady]}>
-                          {oppCount === 1 ? 'View role' : 'View roles'}
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </>
-        )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          );
+        })()}
 
         {/* Recommended Opportunities */}
         <View style={styles.sectionHeader}>
@@ -676,26 +643,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 6,
   },
-  fitReadyLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#166534',
-    marginBottom: 6,
-  },
-  fitReadyChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#DCFCE7',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  fitReadyChipText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#166534',
-  },
   fitChipRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -729,9 +676,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#F97316',
-  },
-  fitFooterTextReady: {
-    color: '#10B981',
   },
 });
 
