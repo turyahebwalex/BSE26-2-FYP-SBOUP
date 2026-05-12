@@ -130,8 +130,14 @@ const WorkerDashboardScreen = ({ navigation }) => {
     },
     {
       icon: 'notifications-outline',
-      label: `Alerts${unreadCount > 0 ? `\n(${unreadCount})` : ''}`,
+      label: 'Alerts',
       color: '#EF4444',
+      // Driven by Notification.countDocuments({isRead:false}) on the
+      // server side; surfacing the count as a corner badge instead of in
+      // the label string keeps the typography consistent across the four
+      // quick-action tiles and matches the unread bubble pattern used on
+      // the Messages tab icon.
+      badgeCount: unreadCount,
       onPress: () => navigation.navigate('ProfileTab', { screen: 'Notifications' }),
     },
   ];
@@ -216,8 +222,19 @@ const WorkerDashboardScreen = ({ navigation }) => {
             style={styles.statCard}
             onPress={() => navigation.navigate('ProfileTab', { screen: 'Notifications' })}
           >
-            <Ionicons name="notifications-outline" size={22} color="#EF4444" />
-            <Text style={styles.statNumber}>{unreadCount}</Text>
+            <Ionicons
+              name={unreadCount > 0 ? 'notifications' : 'notifications-outline'}
+              size={22}
+              color="#EF4444"
+            />
+            <Text
+              style={[
+                styles.statNumber,
+                unreadCount > 0 && styles.statNumberAlert,
+              ]}
+            >
+              {unreadCount}
+            </Text>
             <Text style={styles.statLabel}>Unread</Text>
           </TouchableOpacity>
         </View>
@@ -233,6 +250,13 @@ const WorkerDashboardScreen = ({ navigation }) => {
             >
               <View style={[styles.actionIcon, { backgroundColor: action.color + '15' }]}>
                 <Ionicons name={action.icon} size={24} color={action.color} />
+                {action.badgeCount > 0 && (
+                  <View style={styles.actionBadge}>
+                    <Text style={styles.actionBadgeText}>
+                      {action.badgeCount > 99 ? '99+' : action.badgeCount}
+                    </Text>
+                  </View>
+                )}
               </View>
               <Text style={styles.actionLabel}>{action.label}</Text>
             </TouchableOpacity>
@@ -257,23 +281,28 @@ const WorkerDashboardScreen = ({ navigation }) => {
                 const pct = Math.round((Number(cat.fitScore) || 0) * 100);
                 const missing = Array.isArray(cat.missingSkills) ? cat.missingSkills : [];
                 const top = missing[0];
+                const oppCount = Number(cat.matchingOpportunityCount) || 0;
+                // Two distinct CTAs: when there are still gaps the tap
+                // jumps to Learning with a prefilled skill; when the
+                // worker has closed every gap in the bucket, the tap
+                // jumps to Discover filtered to that opportunity
+                // category so they can review and apply.
+                const onTap = () => {
+                  if (top) {
+                    navigation.navigate('Learning', { prefillSkill: top });
+                  } else {
+                    navigation.navigate('Discover', {
+                      screen: 'DiscoverMain',
+                      params: { showMatches: true, category: cat.category },
+                    });
+                  }
+                };
                 return (
                   <TouchableOpacity
                     key={cat.category || idx}
                     style={styles.fitCard}
                     activeOpacity={0.85}
-                    onPress={() =>
-                      navigation.navigate(
-                        'Learning',
-                        // Pre-fill the generate modal with the top
-                        // missing skill in this category so the worker
-                        // can confirm + generate a pathway for the
-                        // specific gap they tapped. Falls back to
-                        // opening the modal blank when no missing
-                        // skills (rare — worker fully matches category).
-                        top ? { prefillSkill: top } : undefined
-                      )
-                    }
+                    onPress={onTap}
                   >
                     <View style={styles.fitCardHeader}>
                       <View style={styles.fitBadge}>
@@ -302,12 +331,36 @@ const WorkerDashboardScreen = ({ navigation }) => {
                         </View>
                       </>
                     ) : (
-                      <Text style={styles.fitMissingLabel}>You match this category.</Text>
+                      // Gap-free bucket: worker has every required skill
+                      // for at least one role here. Show the count + a
+                      // 'Ready to apply' marker so the next action is
+                      // obvious — applying — not generating another
+                      // pathway they don't need.
+                      <>
+                        <Text style={styles.fitReadyLabel}>
+                          {oppCount === 1
+                            ? '1 role ready to apply'
+                            : `${oppCount || 'A few'} roles ready to apply`}
+                        </Text>
+                        <View style={styles.fitChipRow}>
+                          <View style={styles.fitReadyChip}>
+                            <Ionicons name="checkmark-circle" size={11} color="#166534" />
+                            <Text style={styles.fitReadyChipText}>All skills covered</Text>
+                          </View>
+                        </View>
+                      </>
                     )}
-                    {!!top && (
+                    {!!top ? (
                       <View style={styles.fitFooter}>
                         <Ionicons name="sparkles" size={11} color="#F97316" />
                         <Text style={styles.fitFooterText}>Bridge {top}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.fitFooter}>
+                        <Ionicons name="arrow-forward-circle" size={11} color="#10B981" />
+                        <Text style={[styles.fitFooterText, styles.fitFooterTextReady]}>
+                          {oppCount === 1 ? 'View role' : 'View roles'}
+                        </Text>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -499,6 +552,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  actionBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  actionBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statNumberAlert: {
+    color: '#EF4444',
+  },
   actionLabel: {
     fontSize: 13,
     fontWeight: '500',
@@ -601,6 +676,26 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 6,
   },
+  fitReadyLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#166534',
+    marginBottom: 6,
+  },
+  fitReadyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DCFCE7',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  fitReadyChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#166534',
+  },
   fitChipRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -634,6 +729,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#F97316',
+  },
+  fitFooterTextReady: {
+    color: '#10B981',
   },
 });
 

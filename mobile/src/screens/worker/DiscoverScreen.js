@@ -27,11 +27,17 @@ const DiscoverScreen = ({ navigation, route }) => {
   // showMatches arrives from the dashboard's Matches stat card. When set,
   // we filter the opportunity list down to the matching-engine's recom-
   // mendations so the count on the stat card equals what the worker sees.
+  // category arrives from the dashboard's "Close Your Skill Gaps" rail
+  // when the worker taps a category that has no remaining gaps — it
+  // pre-selects the matching chip so they see roles in that category.
   const initialShowMatches = Boolean(route?.params?.showMatches);
+  const initialCategory = (route?.params?.category && CATEGORIES.some((c) => c.key === route.params.category))
+    ? route.params.category
+    : 'all';
 
   const [opportunities, setOpportunities] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [showMatchesOnly, setShowMatchesOnly] = useState(initialShowMatches);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,7 +49,11 @@ const DiscoverScreen = ({ navigation, route }) => {
   // existing screen instance and the new param is ignored.
   useEffect(() => {
     setShowMatchesOnly(Boolean(route?.params?.showMatches));
-  }, [route?.params?.showMatches]);
+    const cat = route?.params?.category;
+    if (cat && CATEGORIES.some((c) => c.key === cat)) {
+      setSelectedCategory(cat);
+    }
+  }, [route?.params?.showMatches, route?.params?.category]);
 
   // Fetch the worker's profileId once on mount
   useEffect(() => {
