@@ -19,6 +19,7 @@ from collections import Counter, defaultdict
 from typing import Optional
 
 from bson import ObjectId
+from bson.errors import InvalidId
 
 from database.mongo_client import get_db
 from models.db_models import CategoryFit, ProfileSummary
@@ -37,15 +38,41 @@ MIN_FIT_SCORE = 0.3
 BUCKET_REC_MIN_SCORE = 20.0
 
 
+async def _completed_opportunity_ids(user_id: str) -> set[str]:
+    """Opportunities the worker has already finished a LearningPath for.
+
+    Returned as a set of stringified opportunityIds so callers can filter
+    recommendations cheaply. Used by the dashboard "Close Your Skill
+    Gaps" rail so a fully-completed pathway stops contributing to the
+    worker's gap chips — once they've put in the work, the dashboard
+    shouldn't keep pointing at the same opportunity as a gap source.
+    """
+    try:
+        uid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+    except (InvalidId, TypeError):
+        return set()
+    db = get_db()
+    cursor = db.learningpaths.find(
+        {
+            "userId": uid,
+            "progress": 100,
+            "opportunityId": {"$ne": None},
+        },
+        {"opportunityId": 1},
+    )
+    return {str(doc["opportunityId"]) async for doc in cursor if doc.get("opportunityId")}
+
+
 async def compute_category_fit(profile: ProfileSummary, user_id: str) -> tuple[list[CategoryFit], str]:
     """Returns (fitting_categories, consistency_mode).
 
     Tries the recommendations-driven path first. Falls back to the
     local MiniLM computation if the matching-engine is unavailable.
     """
+    completed_opp_ids = await _completed_opportunity_ids(user_id)
     recs = await fetch_recommendations(user_id)
     if recs is not None:
-        return await _from_recommendations(recs), "matching-engine"
+        return await _from_recommendations(recs, completed_opp_ids), "matching-engine"
 
     logger.warning(
         "matching-engine unavailable; falling back to local category fit for user %s",
@@ -54,9 +81,13 @@ async def compute_category_fit(profile: ProfileSummary, user_id: str) -> tuple[l
     return await _local_category_fit(profile), "fallback"
 
 
-async def _from_recommendations(recommendations: list[dict]) -> list[CategoryFit]:
+async def _from_recommendations(
+    recommendations: list[dict],
+    completed_opp_ids: Optional[set[str]] = None,
+) -> list[CategoryFit]:
     if not recommendations:
         return []
+    completed_opp_ids = completed_opp_ids or set()
 
     opp_ids = [str(r.get("opportunityId")) for r in recommendations if r.get("opportunityId")]
     opportunities = await fetch_opportunities_by_ids(opp_ids)
@@ -66,9 +97,14 @@ async def _from_recommendations(recommendations: list[dict]) -> list[CategoryFit
     # 72% match and seven 12% matches in the same category averages
     # ~20% and the bucket falls below MIN_FIT_SCORE — the worker sees
     # nothing despite genuinely fitting the category once.
+    # Also skip recs whose opportunity already has a 100% complete
+    # LearningPath — the worker addressed those gaps, so they shouldn't
+    # keep driving missing-skill chips on the rail.
     buckets: dict[str, list[dict]] = defaultdict(list)
     for rec in recommendations:
         opp_id = str(rec.get("opportunityId") or "")
+        if opp_id in completed_opp_ids:
+            continue
         opp_meta = opportunities.get(opp_id)
         if not opp_meta:
             continue
