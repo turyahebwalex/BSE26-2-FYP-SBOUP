@@ -30,7 +30,11 @@ import config
 
 logger = logging.getLogger(__name__)
 
-MIN_FIT_SCORE = 0.4
+MIN_FIT_SCORE = 0.3
+# A rec must score at least this much (0-100) to count toward a
+# category's average fitScore. Below this the match is too weak to
+# meaningfully represent fit; keeping it would just dilute the mean.
+BUCKET_REC_MIN_SCORE = 20.0
 
 
 async def compute_category_fit(profile: ProfileSummary, user_id: str) -> tuple[list[CategoryFit], str]:
@@ -57,11 +61,18 @@ async def _from_recommendations(recommendations: list[dict]) -> list[CategoryFit
     opp_ids = [str(r.get("opportunityId")) for r in recommendations if r.get("opportunityId")]
     opportunities = await fetch_opportunities_by_ids(opp_ids)
 
+    # Pre-filter weak recs out of each bucket so the per-category mean
+    # reflects only meaningful matches. Without this, a worker with one
+    # 72% match and seven 12% matches in the same category averages
+    # ~20% and the bucket falls below MIN_FIT_SCORE — the worker sees
+    # nothing despite genuinely fitting the category once.
     buckets: dict[str, list[dict]] = defaultdict(list)
     for rec in recommendations:
         opp_id = str(rec.get("opportunityId") or "")
         opp_meta = opportunities.get(opp_id)
         if not opp_meta:
+            continue
+        if float(rec.get("matchScore") or 0) < BUCKET_REC_MIN_SCORE:
             continue
         buckets[opp_meta["category"]].append(rec)
 

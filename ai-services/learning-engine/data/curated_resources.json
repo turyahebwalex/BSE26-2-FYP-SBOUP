@@ -58,5 +58,35 @@
     {"title": "React Official Tutorial", "url": "https://react.dev/learn", "provider": "react.dev", "cost": 0, "estimatedDuration": "10h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.8, "description": "Official tutorial covering components, JSX, state, and effects."},
     {"title": "Full Stack Open: React", "url": "https://fullstackopen.com/en/", "provider": "University of Helsinki", "cost": 0, "estimatedDuration": "100h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.7, "description": "Comprehensive React + Node curriculum from a research university."},
     {"title": "Build a React Application", "url": "https://scrimba.com/learn/learnreact", "provider": "Scrimba", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "Project-based React introduction with interactive code playgrounds."}
+  ],
+  "React Native": [
+    {"title": "React Native Quickstart", "url": "https://reactnative.dev/docs/getting-started", "provider": "reactnative.dev", "cost": 0, "estimatedDuration": "6h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.7, "description": "Official getting-started guide covering setup, components, and Expo workflow."},
+    {"title": "React Native Crash Course", "url": "https://www.youtube.com/results?search_query=react+native+crash+course", "provider": "YouTube", "cost": 0, "estimatedDuration": "5h", "type": "video", "difficultyLevel": "beginner", "rating": 4.6, "description": "End-to-end mobile app build from setup to publishing in one sitting."},
+    {"title": "Expo + Native Modules", "url": "https://docs.expo.dev/", "provider": "Expo", "cost": 0, "estimatedDuration": "15h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.7, "description": "Working with EAS Build, native modules, and platform APIs in Expo."}
+  ],
+  "Marketing": [
+    {"title": "Marketing Fundamentals", "url": "https://www.coursera.org/learn/wharton-marketing", "provider": "Wharton (Coursera audit)", "cost": 0, "estimatedDuration": "30h", "type": "course", "difficultyLevel": "beginner", "rating": 4.7, "description": "STP, positioning, and the 4Ps. Free to audit."},
+    {"title": "HubSpot Inbound Marketing", "url": "https://academy.hubspot.com/courses/inbound-marketing", "provider": "HubSpot Academy", "cost": 0, "estimatedDuration": "5h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "Attract, engage, delight — the inbound model with practical exercises."},
+    {"title": "Marketing Strategy in Practice", "url": "https://www.edx.org/learn/marketing", "provider": "edX", "cost": 0, "estimatedDuration": "20h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.5, "description": "Strategy frameworks applied to real campaigns and B2B/B2C contexts."}
+  ],
+  "Digital Marketing": [
+    {"title": "Google Digital Garage", "url": "https://learndigital.withgoogle.com/digitalgarage/course/digital-marketing", "provider": "Google", "cost": 0, "estimatedDuration": "40h", "type": "course", "difficultyLevel": "beginner", "rating": 4.8, "description": "Full Google-curated digital marketing certification, accredited by Interactive Advertising Bureau Europe."},
+    {"title": "Meta Blueprint", "url": "https://www.facebookblueprint.com/", "provider": "Meta", "cost": 0, "estimatedDuration": "15h", "type": "course", "difficultyLevel": "beginner", "rating": 4.5, "description": "Facebook + Instagram ad management and campaign optimisation."},
+    {"title": "SEO Starter Guide", "url": "https://developers.google.com/search/docs/fundamentals/seo-starter-guide", "provider": "Google Search Central", "cost": 0, "estimatedDuration": "4h", "type": "article", "difficultyLevel": "beginner", "rating": 4.7, "description": "Practical SEO fundamentals direct from Google's developer docs."}
+  ],
+  "Mobile Development": [
+    {"title": "Android Basics with Compose", "url": "https://developer.android.com/courses/android-basics-compose/course", "provider": "Google", "cost": 0, "estimatedDuration": "60h", "type": "course", "difficultyLevel": "beginner", "rating": 4.7, "description": "Build Android apps with Jetpack Compose, Kotlin and the modern Android stack."},
+    {"title": "Flutter — Build Your First App", "url": "https://docs.flutter.dev/get-started/codelab", "provider": "Flutter", "cost": 0, "estimatedDuration": "4h", "type": "tutorial", "difficultyLevel": "beginner", "rating": 4.6, "description": "Official Flutter codelab — single codebase for Android, iOS, web."},
+    {"title": "iOS Development with SwiftUI", "url": "https://developer.apple.com/tutorials/swiftui", "provider": "Apple", "cost": 0, "estimatedDuration": "20h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.7, "description": "Apple's official SwiftUI tutorial series with interactive Xcode projects."}
+  ],
+  "Communication Skills": [
+    {"title": "Effective Communication at Work", "url": "https://www.coursera.org/learn/wharton-communication-skills", "provider": "Wharton (Coursera audit)", "cost": 0, "estimatedDuration": "10h", "type": "course", "difficultyLevel": "beginner", "rating": 4.7, "description": "Active listening, clear writing, and presenting under pressure."},
+    {"title": "Public Speaking", "url": "https://www.toastmasters.org/resources", "provider": "Toastmasters International", "cost": 0, "estimatedDuration": "5h", "type": "article", "difficultyLevel": "beginner", "rating": 4.6, "description": "Speech structure, vocal variety, and managing audience attention."},
+    {"title": "Business Writing", "url": "https://www.openlearn.open.ac.uk/", "provider": "Open University", "cost": 0, "estimatedDuration": "8h", "type": "course", "difficultyLevel": "beginner", "rating": 4.4, "description": "Tone, concision, and structure for emails, reports, and proposals."}
+  ],
+  "Customer Service": [
+    {"title": "Customer Service Fundamentals", "url": "https://academy.hubspot.com/courses/customer-service", "provider": "HubSpot Academy", "cost": 0, "estimatedDuration": "4h", "type": "course", "difficultyLevel": "beginner", "rating": 4.6, "description": "Service mindset, dealing with difficult customers, escalation protocols."},
+    {"title": "Customer Service Excellence", "url": "https://www.edx.org/learn/customer-service", "provider": "edX", "cost": 0, "estimatedDuration": "12h", "type": "course", "difficultyLevel": "intermediate", "rating": 4.5, "description": "Service operations, NPS, and quality measurement for customer-facing teams."},
+    {"title": "Active Listening for Support", "url": "https://www.youtube.com/results?search_query=active+listening+customer+service", "provider": "YouTube", "cost": 0, "estimatedDuration": "2h", "type": "video", "difficultyLevel": "beginner", "rating": 4.5, "description": "Listening techniques and de-escalation phrases for support roles."}
   ]
 }

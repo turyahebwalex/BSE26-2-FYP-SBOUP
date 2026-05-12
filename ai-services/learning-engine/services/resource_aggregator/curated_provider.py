@@ -46,15 +46,47 @@ def _to_candidate(skill: str, raw: dict) -> ResourceCandidate:
     )
 
 
+_STOPWORDS = {"a", "an", "the", "of", "and", "for", "in", "to", "with", "skills"}
+
+
+def _tokenise(name: str) -> set[str]:
+    """Lower-case word tokens, stop-words removed. 'React Native' → {react, native}."""
+    return {t for t in name.lower().split() if t and t not in _STOPWORDS}
+
+
 class CuratedProvider:
     name = "curated"
 
     async def fetch(self, skill: str) -> list[ResourceCandidate]:
         catalog = _load_catalog()
-        # Case-insensitive lookup: catalog uses Title-Case keys but the
-        # canonical Skill.skillName values may not always match exactly.
+        if not catalog:
+            return []
+
+        # 1. Exact lookup, case-insensitive — catalog uses Title-Case keys
+        #    but canonical Skill.skillName values don't always match exactly.
         lower_index = {k.lower(): k for k in catalog.keys()}
         key = lower_index.get(skill.lower())
-        if key is None:
+        if key is not None:
+            return [_to_candidate(skill, raw) for raw in catalog.get(key, [])]
+
+        # 2. Token-overlap fallback so 'React native' finds 'React',
+        #    'Digital marketing strategy' finds 'Digital Marketing', etc.
+        #    Without this, a worker searching for a slightly-different
+        #    phrasing than what's in the catalog gets zero resources.
+        query_tokens = _tokenise(skill)
+        if not query_tokens:
             return []
-        return [_to_candidate(skill, raw) for raw in catalog.get(key, [])]
+        best_key: str | None = None
+        best_overlap = 0
+        for cat_key in catalog.keys():
+            cat_tokens = _tokenise(cat_key)
+            overlap = len(query_tokens & cat_tokens)
+            if overlap > best_overlap:
+                best_key = cat_key
+                best_overlap = overlap
+        if best_key is None or best_overlap == 0:
+            return []
+        # Tag the returned resources with the *query* skill so downstream
+        # bridgesSkill matches the worker's missing-skill list, not the
+        # catalog's slightly-different key name.
+        return [_to_candidate(skill, raw) for raw in catalog.get(best_key, [])]
