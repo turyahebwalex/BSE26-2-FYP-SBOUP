@@ -46,13 +46,19 @@ const DiscoverScreen = ({ navigation, route }) => {
 
   // Keep the filter in sync if the dashboard navigates here again with a
   // different param value — without this, React Navigation re-uses the
-  // existing screen instance and the new param is ignored.
+  // existing screen instance and the new param is ignored. Critically,
+  // when a navigation doesn't carry a category param we reset to 'all'
+  // so the sticky filter from a previous navigation doesn't bleed in.
+  // Without this reset, tapping "View role" on an apprenticeship card
+  // and then later tapping the Matches stat tile would still filter to
+  // apprenticeship, which is what produced the "15 matches button only
+  // shows one opportunity" symptom.
   useEffect(() => {
     setShowMatchesOnly(Boolean(route?.params?.showMatches));
     const cat = route?.params?.category;
-    if (cat && CATEGORIES.some((c) => c.key === cat)) {
-      setSelectedCategory(cat);
-    }
+    setSelectedCategory(
+      cat && CATEGORIES.some((c) => c.key === cat) ? cat : 'all'
+    );
   }, [route?.params?.showMatches, route?.params?.category]);
 
   // Fetch the worker's profileId once on mount
