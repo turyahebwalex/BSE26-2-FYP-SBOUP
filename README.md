@@ -70,25 +70,94 @@ SBOUP integrates **AI-powered CV generation**, **skill verification**, **learnin
 
 ## How to Run the Project
 
-Full guide: [docs/git-setup-and-contributor-guide.md](docs/git-setup-and-contributor-guide.md)
+Full git/contributor guide: [docs/git-setup-and-contributor-guide.md](docs/git-setup-and-contributor-guide.md)
 
-### One command to start everything
+### Prerequisites
 
-After cloning the repo (and after any `git pull` that touches dependencies), this is all you need to bring up the entire stack — web, mobile, backend, AI services, MongoDB, and Redis:
+Install these once on each collaborator's machine — the dev launcher refuses to start without them:
+
+| Tool | Minimum | Why |
+|------|---------|-----|
+| **Docker Desktop** or **Docker Engine + Compose v2** | 24+ | Runs MongoDB, Redis, the API gateway, the web client, and all five AI microservices. |
+| **Node.js** | 18 LTS or newer | `setup.sh` runs `npm install` for `server/`, `client/`, and `mobile/`, plus seeds the DB. |
+| **Git** | any modern version | Cloning + branch hygiene. |
+| **Expo Go** on the test phone | latest from Play Store / App Store | Loads the React Native bundle over LAN or USB. Same app for Android and iOS. |
+| **adb** *(only if you'll run mobile via USB)* | any | `bash scripts/dev.sh` option 2 uses `adb reverse` to tunnel Metro + the API over USB. |
+
+Verify in one shot:
+
+```bash
+docker --version && docker compose version && node --version && git --version
+```
+
+### First-time run after cloning
+
+Do this **exactly once** per machine. The order matters — `setup.sh` must finish before any `npm run` or `expo start` is attempted, otherwise `node_modules` isn't yet installed.
+
+```bash
+git clone https://github.com/turyahebwalex/BSE26-2-FYP-SBOUP.git
+cd BSE26-2-FYP-SBOUP
+bash scripts/setup.sh && bash scripts/dev.sh
+```
+
+`setup.sh` does the following, in order, and skips any step that's already done:
+
+1. Copies every `.env.example → .env` (root + `server/`, `client/`, `mobile/`, all `ai-services/*/`).
+2. Installs Node dependencies under `server/`, `client/`, and `mobile/`.
+3. Starts MongoDB + Redis via Docker if they aren't already running.
+4. Seeds the database with the [shared demo users](#shared-demo-credentials-seeded-on-every-dev-database).
+
+Then `dev.sh` brings the rest of the stack up (Docker compose, mobile Expo). When it prompts for mobile mode, **choose option 1 (Wi-Fi)** unless you have a USB cable + adb (option 2).
+
+> **Important — don't skip `setup.sh` on first run.** It's the only thing that creates `.env` files. If you go straight to `dev.sh`, Docker compose will fall back to placeholders and the API will boot without a working JWT secret.
+
+### Subsequent runs (everyday dev loop)
 
 ```bash
 bash scripts/dev.sh
 ```
 
-The launcher prompts for mobile mode (Wi-Fi QR / USB / skip), brings up the Docker stack, auto-detects your LAN IP so generated CV PDFs open on the phone, and starts Expo on the host. Scan the QR with Expo Go to launch the mobile app.
+That's it. No `setup.sh` needed unless someone has changed `package.json`, the seeder, or `.env.example`. The launcher reuses the existing Docker images (no rebuilds), reuses the seeded database, and just brings the stack back up plus Expo.
 
-On the **first run after cloning**, also run the bootstrap once to install Node deps and seed the database:
+### Pull from main: when to re-run what
 
-```bash
-bash scripts/setup.sh && bash scripts/dev.sh
-```
+| What changed in the pull | Run before `dev.sh` |
+|---|---|
+| Only application code (`.js` / `.py` / templates) | nothing — `dev.sh` is enough |
+| `package.json`, `requirements.txt`, or `Dockerfile` | `bash scripts/setup.sh` to refresh `node_modules`, plus `bash scripts/dev.sh --build` to rebuild changed images |
+| `.env.example` (new variable added) | `bash scripts/setup.sh` so the new key gets copied into your local `.env` |
+| AI service code under `ai-services/cv-generation` or `ai-services/learning-engine` | `bash scripts/dev.sh --pull` to grab the freshly-built GHCR image instead of rebuilding locally |
 
-`setup.sh` is idempotent — safe to re-run, but only needed once unless dependencies change.
+### Avoiding Expo "failed to download remote update" + port conflicts
+
+The Expo Go client times out after ~30 seconds when fetching the JS bundle, but a **first-time** Metro bundle on this project takes 35–45 seconds (1100+ modules, Hermes transform). That timing mismatch is the single biggest source of "failed to download remote update" reports. Follow these rules to avoid it:
+
+**Before running `dev.sh`:**
+
+1. **Make sure nothing else is holding port 8081 or 5000.** If a previous Metro/server is still alive from an earlier session, the new run picks port 8082 instead — and Expo Go on the phone, if you scan the freshly-printed QR, then fails to resolve the bundle. Kill stale processes first:
+
+   ```bash
+   fuser -k 8081/tcp 5000/tcp 2>/dev/null || true
+   docker compose rm -fs mobile        # only relevant if you've ever run `docker compose up` without dev.sh
+   ```
+
+2. **Phone and laptop must be on the same Wi-Fi network for Wi-Fi mode** (option 1). Tethering off the phone's hotspot is the most reliable setup — campus / public Wi-Fi often blocks device-to-device traffic to ports 8081/5000.
+
+**On the phone:**
+
+3. **Don't scan the QR while Metro is still building the bundle for the first time.** Wait until you see the line `Android Bundled <Nms> node_modules/expo/AppEntry.js (1122 modules)` in the terminal. *Only then* scan.
+
+4. **Pre-warm the bundle from the laptop before scanning** — turns the phone's first bundle fetch into a cache hit (< 1 s) instead of a 35-second wait:
+
+   ```bash
+   curl -s "http://$(ip route get 1.1.1.1 | awk '/src/ {print $7}'):8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true" >/dev/null
+   ```
+
+   Run that in a separate terminal once Metro is up. When it returns (≈ 40 s the first time, < 2 s afterwards), scan the QR.
+
+5. **If Expo Go is stuck on "Failed to download remote update":** force-close Expo Go (swipe from recents — don't just background it), reopen, rescan. The bundle is cached now, the second attempt loads in seconds. If that still fails on Android: long-press Expo Go → App info → Storage → Clear data; on iOS, uninstall + reinstall (iOS caches more aggressively).
+
+**Don't ever run `docker compose up` directly without `dev.sh`** — the compose file ships a `mobile` service that races for port 8081 with the host-side Expo. `dev.sh` excludes that service for you (`--scale mobile=0`).
 
 ### Useful flags for `dev.sh`
 
@@ -110,17 +179,34 @@ Pre-built images live at `ghcr.io/turyahebwalex/sboup-cv:latest` and `ghcr.io/tu
 
 Use these on both the web client and the Expo mobile app — no need to register a new user just to log in.
 
-### Remote collaborators
+### Ports the stack uses
 
-If you're working from a different network than your teammates and need to share a running stack:
+If any of these are taken, the run will fail. Check with `ss -lntp` (Linux) or `lsof -i :<port>` (macOS) before starting.
 
-- **Phone + laptop on the same Wi-Fi → just use `bash scripts/dev.sh`.** The Wi-Fi mode prints the QR; LAN IP is auto-detected.
-- **Phone via USB cable → `bash scripts/dev.sh` → choose option 2.** `adb reverse` tunnels Metro and the API over USB, sidestepping any restrictive Wi-Fi.
-- **Phone on a different network entirely** → start Expo in tunnel mode and pin the API URL to a public tunnel:
+| Port | Service |
+|------|---------|
+| 3000 | Web client (React) |
+| 5000 | API gateway (Node/Express) |
+| 5001 | matching-engine (Python) |
+| 5002 | fraud-detection (Python) |
+| 5003 | cv-generation (Python, GHCR image) |
+| 5004 | learning-engine (Python, GHCR image) |
+| 5005 | chatbot-service (Python) |
+| 6379 | Redis |
+| 8081 | Expo Metro bundler |
+| 27017 | MongoDB |
+
+### Remote collaborators (phone on a different network than the laptop)
+
+The default Wi-Fi setup assumes phone + laptop on the same network. When that's not the case:
+
+- **Easiest workaround — phone hotspot.** Disable laptop Wi-Fi, then connect laptop to phone's hotspot. Now both devices are on the same micro-network and `dev.sh` option 1 just works. Avoids campus/hotel Wi-Fi blocking device-to-device traffic.
+- **USB tether.** `bash scripts/dev.sh → option 2`. `adb reverse` tunnels Metro (8081) and the API (5000) over USB. No Wi-Fi needed at all.
+- **Truly remote (different geographies).** Expo tunnel mode relays the bundle through Expo's servers:
   ```bash
-  cd mobile && npm run start:tunnel        # Expo bundle goes through ngrok
-  EXPO_PUBLIC_API_URL=https://<your-public-backend>/api docker compose up -d server
+  cd mobile && npm run start:tunnel
   ```
+  Then expose the backend through `ngrok http 5000` (or similar) and set `EXPO_PUBLIC_API_URL=https://<ngrok-domain>/api` before re-running `docker compose up -d server`. Slower, but works across NATs and firewalls.
 
 ### Troubleshooting
 
