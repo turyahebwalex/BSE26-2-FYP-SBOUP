@@ -120,6 +120,24 @@ exports.markAllAsRead = async (req, res) => {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// Get unread count only — cheap polling endpoint used by the worker
+// dashboard's "Unread" stat tile and the Alerts quick-action badge.
+// Returns a tiny shape so the rateLimiter's POLLING_EXEMPT skip is safe.
+// ────────────────────────────────────────────────────────────────────────────
+exports.getUnreadCount = async (req, res) => {
+  try {
+    const unreadCount = await Notification.countDocuments({
+      userId: req.user._id,
+      isRead: false,
+    });
+    res.json({ unreadCount });
+  } catch (error) {
+    console.error('getUnreadCount error:', error);
+    res.status(500).json({ error: 'Failed to get unread count', unreadCount: 0 });
+  }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Delete a notification
 // ────────────────────────────────────────────────────────────────────────────
 exports.deleteNotification = async (req, res) => {
