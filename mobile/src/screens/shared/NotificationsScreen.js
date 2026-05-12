@@ -58,10 +58,21 @@ const TYPE_COLORS = {
   job_alert:          '#F97316',
 };
 
-// ─── Action button config per type ─────────────────────────────────────────────
-const getActions = (type) => {
+// ─── Action button config per notification ────────────────────────────────────
+// Takes the full notification so the match-type case can branch on
+// metadata.readyToApply — when the server has determined the worker now
+// meets every required skill for an opportunity, the button reads
+// 'Apply' and lands on the opportunity detail screen instead of the
+// generic 'View'/'Discover' path.
+const getActions = (notif) => {
+  const type = notif?.type;
+  const meta = notif?.metadata || {};
   switch (type) {
     case 'match':
+      if (meta.readyToApply && meta.opportunityId) {
+        return { primary: { label: 'Apply', nav: 'OpportunityDetails' } };
+      }
+      return { primary: { label: 'View', nav: 'Discover' } };
     case 'job_alert':
     case 'opportunity':       return { primary: { label: 'View',   nav: 'Discover' } };
     case 'application_update':
@@ -316,6 +327,16 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
         if (meta.opportunityId) navigateToOpportunityDetail(meta.opportunityId);
         break;
       case 'match':
+        // Ready-to-apply matches (server flags readyToApply + opportunityId)
+        // jump straight to the opportunity detail screen where the Apply
+        // button lives. Generic match notifications fall through to
+        // Discover so the worker can still browse.
+        if (meta.readyToApply && meta.opportunityId) {
+          navigateToOpportunityDetail(meta.opportunityId);
+        } else {
+          navigateToRootTab('Discover');
+        }
+        break;
       case 'job_alert':
         navigateToRootTab('Discover');
         break;
@@ -364,7 +385,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
 
   const renderActionButtons = (item) => {
     const notifId = item._id || item.id;
-    const actions = getActions(item.type);
+    const actions = getActions(item);
     if (!actions) return null;
 
     if (item.type === 'connection_request') {
