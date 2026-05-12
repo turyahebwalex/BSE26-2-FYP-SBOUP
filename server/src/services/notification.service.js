@@ -12,11 +12,16 @@ const registerIO = (io) => {
   ioInstance = io;
 };
 
-const create = async ({ userId, type, content, metadata }) => {
+const create = async ({ userId, type, title, content, metadata }) => {
   try {
     const notification = await Notification.create({
       userId,
       type,
+      // Title is optional on the schema but rendered prominently in
+      // the bell-icon list, so callers that have a natural headline
+      // (e.g. "Pathway complete") should pass one — the body becomes
+      // the secondary line.
+      ...(title ? { title } : {}),
       content,
       metadata: metadata || {},
     });

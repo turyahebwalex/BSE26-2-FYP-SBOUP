@@ -1,7 +1,9 @@
 const LearningPath = require('../models/LearningPath');
 const Profile = require('../models/Profile');
+const Opportunity = require('../models/Opportunity');
 const logger = require('../utils/logger');
 const ml = require('../services/ml.service');
+const notificationService = require('../services/notification.service');
 
 // Map the AI service's `data` envelope onto a LearningPath document.
 // Persisting the rich fields (analysisSummary, pathwayRationale,
@@ -307,9 +309,35 @@ exports.updateProgress = async (req, res) => {
     // the mobile alert would show stale data and the worker has no way
     // to know whether their effort moved the needle.
     let newMatchScore = null;
+    let previousMatchScore = null;
+    let opportunityTitle = null;
     let bridgedSkill = null;
+    const pathJustCompleted = path.progress === 100 && !wasPathCompleted;
+
     if (newlyCompleted && resource.url) {
       bridgedSkill = resource.bridgesSkill || path.targetSkill || null;
+
+      // Capture the pre-bridge score on the path's opportunity FIRST so
+      // we can show the worker the delta after the upsert lands. Without
+      // a baseline we can only say "your match is X%" — with one we can
+      // say "your match jumped from X% to Y%", which is the feedback the
+      // worker is asking for.
+      if (path.opportunityId) {
+        const profile = await Profile.findOne({ userId: req.user._id })
+          .select('_id')
+          .lean();
+        if (profile) {
+          const pre = await ml.scoreMatch({
+            profileId: profile._id,
+            opportunityId: path.opportunityId,
+          });
+          if (pre.ok) {
+            const raw = pre.data?.matchScore ?? pre.data?.score ?? pre.data?.data?.matchScore;
+            if (typeof raw === 'number') previousMatchScore = Math.round(raw);
+          }
+        }
+      }
+
       const hookResult = await ml.markLearningProgress({
         userId: req.user._id,
         learningPathId: path._id,
@@ -341,14 +369,64 @@ exports.updateProgress = async (req, res) => {
             if (typeof raw === 'number') newMatchScore = Math.round(raw);
           }
         }
+        const opp = await Opportunity.findById(path.opportunityId).select('title').lean();
+        if (opp) opportunityTitle = opp.title;
       }
+    }
+
+    // On the 0->100 transition, persist a Notification so the worker can
+    // revisit the milestone from the bell-icon list. The dashboard rail
+    // already drops opportunities with a 100%-complete path (filter is
+    // in the AI service taxonomy_service), so this notification is the
+    // primary feedback channel for "you addressed every gap on this
+    // role". Fire-and-forget — a notification failure shouldn't roll
+    // back the LearningPath save.
+    if (pathJustCompleted) {
+      const titleLabel = opportunityTitle || path.targetSkill || 'learning pathway';
+      // Build the message as one sentence + an optional score line, so
+      // the comma-then-clause flows naturally ("...pathway, closing
+      // your X gap.") instead of "...pathway. closing your X gap.".
+      const lead = bridgedSkill
+        ? `You completed the ${titleLabel} pathway, closing your ${bridgedSkill} gap.`
+        : `You completed the ${titleLabel} pathway.`;
+      let scoreLine = '';
+      if (opportunityTitle && typeof newMatchScore === 'number') {
+        if (typeof previousMatchScore === 'number' && newMatchScore !== previousMatchScore) {
+          const delta = newMatchScore - previousMatchScore;
+          const sign = delta > 0 ? '+' : '';
+          scoreLine =
+            ` Your match for ${opportunityTitle} is now ${newMatchScore}% (${sign}${delta} pts).`;
+        } else {
+          scoreLine = ` Your match for ${opportunityTitle} is now ${newMatchScore}%.`;
+        }
+      } else if (bridgedSkill && !opportunityTitle) {
+        scoreLine = ' Your matching scores on related roles will refresh shortly.';
+      }
+      const content = `${lead}${scoreLine}`;
+      notificationService.create({
+        userId: req.user._id,
+        type: 'learning',
+        title: opportunityTitle
+          ? `Pathway complete — ${opportunityTitle}`
+          : 'Pathway complete',
+        content,
+        metadata: {
+          learningPathId: String(path._id),
+          opportunityId: path.opportunityId ? String(path.opportunityId) : null,
+          bridgedSkill,
+          previousMatchScore,
+          newMatchScore,
+        },
+      }).catch((err) => logger.warn(`learning completion notification: ${err.message}`));
     }
 
     res.json({
       learningPath: path,
-      pathJustCompleted: path.progress === 100 && !wasPathCompleted,
+      pathJustCompleted,
       bridgedSkill,
+      previousMatchScore,
       newMatchScore,
+      opportunityTitle,
     });
   } catch (error) {
     logger.warn(`updateProgress: ${error.message}`);
