@@ -1,6 +1,7 @@
 const LearningPath = require('../models/LearningPath');
 const Profile = require('../models/Profile');
 const Opportunity = require('../models/Opportunity');
+const ProfileSkill = require('../models/ProfileSkill');
 const logger = require('../utils/logger');
 const ml = require('../services/ml.service');
 const notificationService = require('../services/notification.service');
@@ -312,6 +313,7 @@ exports.updateProgress = async (req, res) => {
     let previousMatchScore = null;
     let opportunityTitle = null;
     let bridgedSkill = null;
+    let fullyMatchesOpportunity = false;
     const pathJustCompleted = path.progress === 100 && !wasPathCompleted;
 
     if (newlyCompleted && resource.url) {
@@ -368,9 +370,29 @@ exports.updateProgress = async (req, res) => {
             const raw = payload.matchScore ?? payload.score ?? payload.data?.matchScore;
             if (typeof raw === 'number') newMatchScore = Math.round(raw);
           }
+
+          // Did this completion close every required skill for the
+          // opportunity? If yes, the dashboard's "Close Your Skill
+          // Gaps" rail correctly drops the card (because we filter by
+          // progress=100 elsewhere), but the worker still needs an
+          // obvious "Apply" prompt — that's what the match-type
+          // notification below provides. Calculated as a strict set
+          // comparison: opportunity.requiredSkills ⊆ profile.skills.
+          const oppFull = await Opportunity.findById(path.opportunityId)
+            .select('title requiredSkills')
+            .lean();
+          if (oppFull) {
+            opportunityTitle = oppFull.title;
+            const required = (oppFull.requiredSkills || []).map(String);
+            if (required.length > 0) {
+              const owned = await ProfileSkill.find({ profileId: profile._id })
+                .select('skillId')
+                .lean();
+              const ownedIds = new Set(owned.map((s) => String(s.skillId)));
+              fullyMatchesOpportunity = required.every((id) => ownedIds.has(id));
+            }
+          }
         }
-        const opp = await Opportunity.findById(path.opportunityId).select('title').lean();
-        if (opp) opportunityTitle = opp.title;
       }
     }
 
@@ -418,6 +440,33 @@ exports.updateProgress = async (req, res) => {
           newMatchScore,
         },
       }).catch((err) => logger.warn(`learning completion notification: ${err.message}`));
+
+      // Separately: if this completion brought the worker over the full-
+      // match line on the bound opportunity (every required skill now in
+      // their profile), fire a 'match' notification with metadata that
+      // tells the mobile to render an Apply CTA. Goes under the Matches
+      // filter in the bell-icon list and gives the worker an obvious
+      // next step now that there's no gap to bridge.
+      if (fullyMatchesOpportunity && opportunityTitle && path.opportunityId) {
+        const scoreFragment = typeof newMatchScore === 'number'
+          ? ` Your match score is now ${newMatchScore}%.`
+          : '';
+        notificationService.create({
+          userId: req.user._id,
+          type: 'match',
+          title: `Ready to apply — ${opportunityTitle}`,
+          content:
+            `You now meet every required skill for ${opportunityTitle}.${scoreFragment} Tap Apply to submit your application.`,
+          metadata: {
+            opportunityId: String(path.opportunityId),
+            opportunityTitle,
+            readyToApply: true,
+            newMatchScore,
+          },
+        }).catch((err) =>
+          logger.warn(`ready-to-apply notification: ${err.message}`)
+        );
+      }
     }
 
     res.json({
@@ -427,6 +476,7 @@ exports.updateProgress = async (req, res) => {
       previousMatchScore,
       newMatchScore,
       opportunityTitle,
+      fullyMatchesOpportunity,
     });
   } catch (error) {
     logger.warn(`updateProgress: ${error.message}`);
