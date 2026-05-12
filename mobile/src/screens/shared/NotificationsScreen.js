@@ -249,6 +249,28 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     navigation.getParent()?.navigate(screenName, params);
   };
 
+  // Learning lives inside HomeTab's stack, not at the bottom-tab level,
+  // so we have to navigate into HomeTab and then to the Learning screen.
+  // The pathway-completion notification persists learningPathId in its
+  // metadata; forwarding it as focusPathId makes LearningScreen
+  // auto-expand the card the worker just finished.
+  const navigateToLearning = (meta = {}) => {
+    navigation.getParent()?.navigate('HomeTab', {
+      screen: 'Learning',
+      params: meta.learningPathId
+        ? { focusPathId: String(meta.learningPathId) }
+        : undefined,
+    });
+  };
+
+  // OpportunityDetail is also nested inside HomeTab. Same pattern.
+  const navigateToOpportunityDetail = (opportunityId) => {
+    navigation.getParent()?.navigate('HomeTab', {
+      screen: 'OpportunityDetail',
+      params: { opportunityId: String(opportunityId) },
+    });
+  };
+
   const navigateForNotif = (item, navKey) => {
     const meta = item.metadata || {};
     switch (navKey) {
@@ -259,13 +281,13 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
         navigateToRootTab('ApplicationDetails', { applicationId: meta.applicationId });
         break;
       case 'OpportunityDetails':
-        navigateToRootTab('OpportunityDetails', { opportunityId: meta.opportunityId });
+        if (meta.opportunityId) navigateToOpportunityDetail(meta.opportunityId);
         break;
       case 'Discover':
         navigateToRootTab('Discover');
         break;
       case 'Learning':
-        navigateToRootTab('Learning');
+        navigateToLearning(meta);
         break;
       case 'FraudReport':
         navigateToRootTab('FraudReport', { notificationId: item._id || item.id });
@@ -291,8 +313,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
           navigateToRootTab('ApplicationDetails', { applicationId: meta.applicationId });
         break;
       case 'opportunity':
-        if (meta.opportunityId)
-          navigateToRootTab('OpportunityDetails', { opportunityId: meta.opportunityId });
+        if (meta.opportunityId) navigateToOpportunityDetail(meta.opportunityId);
         break;
       case 'match':
       case 'job_alert':
@@ -302,7 +323,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
         navigateToRootTab('Network');
         break;
       case 'learning':
-        navigateToRootTab('Learning');
+        navigateToLearning(meta);
         break;
       default:
         break;
