@@ -191,7 +191,20 @@ const WorkerDashboardScreen = ({ navigation }) => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.statCard}
-            onPress={() => navigation.navigate('Discover')}
+            // Pass showMatches so DiscoverScreen opens filtered to the
+            // worker's matching-engine recommendations rather than the
+            // full opportunity catalogue. The number on this card is the
+            // count of recs >= 5% match — tapping it should land them on
+            // exactly that filtered set, not a different list.
+            // Nested form is required because Discover is a Tab containing
+            // a stack — passing params at the tab level alone wouldn't
+            // reach the DiscoverMain screen.
+            onPress={() =>
+              navigation.navigate('Discover', {
+                screen: 'DiscoverMain',
+                params: { showMatches: true },
+              })
+            }
           >
             <Ionicons name="star-outline" size={22} color="#3B82F6" />
             <Text style={styles.statNumber}>

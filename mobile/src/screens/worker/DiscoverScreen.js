@@ -23,14 +23,27 @@ const CATEGORIES = [
   { key: 'apprenticeship', label: 'Apprenticeship' },
 ];
 
-const DiscoverScreen = ({ navigation }) => {
+const DiscoverScreen = ({ navigation, route }) => {
+  // showMatches arrives from the dashboard's Matches stat card. When set,
+  // we filter the opportunity list down to the matching-engine's recom-
+  // mendations so the count on the stat card equals what the worker sees.
+  const initialShowMatches = Boolean(route?.params?.showMatches);
+
   const [opportunities, setOpportunities] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [showMatchesOnly, setShowMatchesOnly] = useState(initialShowMatches);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [profileId, setProfileId] = useState(null);
+
+  // Keep the filter in sync if the dashboard navigates here again with a
+  // different param value — without this, React Navigation re-uses the
+  // existing screen instance and the new param is ignored.
+  useEffect(() => {
+    setShowMatchesOnly(Boolean(route?.params?.showMatches));
+  }, [route?.params?.showMatches]);
 
   // Fetch the worker's profileId once on mount
   useEffect(() => {
@@ -45,6 +58,44 @@ const DiscoverScreen = ({ navigation }) => {
       const params = {};
       if (searchQuery.trim()) params.search = searchQuery.trim();
       if (selectedCategory !== 'all') params.category = selectedCategory;
+
+      // In matches-only mode, fetch the opportunity catalogue + the
+      // worker's recommendations in parallel, then inner-join by
+      // opportunityId. Recommendations already carry matchScore so we
+      // skip the per-opp scoring round-trip in this path.
+      if (showMatchesOnly) {
+        const [oppsRes, recsRes] = await Promise.all([
+          opportunityAPI.getAll(params),
+          matchingAPI.getRecommendations(),
+        ]);
+        const oppList = oppsRes?.data?.opportunities || oppsRes?.data?.data || oppsRes?.data || [];
+        const recList =
+          recsRes?.data?.recommendations || recsRes?.data?.data || recsRes?.data || [];
+
+        const scoreById = new Map();
+        (Array.isArray(recList) ? recList : []).forEach((r) => {
+          const id = r.opportunityId || r.opportunity?._id || r.opportunity?.id;
+          const score = r.matchScore ?? r.score ?? r.opportunity?.matchScore ?? 0;
+          if (id) scoreById.set(String(id), score);
+        });
+
+        // Only opportunities that the matching engine recommended with a
+        // meaningful score (>= 5%) — same threshold the dashboard card
+        // uses, so the count on the stat tile equals the rows shown here.
+        const filtered = (Array.isArray(oppList) ? oppList : [])
+          .filter((opp) => {
+            const id = String(opp._id || opp.id || '');
+            return scoreById.has(id) && scoreById.get(id) >= 5;
+          })
+          .map((opp) => ({
+            ...opp,
+            matchScore: scoreById.get(String(opp._id || opp.id)) ?? 0,
+          }))
+          .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+
+        setOpportunities(filtered);
+        return;
+      }
 
       const { data } = await opportunityAPI.getAll(params);
       const list = data.opportunities || data.data || data || [];
@@ -83,7 +134,7 @@ const DiscoverScreen = ({ navigation }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [searchQuery, selectedCategory, profileId]);
+  }, [searchQuery, selectedCategory, profileId, showMatchesOnly]);
 
   useEffect(() => {
     fetchOpportunities();
@@ -155,6 +206,29 @@ const DiscoverScreen = ({ navigation }) => {
         )}
       />
 
+      {/* Matches-only banner — appears when DiscoverScreen was opened
+          from the dashboard's Matches stat card. Gives the worker a
+          clear toggle back to the full catalogue without leaving the
+          screen. */}
+      {showMatchesOnly && (
+        <View style={styles.matchesBanner}>
+          <Ionicons name="star" size={14} color="#1D4ED8" />
+          <Text style={styles.matchesBannerText}>
+            Showing your matches only
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setShowMatchesOnly(false);
+              setLoading(true);
+            }}
+            style={styles.matchesBannerClear}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.matchesBannerClearText}>Show all</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Results count */}
       <Text style={styles.resultsCount}>
         {opportunities.length} {opportunities.length === 1 ? 'opportunity' : 'opportunities'} found
@@ -165,11 +239,15 @@ const DiscoverScreen = ({ navigation }) => {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <Ionicons name="briefcase-outline" size={48} color="#D1D5DB" />
-      <Text style={styles.emptyTitle}>No Opportunities Found</Text>
+      <Text style={styles.emptyTitle}>
+        {showMatchesOnly ? 'No matches yet' : 'No Opportunities Found'}
+      </Text>
       <Text style={styles.emptyText}>
-        {searchQuery
-          ? 'Try adjusting your search or filters.'
-          : 'New opportunities are posted regularly. Check back soon!'}
+        {showMatchesOnly
+          ? 'The matching engine has not surfaced any roles above the 5% threshold yet. Add more skills or experience to your profile to widen the pool.'
+          : searchQuery
+            ? 'Try adjusting your search or filters.'
+            : 'New opportunities are posted regularly. Check back soon!'}
       </Text>
     </View>
   );
@@ -305,6 +383,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9CA3AF',
     marginBottom: 12,
+  },
+  matchesBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  matchesBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#1E40AF',
+    fontWeight: '600',
+  },
+  matchesBannerClear: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  matchesBannerClearText: {
+    fontSize: 12,
+    color: '#1D4ED8',
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 20,
