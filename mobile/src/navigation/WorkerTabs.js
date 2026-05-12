@@ -51,6 +51,11 @@ const DiscoverStackScreen = () => (
   <DiscoverStack.Navigator screenOptions={screenOptions}>
     <DiscoverStack.Screen name="DiscoverMain" component={DiscoverScreen} />
     <DiscoverStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
+    {/* OpportunityDetail's "Bridge a skill gap" alert navigates to Learning;
+        without this route the navigator throws when the alert is fired from
+        the Discover tab. Same screen component as the Home stack — React
+        Navigation re-uses the registered name within each stack. */}
+    <DiscoverStack.Screen name="Learning" component={LearningScreen} />
   </DiscoverStack.Navigator>
 );
 
@@ -61,6 +66,7 @@ const MessagesStackScreen = () => (
     <MessagesStack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
     <MessagesStack.Screen name="PeopleByLocation" component={PeopleByLocationScreen} />
     <MessagesStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
+    <MessagesStack.Screen name="Learning" component={LearningScreen} />
   </MessagesStack.Navigator>
 );
 
