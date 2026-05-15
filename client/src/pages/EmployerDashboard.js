@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { opportunityAPI } from '../services/api';
-import { FiPlusCircle, FiBriefcase, FiUsers, FiTrendingUp, FiEye } from 'react-icons/fi';
+import { FiPlusCircle, FiBriefcase, FiUsers, FiTrendingUp, FiEye, FiUser } from 'react-icons/fi';
 
 const EmployerDashboard = () => {
   const { user } = useAuth();
@@ -40,9 +40,14 @@ const EmployerDashboard = () => {
           <h1 className="text-2xl font-bold">Hello, {user?.fullName?.split(' ')[0]}!</h1>
           <p className="text-sm text-gray-500">Employer Dashboard</p>
         </div>
-        <Link to="/employer/post" className="btn-primary flex items-center gap-2 text-sm">
-          <FiPlusCircle size={16} /> Post Job
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link to="/employer/profile" className="btn-secondary flex items-center gap-1 text-sm">
+            <FiUser size={14} /> My Profile
+          </Link>
+          <Link to="/employer/post" className="btn-primary flex items-center gap-2 text-sm">
+            <FiPlusCircle size={16} /> Post Job
+          </Link>
+        </div>
       </div>
 
       {/* Stats Grid */}

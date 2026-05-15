@@ -6,7 +6,6 @@ const ctrl = require('../controllers/profile.controller');
 router.post('/', authenticate, validate('createProfile'), ctrl.createProfile);
 router.get('/me', authenticate, ctrl.getMyProfile);
 router.put('/me', authenticate, ctrl.updateProfile);
-router.get('/:id', ctrl.getProfileById);
 
 // Skills
 router.post('/skills', authenticate, validate('addProfileSkill'), ctrl.addSkill);
@@ -21,11 +20,17 @@ router.delete('/experience/:expId', authenticate, ctrl.deleteExperience);
 router.post('/education', authenticate, validate('addEducation'), ctrl.addEducation);
 router.delete('/education/:eduId', authenticate, ctrl.deleteEducation);
 
+// Avatar
+router.put('/avatar', authenticate, ctrl.updateAvatar);
+
 // Preferences
 router.put('/preferences', authenticate, ctrl.updatePreference);
 
 // Portfolio
 router.post('/portfolio', authenticate, ctrl.addPortfolioItem);
 router.delete('/portfolio/:itemId', authenticate, ctrl.removePortfolioItem);
+
+// Public profile by ID — keep last so named routes above take priority
+router.get('/:id', ctrl.getProfileById);
 
 module.exports = router;
