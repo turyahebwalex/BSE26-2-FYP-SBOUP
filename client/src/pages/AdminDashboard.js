@@ -36,7 +36,16 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarEle
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
-  const [flagged, setFlagged] = useState({ flaggedOpportunities: [], pendingReports: [] });
+  const [flagged, setFlagged] = useState({
+    flaggedOpportunities: [],
+    suspendedOpportunities: [],
+    pendingAppeals: [],
+    pendingReports: [],
+  });
+  const [modSubTab, setModSubTab] = useState('review');
+  const [archivedOps, setArchivedOps] = useState([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  const [appealNotes, setAppealNotes] = useState({});
   const [users, setUsers] = useState([]);
   const [reports, setReports] = useState([]);
   const [trends, setTrends] = useState([]);
@@ -99,11 +108,72 @@ const AdminDashboard = () => {
       toast.success(`Content ${action}d`);
       setFlagged((prev) => ({
         ...prev,
-        flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
+        flaggedOpportunities: (prev.flaggedOpportunities || []).filter((o) => o._id !== contentId),
+        suspendedOpportunities: (prev.suspendedOpportunities || []).filter((o) => o._id !== contentId),
+        pendingAppeals: (prev.pendingAppeals || []).filter((o) => o._id !== contentId),
       }));
-      setFeedbacks((prev) => { const n = { ...prev }; delete n[contentId]; return n; });
+      setFeedbacks((prev) => {
+        const n = { ...prev };
+        delete n[contentId];
+        return n;
+      });
     } catch {
       toast.error('Action failed');
+    }
+  };
+
+  const loadArchived = async () => {
+    setArchivedLoading(true);
+    try {
+      const { data } = await adminAPI.getArchivedOpportunities({ limit: 50 });
+      setArchivedOps(data.opportunities || []);
+    } catch {
+      toast.error('Failed to load archived postings');
+    }
+    setArchivedLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === 'moderation' && modSubTab === 'archived') loadArchived();
+  }, [tab, modSubTab]);
+
+  const restoreArchived = async (id) => {
+    try {
+      await adminAPI.restoreArchivedOpportunity(id);
+      toast.success('Posting restored to published');
+      setArchivedOps((prev) => prev.filter((o) => o._id !== id));
+    } catch {
+      toast.error('Restore failed');
+    }
+  };
+
+  const purgeArchived = async (id) => {
+    if (!window.confirm('Permanently delete this posting? This cannot be undone.')) return;
+    try {
+      await adminAPI.permanentlyRemoveOpportunity(id);
+      toast.success('Posting permanently removed');
+      setArchivedOps((prev) => prev.filter((o) => o._id !== id));
+    } catch {
+      toast.error('Removal failed');
+    }
+  };
+
+  const reviewAppeal = async (oppId, action) => {
+    try {
+      const adminNote = appealNotes[oppId] || '';
+      await adminAPI.reviewAppeal(oppId, { action, adminNote });
+      toast.success(`Appeal ${action}d`);
+      setFlagged((prev) => ({
+        ...prev,
+        pendingAppeals: (prev.pendingAppeals || []).filter((o) => o._id !== oppId),
+      }));
+      setAppealNotes((prev) => {
+        const n = { ...prev };
+        delete n[oppId];
+        return n;
+      });
+    } catch {
+      toast.error('Appeal review failed');
     }
   };
 
@@ -215,6 +285,213 @@ const AdminDashboard = () => {
       ],
     };
   }, [users]);
+
+  const renderQueueCard = (opp, ctx) => {
+    const { borderClass, statusTag } = ctx;
+    const signals = opp.fraudSignals || [];
+    const isExpanded = expandedOpp === opp._id;
+    const scoreColor = opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600';
+    const scoreBg = opp.fraudRiskScore >= 70 ? 'bg-red-50' : opp.fraudRiskScore >= 30 ? 'bg-yellow-50' : 'bg-green-50';
+
+    const xai = opp.fraudXai || {};
+    const qm = xai.qualityMetrics || {};
+    const checksRaw = qm.completeness_checks || {};
+    const fallbackChecks = {
+      has_description: (opp.description || '').length > 50,
+      has_requirements: (opp.requirements || '').length > 20,
+      has_salary: !!(opp.compensationRange?.min || opp.compensationRange?.max),
+      has_location: !!(opp.location && String(opp.location).length > 2),
+    };
+    const checks = Object.keys(checksRaw).length ? checksRaw : fallbackChecks;
+
+    const meta = opp.employerModerationMeta || {};
+    const emQ = qm.employer_metrics || {};
+    const accountAge = meta.accountAgeDays ?? emQ.account_age_days;
+    const prevPost = meta.previousPostings ?? emQ.previous_postings;
+    const blockedCnt = meta.blockedCount ?? emQ.blocked_count;
+
+    const conf = (xai.confidenceLevel || '').toLowerCase();
+    const confCls =
+      conf === 'high'
+        ? 'bg-indigo-100 text-indigo-800'
+        : conf === 'medium'
+          ? 'bg-amber-100 text-amber-800'
+          : 'bg-gray-100 text-gray-700';
+
+    const rationale =
+      xai.plainEnglishRationale ||
+      opp.moderationExplanation ||
+      (signals.length
+        ? 'No plain-language summary is stored for this posting yet; use the signal list below.'
+        : 'No fraud signals recorded.');
+
+    return (
+      <div key={opp._id} className="card hover:shadow-md transition">
+        <div className="flex justify-between items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold">{opp.title}</h3>
+              {statusTag && (
+                <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                  {statusTag}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Posted by: {opp.postedByUserId?.fullName || 'Unknown'} • {opp.companyId?.name || 'No company'}
+            </p>
+          </div>
+          <div className={`flex flex-col items-center px-3 py-2 rounded-xl shrink-0 ${scoreBg}`}>
+            <span className={`text-2xl font-bold ${scoreColor}`}>{opp.fraudRiskScore ?? '—'}</span>
+            <span className="text-xs text-gray-500">Fraud score</span>
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 mt-3 line-clamp-2">{opp.description}</p>
+
+        <div className="mt-3 grid md:grid-cols-2 gap-3">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-700">Explanation</span>
+              {xai.confidenceLevel && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${confCls}`}>
+                  {xai.confidenceLevel} confidence
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-slate-700 leading-snug">{rationale}</p>
+          </div>
+
+          <div className="p-3 bg-white rounded-xl border border-gray-100">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Posting completeness</p>
+            <div className="space-y-1">
+              {[
+                ['has_description', 'Description'],
+                ['has_requirements', 'Requirements'],
+                ['has_salary', 'Salary'],
+                ['has_location', 'Location'],
+              ].map(([k, label]) => (
+                <div key={k} className="flex justify-between text-xs text-gray-600">
+                  <span>{label}</span>
+                  <span className={checks[k] ? 'text-green-600 font-medium' : 'text-gray-400'}>
+                    {checks[k] ? '✓' : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {typeof qm.overall_score === 'number' && (
+              <p className="text-[11px] text-gray-500 mt-2">Quality score (service): {qm.overall_score}/100</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 p-3 bg-gray-50 rounded-xl text-xs text-gray-700">
+          <span className="font-semibold text-gray-800">Employer history</span>
+          <p className="mt-1">
+            Account age:{' '}
+            {typeof accountAge === 'number' ? `${accountAge} days` : '—'} • Prior postings:{' '}
+            {typeof prevPost === 'number' ? prevPost : '—'} • Blocked postings:{' '}
+            {typeof blockedCnt === 'number' ? blockedCnt : '—'}
+            {emQ.verification_status && (
+              <>
+                {' '}
+                • Company verification: {emQ.verification_status}
+              </>
+            )}
+          </p>
+        </div>
+
+        {signals.length > 0 && (
+          <div className="mt-3 p-3 bg-red-50 rounded-xl">
+            <div className="flex items-center gap-1.5 mb-2">
+              <FiInfo size={13} className="text-red-500" />
+              <span className="text-xs font-semibold text-red-700">Model signals</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {signals.slice(0, 8).map((s, i) => (
+                <span
+                  key={i}
+                  className="text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded-full"
+                >
+                  {s.signal}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setExpandedOpp(isExpanded ? null : opp._id)}
+          className="text-xs text-primary mt-2 hover:underline"
+        >
+          {isExpanded ? 'Hide details' : 'View full posting'}
+        </button>
+
+        {isExpanded && (
+          <div className="mt-3 pt-3 border-t space-y-2 text-sm text-gray-600">
+            {opp.requirements && (
+              <p>
+                <span className="font-medium">Requirements:</span> {opp.requirements}
+              </p>
+            )}
+            {opp.location && (
+              <p>
+                <span className="font-medium">Location:</span> {opp.location}
+              </p>
+            )}
+            {opp.compensationRange && (
+              <p>
+                <span className="font-medium">Salary:</span>{' '}
+                {opp.compensationRange.min?.toLocaleString()} – {opp.compensationRange.max?.toLocaleString()} UGX
+              </p>
+            )}
+            <p>
+              <span className="font-medium">Remote:</span> {opp.isRemote ? 'Yes' : 'No'}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <FiMessageSquare size={13} className="text-gray-400" />
+            <span className="text-xs text-gray-500">Admin feedback (optional)</span>
+          </div>
+          <textarea
+            rows={2}
+            placeholder="Notes for audit trail / retraining..."
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+            value={feedbacks[opp._id] || ''}
+            onChange={(e) => setFeedbacks((prev) => ({ ...prev, [opp._id]: e.target.value }))}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'approve')}
+            className="btn-primary text-sm !py-1.5 !px-4"
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'suspend')}
+            className="bg-amber-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-amber-600 transition"
+          >
+            Suspend
+          </button>
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'remove')}
+            className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+          >
+            Block
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   if (loading)
     return (
@@ -497,114 +774,222 @@ const AdminDashboard = () => {
       {/* ─── Moderation Tab ─── */}
       {tab === 'moderation' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-lg">
-              Flagged Opportunities ({flagged.flaggedOpportunities?.length || 0})
-            </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setModSubTab('review')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-yellow-700">Under review</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.flaggedOpportunities?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Initial review queue</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModSubTab('suspended')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Suspended</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.suspendedOpportunities?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Separated moderation queue</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModSubTab('appeals')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Appeals</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.pendingAppeals?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Waiting for admin review</p>
+            </button>
           </div>
 
-          {flagged.flaggedOpportunities?.length > 0 ? (
-            flagged.flaggedOpportunities.map((opp) => {
-              const signals = opp.fraudSignals || [];
-              const isExpanded = expandedOpp === opp._id;
-              const scoreColor = opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600';
-              const scoreBg = opp.fraudRiskScore >= 70 ? 'bg-red-50' : opp.fraudRiskScore >= 30 ? 'bg-yellow-50' : 'bg-green-50';
-              return (
-                <div key={opp._id} className="card border-l-4 border-l-yellow-400">
-                  {/* Header */}
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold">{opp.title}</h3>
-                      <p className="text-sm text-gray-500 mt-0.5">
-                        Posted by: {opp.postedByUserId?.fullName || 'Unknown'} •{' '}
-                        {opp.companyId?.name || 'No company'}
-                      </p>
-                    </div>
-                    <div className={`ml-4 flex flex-col items-center px-3 py-2 rounded-xl ${scoreBg}`}>
-                      <span className={`text-2xl font-bold ${scoreColor}`}>{opp.fraudRiskScore ?? '—'}</span>
-                      <span className="text-xs text-gray-500">Fraud Score</span>
-                    </div>
+          <div className="flex flex-wrap gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+            {[
+              { key: 'review', label: 'Review queue' },
+              { key: 'suspended', label: 'Suspended' },
+              { key: 'appeals', label: 'Appeals' },
+              { key: 'archived', label: 'Archived' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setModSubTab(key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  modSubTab === key ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {modSubTab === 'review' && (
+            <>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Under manual review
+                </h3>
+                {(flagged.flaggedOpportunities || []).length > 0 ? (
+                  <div className="space-y-4">
+                    {flagged.flaggedOpportunities.map((opp) =>
+                      renderQueueCard(opp, { borderClass: 'border-l-yellow-400', statusTag: 'under review' })
+                    )}
                   </div>
+                ) : (
+                  <p className="text-sm text-gray-400 py-4">No postings awaiting initial review.</p>
+                )}
+              </div>
+            </>
+          )}
 
-                  {/* Description */}
-                  <p className="text-sm text-gray-600 mt-3 line-clamp-2">{opp.description}</p>
+          {modSubTab === 'suspended' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Suspended (temporary)</h3>
+                <p className="text-xs text-gray-500 mb-3">
+                  Suspended postings stay hidden from the public feed until you approve them or permanently block them
+                  (score ≥ 70 auto-block is separate).
+                </p>
+                {(flagged.suspendedOpportunities || []).length > 0 ? (
+                  <div className="space-y-4">
+                    {flagged.suspendedOpportunities.map((opp) =>
+                      renderQueueCard(opp, { borderClass: 'border-l-amber-400', statusTag: 'suspended' })
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 py-4">No suspended postings.</p>
+                )}
+              </div>
+            </div>
+          )}
 
-                  {/* XAI — Fraud Signals */}
-                  {signals.length > 0 && (
-                    <div className="mt-3 p-3 bg-red-50 rounded-xl">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <FiInfo size={13} className="text-red-500" />
-                        <span className="text-xs font-semibold text-red-700">Why this was flagged</span>
+          {modSubTab === 'appeals' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Employers may submit one appeal per blocked, suspended, or under review posting. Review their
+                justification below.
+              </p>
+              {(flagged.pendingAppeals || []).length > 0 ? (
+                <div className="space-y-4">
+                  {flagged.pendingAppeals.map((opp) => {
+                    const signals = opp.fraudSignals || [];
+                    const submitted = opp.appeal?.submittedAt
+                      ? new Date(opp.appeal.submittedAt).toLocaleString()
+                      : '';
+                    return (
+                      <div key={opp._id} className="card">
+                      <div className="flex justify-between items-start gap-3">
+                        <div>
+                          <h3 className="font-semibold">{opp.title}</h3>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            {opp.postedByUserId?.fullName || 'Unknown'} • Status:{' '}
+                            <span className="font-medium text-gray-700">{opp.status}</span> • Risk{' '}
+                            {opp.fraudRiskScore ?? '—'}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {signals.slice(0, 6).map((s, i) => (
-                          <span key={i} className="text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded-full">
-                            {s.signal}
-                          </span>
-                        ))}
+                      <div className="mt-3 p-3 bg-indigo-50 rounded-xl">
+                        <p className="text-xs font-semibold text-indigo-800 mb-1">Employer appeal</p>
+                        <p className="text-sm text-indigo-950 whitespace-pre-wrap">{opp.appeal?.reason || '—'}</p>
+                        <p className="text-[11px] text-indigo-700 mt-2">Submitted: {submitted || '—'}</p>
                       </div>
-                    </div>
-                  )}
-
-                  {/* Expand for full details */}
-                  <button
-                    onClick={() => setExpandedOpp(isExpanded ? null : opp._id)}
-                    className="text-xs text-primary mt-2 hover:underline"
-                  >
-                    {isExpanded ? 'Hide details' : 'View full posting'}
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-3 pt-3 border-t space-y-2 text-sm text-gray-600">
-                      {opp.requirements && <p><span className="font-medium">Requirements:</span> {opp.requirements}</p>}
-                      {opp.location && <p><span className="font-medium">Location:</span> {opp.location}</p>}
-                      {opp.compensationRange && (
-                        <p>
-                          <span className="font-medium">Salary:</span>{' '}
-                          {opp.compensationRange.min?.toLocaleString()} – {opp.compensationRange.max?.toLocaleString()} UGX
-                        </p>
+                      {signals.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {signals.slice(0, 5).map((s, i) => (
+                            <span
+                              key={i}
+                              className="text-[10px] bg-white border border-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full"
+                            >
+                              {s.signal}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                      <p><span className="font-medium">Remote:</span> {opp.isRemote ? 'Yes' : 'No'}</p>
-                    </div>
-                  )}
-
-                  {/* Admin Feedback */}
-                  <div className="mt-3">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <FiMessageSquare size={13} className="text-gray-400" />
-                      <span className="text-xs text-gray-500">Admin feedback (optional — stored for model retraining)</span>
-                    </div>
-                    <textarea
-                      rows={2}
-                      placeholder="e.g. Legitimate local business, salary is reasonable for Kampala..."
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-                      value={feedbacks[opp._id] || ''}
-                      onChange={(e) => setFeedbacks((prev) => ({ ...prev, [opp._id]: e.target.value }))}
-                    />
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => moderate(opp._id, 'approve')}
-                      className="btn-primary text-sm !py-1.5 !px-4"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => moderate(opp._id, 'remove')}
-                      className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                      <div className="mt-3">
+                        <span className="text-xs text-gray-500">Admin note (optional)</span>
+                        <textarea
+                          rows={2}
+                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                          value={appealNotes[opp._id] || ''}
+                          onChange={(e) => setAppealNotes((prev) => ({ ...prev, [opp._id]: e.target.value }))}
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => reviewAppeal(opp._id, 'approve')}
+                          className="btn-primary text-sm !py-1.5 !px-4"
+                        >
+                          Approve appeal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => reviewAppeal(opp._id, 'reject')}
+                          className="bg-gray-200 text-gray-800 px-4 py-1.5 rounded-full text-sm hover:bg-gray-300 transition"
+                        >
+                          Reject appeal
+                        </button>
+                      </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })
-          ) : (
-            <div className="card text-center py-12">
-              <FiAlertTriangle size={32} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-400">No flagged content — everything looks good!</p>
+              ) : (
+                <div className="card text-center py-12">
+                  <FiMessageSquare size={32} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-gray-400">No pending appeals</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {modSubTab === 'archived' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Employer-archived postings are hidden from discovery. Restore them to published or permanently remove
+                them (distinct from fraud-blocked postings).
+              </p>
+              {archivedLoading ? (
+                <div className="card text-center py-12 text-gray-400 text-sm">Loading archived postings…</div>
+              ) : archivedOps.length > 0 ? (
+                <div className="space-y-4">
+                  {archivedOps.map((opp) => (
+                    <div key={opp._id} className="card flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">{opp.title}</h3>
+                        <p className="text-sm text-gray-500">
+                          {opp.postedByUserId?.fullName || 'Unknown'} • Updated{' '}
+                          {opp.updatedAt ? new Date(opp.updatedAt).toLocaleDateString() : '—'}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => restoreArchived(opp._id)}
+                          className="btn-primary text-sm !py-1.5 !px-4"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => purgeArchived(opp._id)}
+                          className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+                        >
+                          Delete permanently
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="card text-center py-12">
+                  <FiBriefcase size={32} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-gray-400">No archived postings</p>
+                </div>
+              )}
             </div>
           )}
         </div>

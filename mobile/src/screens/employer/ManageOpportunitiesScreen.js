@@ -76,6 +76,9 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
     const oppId = item._id || item.id;
     const statusStyle = STATUS_STYLES[item.status] || STATUS_STYLES.draft;
     const canArchive = item.status === 'published' || item.status === 'draft';
+    const moderationExplanation = item.fraudXai?.plainEnglishRationale || item.moderationExplanation || '';
+    const showModerationExplanation =
+      ['under_review', 'blocked', 'suspended'].includes(item.status) && moderationExplanation;
 
     return (
       <View style={styles.card}>
@@ -119,6 +122,13 @@ const ManageOpportunitiesScreen = ({ navigation }) => {
             </View>
           )}
         </View>
+
+        {showModerationExplanation && (
+          <View style={styles.explanationBox}>
+            <Text style={styles.explanationLabel}>Explanation</Text>
+            <Text style={styles.explanationText}>{moderationExplanation}</Text>
+          </View>
+        )}
 
         <View style={styles.cardActions}>
           <TouchableOpacity
@@ -299,6 +309,25 @@ const styles = StyleSheet.create({
     gap: 14,
     marginBottom: 12,
     flexWrap: 'wrap',
+  },
+  explanationBox: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  explanationLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#B45309',
+    marginBottom: 4,
+  },
+  explanationText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#92400E',
   },
   metaItem: {
     flexDirection: 'row',

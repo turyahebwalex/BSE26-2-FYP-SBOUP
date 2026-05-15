@@ -6,6 +6,7 @@ const Application = require('../models/Application');
 const FraudLog = require('../models/FraudLog');
 const mlService = require('../services/ml.service');
 const notify = require('../services/notification.service');
+const attachModerationExplanation = require('../utils/attachModerationExplanation');
 const logger = require('../utils/logger');
 
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
@@ -62,7 +63,24 @@ const buildFraudExplanation = ({ classification, fraudScore, decisionReason, sig
   return explanationParts.join(' ');
 };
 
-const evaluateFraudDecision = ({ fraudScore, fraudAvailable }) => {
+const applyFraudXaiFromService = (opportunity, fraudData) => {
+  const xai = fraudData && fraudData.xaiExplanation;
+  if (!xai || typeof xai !== 'object') return;
+  opportunity.fraudXai = {
+    plainEnglishRationale: xai.plain_english_rationale || '',
+    confidenceLevel: xai.confidence_level || '',
+    qualityMetrics: xai.quality_metrics || null,
+    riskFactors: Array.isArray(xai.risk_factors) ? xai.risk_factors : [],
+    detailedExplanation: xai.detailed_explanation || '',
+    updatedAt: new Date(),
+  };
+  const qs = xai.quality_metrics?.overall_score;
+  if (typeof qs === 'number' && Number.isFinite(qs)) {
+    opportunity.qualityScore = Math.round(qs);
+  }
+};
+
+const evaluateFraudDecision = ({ fraudScore, fraudAvailable, isAppealable = false }) => {
   if (!fraudAvailable) {
     return {
       status: 'under_review',
@@ -82,13 +100,17 @@ const evaluateFraudDecision = ({ fraudScore, fraudAvailable }) => {
   }
 
   if (fraudScore >= FRAUD_HIGH) {
+    // Permanent block for clear fraud (score >= 70)
     return {
       status: 'blocked',
       classification: 'High Risk',
       decisionOutcome: 'blocked',
-      decisionReason: `Fraud score ${fraudScore} is at or above the auto-rejection threshold (${FRAUD_HIGH}).`,
+      decisionReason: `Fraud score ${fraudScore} indicates clear fraudulent content (>= ${FRAUD_HIGH}). Posting permanently blocked.`,
     };
   }
+
+  // For borderline cases (30-69), keep them in the manual review queue.
+  // Admin can optionally move borderline cases to `suspended` via the moderation UI.
 
   return {
     status: 'under_review',
@@ -136,12 +158,13 @@ exports.createOpportunity = async (req, res) => {
       fraudSignals = Array.isArray(fraudResult.data.signals) && fraudResult.data.signals.length > 0
         ? fraudResult.data.signals
         : buildFraudSignals(fraudFeatures);
-      fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true }).classification;
-      fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true });
+      fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true, isAppealable: true }).classification;
+      fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true, isAppealable: true });
 
       opportunity.fraudRiskScore = fraudScore;
       opportunity.fraudSignals = fraudSignals;
       opportunity.status = fraudDecision.status;
+      applyFraudXaiFromService(opportunity, fraudResult.data);
     } else {
       opportunity.fraudRiskScore = 0;
       opportunity.fraudSignals = [];
@@ -206,13 +229,9 @@ exports.getOpportunities = async (req, res) => {
       minPay,
       maxPay,
       sortBy = 'createdAt',
-      companyId,
     } = req.query;
 
     const filter = { status: 'published', deadline: { $gte: new Date() } };
-    if (companyId) {
-      filter.companyId = companyId;
-    }
     if (category) filter.category = category;
     if (location) filter.location = { $regex: location, $options: 'i' };
     if (experienceLevel) filter.experienceLevel = experienceLevel;
@@ -275,7 +294,11 @@ exports.getOpportunityById = async (req, res) => {
 
     opportunity.viewCount += 1;
     await opportunity.save();
-    res.json({ opportunity });
+    const shouldAttachModerationExplanation = req.user?.role === 'admin' || req.user?.role === 'employer';
+    const responseOpportunity = shouldAttachModerationExplanation
+      ? (await attachModerationExplanation([opportunity]))[0]
+      : opportunity;
+    res.json({ opportunity: responseOpportunity });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch opportunity.' });
   }
@@ -298,7 +321,7 @@ exports.updateOpportunity = async (req, res) => {
 
     Object.assign(opportunity, req.body);
 
-    if (fraudFieldsChanged && opportunity.status === 'published') {
+    if (fraudFieldsChanged) {
       const fraudResult = await mlService.detectFraud(opportunity);
       let fraudScore = opportunity.fraudRiskScore || 0;
       let fraudSignals = opportunity.fraudSignals || [];
@@ -312,12 +335,13 @@ exports.updateOpportunity = async (req, res) => {
         fraudSignals = Array.isArray(fraudResult.data.signals) && fraudResult.data.signals.length > 0
           ? fraudResult.data.signals
           : buildFraudSignals(fraudFeatures);
-        fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true }).classification;
-        fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true });
+        fraudClassification = fraudResult.data.classification || evaluateFraudDecision({ fraudScore, fraudAvailable: true, isAppealable: true }).classification;
+        fraudDecision = evaluateFraudDecision({ fraudScore, fraudAvailable: true, isAppealable: true });
 
         opportunity.fraudRiskScore = fraudScore;
         opportunity.fraudSignals = fraudSignals;
         opportunity.status = fraudDecision.status;
+        applyFraudXaiFromService(opportunity, fraudResult.data);
       } else {
         opportunity.status = 'under_review';
       }
@@ -362,6 +386,68 @@ exports.archiveOpportunity = async (req, res) => {
   }
 };
 
+exports.submitAppeal = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'Appeal reason is required.' });
+    }
+
+    const opportunity = await Opportunity.findOne({
+      _id: req.params.id,
+      postedByUserId: req.user._id,
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Opportunity not found.' });
+    }
+
+    if (!['blocked', 'suspended', 'under_review'].includes(opportunity.status)) {
+      return res.status(400).json({ 
+        error: 'Appeal can only be submitted for blocked, suspended, or under review opportunities.' 
+      });
+    }
+
+    if (opportunity.appeal.status !== 'none') {
+      return res.status(400).json({ 
+        error: 'An appeal has already been submitted for this opportunity.' 
+      });
+    }
+
+    // Update appeal fields
+    opportunity.appeal.status = 'pending';
+    opportunity.appeal.reason = reason.trim();
+    opportunity.appeal.submittedAt = new Date();
+    
+    await opportunity.save();
+
+    // Notify admins about new appeal
+    const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
+    await Promise.all(
+      admins.map((admin) =>
+        notify.create({
+          userId: admin._id,
+          type: 'appeal_submitted',
+          content: `New appeal submitted for "${opportunity.title}" - ${opportunity.fraudRiskScore} risk score.`,
+          metadata: { 
+            opportunityId: opportunity._id, 
+            fraudRiskScore: opportunity.fraudRiskScore,
+            appealReason: reason.trim()
+          },
+        })
+      )
+    );
+
+    res.json({ 
+      message: 'Appeal submitted successfully. It will be reviewed by an administrator.',
+      appeal: opportunity.appeal
+    });
+  } catch (error) {
+    logger.error('Submit appeal error:', error);
+    res.status(500).json({ error: 'Failed to submit appeal.' });
+  }
+};
+
 exports.getMyOpportunities = async (req, res) => {
   try {
     const opportunities = await Opportunity.find({ postedByUserId: req.user._id })
@@ -397,7 +483,9 @@ exports.getMyOpportunities = async (req, res) => {
       };
     });
 
-    res.json({ opportunities: enriched });
+    const opportunitiesWithExplanation = await attachModerationExplanation(enriched);
+
+    res.json({ opportunities: opportunitiesWithExplanation });
   } catch (error) {
     logger.error('Get my opportunities error:', error);
     res.status(500).json({ error: 'Failed to fetch opportunities.' });
