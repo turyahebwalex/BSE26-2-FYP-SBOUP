@@ -6,6 +6,8 @@ const ctrl = require('../controllers/profile.controller');
 router.post('/', authenticate, validate('createProfile'), ctrl.createProfile);
 router.get('/me', authenticate, ctrl.getMyProfile);
 router.put('/me', authenticate, ctrl.updateProfile);
+router.put('/avatar', authenticate, ctrl.updateAvatar);
+router.get('/:id', ctrl.getProfileById);
 
 // Skills
 router.post('/skills', authenticate, validate('addProfileSkill'), ctrl.addSkill);
