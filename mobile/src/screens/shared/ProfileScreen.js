@@ -2,17 +2,23 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../context/AuthContext';
 import { profileAPI, BASE_URL } from '../../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Avatar is stored per-user so switching accounts shows the right photo
+const AVATAR_KEY = (userId) => `user_avatar_uri_${userId}`;
 
 const ProfileScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
@@ -25,6 +31,57 @@ const ProfileScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [avatarUri, setAvatarUri] = useState(null);
+
+  // Load avatar: AsyncStorage cache first, then fall back to DB
+  useEffect(() => {
+    const userId = user?._id || user?.id || 'guest';
+    const key = AVATAR_KEY(userId);
+    AsyncStorage.getItem(key).then(async (cached) => {
+      if (cached) {
+        setAvatarUri(cached);
+      } else {
+        // Not in cache — try to load from the profile in DB
+        try {
+          const { data } = await profileAPI.getMyProfile();
+          const b64 = data.profile?.avatarBase64;
+          if (b64) {
+            const uri = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+            setAvatarUri(uri);
+            await AsyncStorage.setItem(key, uri);
+          }
+        } catch (_) {}
+      }
+    });
+  }, [user]);
+
+  const handlePickAvatar = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+      base64: true,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      const userId = user?._id || user?.id || 'guest';
+      const key = AVATAR_KEY(userId);
+      const dataUri = `data:image/jpeg;base64,${asset.base64}`;
+      setAvatarUri(dataUri);
+      await AsyncStorage.setItem(key, dataUri);
+      try {
+        await profileAPI.updateAvatar(asset.base64);
+      } catch (e) {
+        Alert.alert('Warning', 'Photo saved locally but could not sync to server.');
+      }
+    }
+  };
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -77,6 +134,7 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const handleLogout = () => {
+    setAvatarUri(null);
     logout();
   };
 
@@ -110,9 +168,18 @@ const ProfileScreen = ({ navigation }) => {
       >
         {/* Profile Header */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials()}</Text>
-          </View>
+          <TouchableOpacity onPress={handlePickAvatar} style={styles.avatarWrapper} activeOpacity={0.8}>
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{getInitials()}</Text>
+              </View>
+            )}
+            <View style={styles.avatarEditBadge}>
+              <Ionicons name={avatarUri ? 'pencil' : 'camera'} size={12} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
           <Text style={styles.userName}>
             {user?.fullName || user?.name || 'User'}
           </Text>
@@ -325,12 +392,33 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 24,
   },
+  avatarWrapper: {
+    position: 'relative',
+    marginBottom: 12,
+  },
   avatar: {
     width: 80, height: 80, borderRadius: 40,
     backgroundColor: '#F97316',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#1F2937',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F9FAFB',
   },
   avatarText:   { fontSize: 30, fontWeight: '700', color: '#FFFFFF' },
   userName:     { fontSize: 22, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
