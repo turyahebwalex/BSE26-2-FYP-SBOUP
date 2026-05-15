@@ -39,6 +39,39 @@ const uploadAvatar = multer({
 
 exports.uploadAvatar = uploadAvatar;
 
+// Helper function to save base64 image
+const saveBase64Image = async (userId, base64Data) => {
+  let buffer;
+  let fileExtension = 'jpg';
+  
+  // Check if base64 has data URL prefix
+  const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  
+  if (matches && matches.length === 3) {
+    buffer = Buffer.from(matches[2], 'base64');
+    const mimeType = matches[1];
+    if (mimeType === 'image/png') fileExtension = 'png';
+    else if (mimeType === 'image/jpeg') fileExtension = 'jpg';
+    else if (mimeType === 'image/gif') fileExtension = 'gif';
+    else if (mimeType === 'image/webp') fileExtension = 'webp';
+  } else {
+    // Assume raw base64 without prefix
+    buffer = Buffer.from(base64Data, 'base64');
+  }
+  
+  const filename = `avatar-${userId}-${Date.now()}.${fileExtension}`;
+  const uploadDir = './uploads/avatars';
+  
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  
+  const filepath = path.join(uploadDir, filename);
+  fs.writeFileSync(filepath, buffer);
+  
+  return `/uploads/avatars/${filename}`;
+};
+
 // ─────────────────────────────────────────────────────────────
 // Existing user methods
 // ─────────────────────────────────────────────────────────────
@@ -54,23 +87,53 @@ exports.updateMe = async (req, res) => {
   }
 };
 
+// UPDATED: Supports both file upload (web) and base64 (mobile)
 exports.updateAvatar = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+    let avatarUrl = null;
+    
+    // Case 1: Base64 image from mobile app
+    if (req.body.avatarBase64) {
+      avatarUrl = await saveBase64Image(req.user._id, req.body.avatarBase64);
+    }
+    // Case 2: File upload from web
+    else if (req.file) {
+      avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    }
+    else {
+      return res.status(400).json({ error: 'No image provided.' });
+    }
+    
+    // Delete old avatar if exists
     const user = await User.findById(req.user._id);
     if (user.avatar && user.avatar !== '/uploads/avatars/default-avatar.png') {
       const oldAvatarPath = path.join(__dirname, '..', user.avatar);
-      if (fs.existsSync(oldAvatarPath)) fs.unlinkSync(oldAvatarPath);
+      if (fs.existsSync(oldAvatarPath)) {
+        fs.unlinkSync(oldAvatarPath);
+      }
     }
-    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    
+    // Update user with new avatar
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       { avatar: avatarUrl },
       { new: true }
     ).select('-passwordHash');
+    
+    // Emit socket event for real-time updates
     const io = req.app.get('io');
-    if (io) io.emit('user_avatar_updated', { userId: req.user._id, avatar: avatarUrl });
-    res.json({ success: true, avatar: avatarUrl, user: updatedUser });
+    if (io) {
+      io.emit('user_avatar_updated', { 
+        userId: req.user._id, 
+        avatar: avatarUrl 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      avatar: avatarUrl, 
+      user: updatedUser 
+    });
   } catch (error) {
     console.error('Avatar upload error:', error);
     res.status(500).json({ error: 'Failed to update avatar.' });
