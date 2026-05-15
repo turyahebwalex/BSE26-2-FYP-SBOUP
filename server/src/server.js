@@ -50,7 +50,7 @@ const server = http.createServer(app);
 // ─── Create upload directories (inside /app/uploads) ────────────────────────
 // Inside Docker, __dirname = /app/src, so we go up one level to /app
 const uploadsRoot = path.join(__dirname, '..', 'uploads');
-const uploadDirs = ['avatars', 'messages', 'temp', 'documents'];
+const uploadDirs = ['avatars', 'messages', 'temp', 'documents', 'applications'];
 uploadDirs.forEach((dir) => {
   const fullPath = path.join(uploadsRoot, dir);
   if (!fs.existsSync(fullPath)) {

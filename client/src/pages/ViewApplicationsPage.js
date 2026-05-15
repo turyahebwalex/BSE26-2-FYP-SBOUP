@@ -10,6 +10,9 @@ import {
   FiX,
   FiCalendar,
   FiStar,
+  FiDownload,
+  FiEye,
+  FiPaperclip,
 } from 'react-icons/fi';
 
 const statusStyles = {
@@ -40,6 +43,19 @@ const ViewApplicationsPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [attachmentModal, setAttachmentModal] = useState(null); // { fileName, fileUrl, fileType }
+
+  // Derive a meaningful skill score from available breakdown data.
+  // The ML model stores cosineScore (0-100). Older applications stored
+  // skillScore which was always 0. Fall back to the overall matchScore
+  // so the employer always sees a non-zero number when there is a match.
+  const getSkillScore = (app) => {
+    const bd = app.matchBreakdown || {};
+    if (bd.cosineScore > 0) return Math.round(bd.cosineScore);
+    if (bd.skillScore > 0)  return Math.round(bd.skillScore);
+    // Use overall match score as the best available proxy
+    return Math.round(app.matchScore || 0);
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -192,23 +208,31 @@ const ViewApplicationsPage = () => {
                   </div>
                 </div>
 
-                {/* Match breakdown */}
-                {app.matchBreakdown && (
-                  <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <p className="text-gray-500">Skills</p>
-                      <p className="font-semibold">{Math.round(app.matchBreakdown.skillScore || 0)}%</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <p className="text-gray-500">Experience</p>
-                      <p className="font-semibold">{Math.round(app.matchBreakdown.experienceScore || 0)}%</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <p className="text-gray-500">Collab</p>
-                      <p className="font-semibold">{Math.round(app.matchBreakdown.collaborativeScore || 0)}%</p>
-                    </div>
+                {/* Match breakdown — uses ML model fields */}
+                <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                  <div className="bg-gray-50 rounded-lg p-2">
+                    <p className="text-gray-500">Skill Match</p>
+                    <p className="font-semibold">{getSkillScore(app)}%</p>
                   </div>
-                )}
+                  <div className="bg-gray-50 rounded-lg p-2">
+                    <p className="text-gray-500">Location</p>
+                    <p className="font-semibold">
+                      {app.matchBreakdown?.locationMatch != null
+                        ? (app.matchBreakdown.locationMatch ? '✓ Match' : '✗ No match')
+                        : '—'}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-2">
+                    <p className="text-gray-500">Experience</p>
+                    <p className="font-semibold">
+                      {app.matchBreakdown?.expFit != null
+                        ? (app.matchBreakdown.expFit ? '✓ Meets req' : '✗ Below req')
+                        : app.matchBreakdown?.experienceScore != null
+                        ? `${Math.round(app.matchBreakdown.experienceScore)}%`
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
 
                 {app.coverLetter && (
                   <>
@@ -224,6 +248,70 @@ const ViewApplicationsPage = () => {
                       </p>
                     )}
                   </>
+                )}
+
+                {/* Attachments */}
+                {app.attachments && app.attachments.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-gray-500 mb-1 font-medium flex items-center gap-1">
+                      <FiPaperclip size={11} /> Attachments ({app.attachments.length})
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {app.attachments.map((att, idx) => {
+                        const isImage = att.fileType?.startsWith('image');
+                        // Build a full URL: server paths start with /uploads/
+                        // Local device paths (file:///) are not accessible from the web
+                        const isServerUrl = att.fileUrl && (
+                          att.fileUrl.startsWith('/uploads/') ||
+                          att.fileUrl.startsWith('http')
+                        );
+                        const fullUrl = isServerUrl
+                          ? att.fileUrl.startsWith('http')
+                            ? att.fileUrl
+                            : `${window.location.protocol}//${window.location.hostname}:5000${att.fileUrl}`
+                          : null;
+
+                        return (
+                          <div
+                            key={att._id || idx}
+                            className="flex items-center gap-1 text-xs bg-orange-50 border border-orange-200 rounded-lg px-2 py-1.5"
+                          >
+                            <span className="mr-0.5">{isImage ? '🖼' : '📄'}</span>
+                            <span className="max-w-[110px] truncate text-gray-700">
+                              {att.fileName || 'Attachment'}
+                            </span>
+                            {fullUrl ? (
+                              <>
+                                {/* View — opens in new tab */}
+                                <a
+                                  href={fullUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-1 text-primary hover:text-primary-dark"
+                                  title="View"
+                                >
+                                  <FiEye size={13} />
+                                </a>
+                                {/* Download */}
+                                <a
+                                  href={fullUrl}
+                                  download={att.fileName || 'attachment'}
+                                  className="text-gray-500 hover:text-gray-700"
+                                  title="Download"
+                                >
+                                  <FiDownload size={13} />
+                                </a>
+                              </>
+                            ) : (
+                              <span className="ml-1 text-gray-400 text-xs italic" title="File was attached from a mobile device and cannot be accessed from the web">
+                                (local file)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
 
                 {/* Actions */}
