@@ -49,3 +49,15 @@ temp/
 # Expo (local dev cache)
 .expo/
 docker-compose.override.yml
+
+# Local helper scripts
+start-app-local.sh
+stop-app-local.sh
+
+# Local fraud test and data files
+ai-services/fraud-detection/test_fraud_live.py
+ai-services/fraud-detection/test_fraud_local.py
+ai-services/fraud-detection/test_new_models.py
+ai-services/fraud-detection/debug_prediction.py
+.local-deps/
+.mongo-data/
