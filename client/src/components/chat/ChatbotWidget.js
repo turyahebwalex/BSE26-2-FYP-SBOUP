@@ -3,6 +3,99 @@ import { FiMessageCircle, FiX, FiSend } from 'react-icons/fi';
 import { chatbotAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
+// ── Lightweight markdown renderer ─────────────────────────────────────────────
+// Handles: **bold**, *italic*, bullet lists (* / -), numbered lists, line breaks.
+// No external dependency — keeps the bundle small.
+const MarkdownText = ({ text }) => {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+  const elements = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Blank line → spacer
+    if (!line.trim()) {
+      elements.push(<div key={i} className="h-1" />);
+      i++;
+      continue;
+    }
+
+    // Bullet list item: starts with * or -
+    if (/^[\*\-]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[\*\-]\s+/.test(lines[i])) {
+        items.push(
+          <li key={i} className="ml-3 list-disc">
+            <InlineMarkdown text={lines[i].replace(/^[\*\-]\s+/, '')} />
+          </li>
+        );
+        i++;
+      }
+      elements.push(<ul key={`ul-${i}`} className="space-y-0.5 my-1">{items}</ul>);
+      continue;
+    }
+
+    // Numbered list item: starts with 1. 2. etc.
+    if (/^\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        items.push(
+          <li key={i} className="ml-3 list-decimal">
+            <InlineMarkdown text={lines[i].replace(/^\d+\.\s+/, '')} />
+          </li>
+        );
+        i++;
+      }
+      elements.push(<ol key={`ol-${i}`} className="space-y-0.5 my-1">{items}</ol>);
+      continue;
+    }
+
+    // Heading: ### or ##
+    if (/^#{1,3}\s+/.test(line)) {
+      elements.push(
+        <p key={i} className="font-semibold mt-2 mb-0.5">
+          <InlineMarkdown text={line.replace(/^#{1,3}\s+/, '')} />
+        </p>
+      );
+      i++;
+      continue;
+    }
+
+    // Regular paragraph line
+    elements.push(
+      <p key={i} className="leading-snug">
+        <InlineMarkdown text={line} />
+      </p>
+    );
+    i++;
+  }
+
+  return <div className="space-y-0.5 text-sm">{elements}</div>;
+};
+
+// Renders inline markdown: **bold**, *italic*, `code`
+const InlineMarkdown = ({ text }) => {
+  // Split on **bold**, *italic*, `code`
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return (
+    <>
+      {parts.map((part, idx) => {
+        if (/^\*\*[^*]+\*\*$/.test(part))
+          return <strong key={idx}>{part.slice(2, -2)}</strong>;
+        if (/^\*[^*]+\*$/.test(part))
+          return <em key={idx}>{part.slice(1, -1)}</em>;
+        if (/^`[^`]+`$/.test(part))
+          return <code key={idx} className="bg-gray-200 rounded px-1 text-xs font-mono">{part.slice(1, -1)}</code>;
+        return <span key={idx}>{part}</span>;
+      })}
+    </>
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Initial greeting and quick-action chips differ by role
 const INITIAL_MESSAGE = {
   employer: {
@@ -102,7 +195,11 @@ const ChatbotWidget = () => {
                     ? 'bg-primary text-white rounded-br-md'
                     : 'bg-gray-100 text-gray-800 rounded-bl-md'
                 }`}>
-                  <p>{msg.text}</p>
+                  {msg.role === 'user' ? (
+                    <p>{msg.text}</p>
+                  ) : (
+                    <MarkdownText text={msg.text} />
+                  )}
                   {msg.actions && msg.actions.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
                       {msg.actions.map((a) => (

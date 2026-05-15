@@ -153,6 +153,10 @@ export const applicationAPI = {
   getForOpportunity: (opportunityId) => api.get(`/applications/opportunity/${opportunityId}`),
   updateStatus: (id, status) => api.put(`/applications/${id}/status`, { status }),
   withdraw: (id) => api.put(`/applications/${id}/withdraw`),
+  uploadAttachment: (formData) => api.post('/applications/upload-attachment', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  }),
 };
 
 // ── Matching ──
