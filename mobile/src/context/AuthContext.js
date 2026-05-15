@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api, { authAPI } from '../services/api';   // ✅ fixed import
+import api, { authAPI } from '../services/api';
 import socketService from '../services/socket';
 
 const AuthContext = createContext(null);
@@ -30,8 +30,6 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUnreadNotificationCount = async () => {
     try {
-      // Dedicated cheap endpoint: returns just {unreadCount} so the
-      // poll doesn't pay for a full notification page load.
       const { data } = await api.get('/notifications/unread-count');
       setUnreadNotificationCount(data.unreadCount || 0);
     } catch (error) {
@@ -124,9 +122,6 @@ export const AuthProvider = ({ children }) => {
       if (error.response) {
         const status = error.response.status;
         if (status === 401) {
-          // Backends sometimes leak technical detail here ("user not found",
-          // "bcrypt mismatch", etc). Override with a single friendly message
-          // so users aren't told which half of the credential pair is wrong.
           message = 'Invalid email or password. Please try again.';
         } else {
           message =
@@ -144,6 +139,39 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: message };
     }
   };
+
+  // ── Google Sign-In ─────────────────────────────────────────
+  const googleLogin = async (idToken) => {
+    try {
+      const response = await api.post('/auth/google', { idToken });
+      const { accessToken, refreshToken, user: userData } = response.data;
+
+      if (userData?.role === 'admin') {
+        return {
+          success: false,
+          adminBlocked: true,
+          error:
+            'System administrators must sign in from the web portal.',
+        };
+      }
+
+      await AsyncStorage.setItem('accessToken', accessToken);
+      if (refreshToken) {
+        await AsyncStorage.setItem('refreshToken', refreshToken);
+      }
+
+      setUser(userData);
+      return { success: true, user: userData };
+    } catch (error) {
+      console.error('Google login error:', error);
+      const message =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        'Google login failed. Please try again.';
+      return { success: false, error: message };
+    }
+  };
+  // ───────────────────────────────────────────────────────────
 
   const register = async (userData) => {
     try {
@@ -189,16 +217,12 @@ export const AuthProvider = ({ children }) => {
         user,
         isLoading,
         login,
+        googleLogin,  // ← Added Google login method
         register,
         logout,
         loadUser,
         unreadMessageCount,
         unreadNotificationCount,
-        // Setters are exposed so screens that mark items as read can
-        // update the badge optimistically without waiting for the next
-        // socket event or focus refetch — NotificationsScreen already
-        // relies on this, but the destructure was previously a no-op
-        // (context never exported the setters).
         setUnreadMessageCount,
         setUnreadNotificationCount,
         refreshUnreadCounts,

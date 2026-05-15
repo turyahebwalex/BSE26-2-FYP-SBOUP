@@ -12,14 +12,18 @@ const ALLOWED_TYPES = {
 };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
+// server.js:  uploadsRoot = path.join(__dirname, '..', 'uploads') = /app/uploads
+// __dirname here (upload.js) = /app/src/middleware
+// So the permanent messages folder is /app/uploads/messages:
+//   path.join('/app/src/middleware', '../../uploads/messages') = /app/uploads/messages ✅
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const tempDir = path.join(__dirname, '../uploads/temp')
-   // const tempDir = path.join(__dirname, '../../uploads/temp');
-    // Ensure the temp directory exists
-    fs.mkdirSync(tempDir, { recursive: true });
-    cb(null, tempDir);
+    const messagesDir = path.join(__dirname, '../../uploads/messages');
+    if (!fs.existsSync(messagesDir)) {
+      fs.mkdirSync(messagesDir, { recursive: true });
+    }
+    cb(null, messagesDir);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -28,7 +32,6 @@ const storage = multer.diskStorage({
 });
 
 // ─── File filter factory ───────────────────────────────────────────────────────
-
 const fileFilter = (allowedTypes) => (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   if (allowedTypes.includes(ext)) {
@@ -42,7 +45,6 @@ const fileFilter = (allowedTypes) => (req, file, cb) => {
 };
 
 // ─── Multer instances ─────────────────────────────────────────────────────────
-
 const uploadDocument = multer({
   storage,
   limits: { fileSize: MAX_FILE_SIZE },
@@ -61,27 +63,21 @@ const uploadAny = multer({
   fileFilter: fileFilter(ALLOWED_TYPES.all),
 });
 
-// ─── uploadMessageAttachments ─────────────────────────────────────────────────
-// This is what the messages route imports. It accepts up to 5 files under the
-// field name "attachments" — matching exactly what the React Native frontend
-// appends via formData.append('attachments', { uri, type, name }).
-
 const uploadMessageAttachments = uploadAny.array('attachments', 5);
 
 // ─── formatFileInfo ───────────────────────────────────────────────────────────
-// Converts a multer file object into the shape stored in the Message model.
-
+// fileUrl must match what express.static serves:
+//   server.js: app.use('/uploads', express.static('/app/uploads'))
+//   so a file at /app/uploads/messages/x.jpg is served at /uploads/messages/x.jpg ✅
 const formatFileInfo = (file) => {
   const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
 
-  // Determine a friendly fileType bucket
   let fileType = 'document';
   if (ALLOWED_TYPES.image.includes(`.${ext}`)) fileType = 'image';
 
   return {
     fileName: file.originalname,
-    // Serve from /uploads/messages — move logic handled in cleanupTempFiles
-    fileUrl: `/uploads/messages/${file.filename}`,
+    fileUrl: `/uploads/messages/${file.filename}`, // ✅ matches static serving root
     fileSize: file.size,
     fileType,
     mimeType: file.mimetype,
@@ -89,38 +85,13 @@ const formatFileInfo = (file) => {
 };
 
 // ─── cleanupTempFiles ─────────────────────────────────────────────────────────
-// After the controller has saved the message, move files from /temp to
-// /uploads/messages so they are permanently accessible.
-// If permanent storage fails for a file, log and continue — don't crash.
-
-const cleanupTempFiles = async (files) => {
-  if (!files || files.length === 0) return;
-
-  const messagesDir = path.join(__dirname, '../../uploads/messages');
-  fs.mkdirSync(messagesDir, { recursive: true });
-
-  for (const file of files) {
-    const src = file.path; // absolute path written by multer
-    const dest = path.join(messagesDir, file.filename);
-
-    try {
-      fs.renameSync(src, dest);
-    } catch (err) {
-      // renameSync can fail across devices — fall back to copy + delete
-      try {
-        fs.copyFileSync(src, dest);
-        fs.unlinkSync(src);
-      } catch (copyErr) {
-        console.error(`Failed to move temp file ${file.filename}:`, copyErr);
-      }
-    }
-  }
+// Files go straight to /app/uploads/messages — no temp folder involved.
+// Kept as a no-op so message.controller.js needs zero changes.
+const cleanupTempFiles = async (_files) => {
+  // No-op: multer writes directly to the permanent folder now.
 };
 
-// ─── Multer error handler middleware ─────────────────────────────────────────
-// Use this in your Express app (app.use) or on individual routes to return
-// clean JSON errors instead of the default HTML multer error page.
-
+// ─── Multer error handler middleware ──────────────────────────────────────────
 const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -133,22 +104,21 @@ const handleMulterError = (err, req, res, next) => {
     }
     return res.status(400).json({ error: err.message });
   }
-  if (err && err.message && err.message.startsWith('File type')) {
+  if (err?.message?.startsWith('File type')) {
     return res.status(415).json({ error: err.message });
   }
   next(err);
 };
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
-
 module.exports = {
   uploadDocument,
   uploadImage,
   uploadAny,
-  uploadMessageAttachments, // ← was missing; fixes the 422 on file sends
-  formatFileInfo,            // ← was missing; used by message.controller.js
-  cleanupTempFiles,          // ← was missing; used by message.controller.js
-  handleMulterError,         // ← bonus: clean JSON errors for multer failures
+  uploadMessageAttachments,
+  formatFileInfo,
+  cleanupTempFiles,
+  handleMulterError,
   ALLOWED_TYPES,
   MAX_FILE_SIZE,
 };

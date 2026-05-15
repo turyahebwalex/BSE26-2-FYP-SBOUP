@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "SkillBridge",
-    "slug": "sboup-mobile",
+    "scheme": "skillbridge",
+    "slug": "skillbridge",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -29,7 +30,9 @@
       "apiUrl": "http://localhost:5000/api"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
     ]
   }
 }

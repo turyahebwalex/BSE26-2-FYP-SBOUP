@@ -29,7 +29,7 @@ console.log('🔍 [API] BASE_URL =', BASE_URL);
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 300000, // 5 minutes — needed for local Ollama on CPU
+  timeout: 300000, 
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -123,7 +123,7 @@ export const profileAPI = {
   getProfile: (id) => api.get(`/profiles/${id}`),
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
-  updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 }),
+  updateAvatar: (avatarBase64) => api.post('/users/avatar', { avatarBase64 }),
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (skillId) => api.delete(`/profiles/skills/${skillId}`),
   addExperience: (data) => api.post('/profiles/experience', data),
@@ -144,15 +144,30 @@ export const opportunityAPI = {
   update: (id, data) => api.put(`/opportunities/${id}`, data),
   archive: (id) => api.delete(`/opportunities/${id}`),
   getMyOpportunities: () => api.get('/opportunities/employer/mine'),
+  // NEW: Application methods
+  getApplicationOptions: (opportunityId) => api.get(`/opportunities/${opportunityId}/apply-options`),
+  getExternalApplyUrl: (opportunityId) => api.get(`/opportunities/${opportunityId}/external-url`),
+  getApplicationForm: (opportunityId) => api.get(`/opportunities/${opportunityId}/application-form`),
+  checkApplicationStatus: (opportunityId) => api.get(`/opportunities/${opportunityId}/check-application`),
+  applyViaMessage: (data) => api.post('/opportunities/apply-by-message', data),
 };
 
-// ── Application ──
+// ── Application (UPDATED with file upload support) ──
 export const applicationAPI = {
+  // For regular JSON application (no files)
   apply: (data) => api.post('/applications', data),
+  // For application with file uploads (CV, cover letter, etc.)
+  applyWithFiles: (formData, onUploadProgress) => 
+    api.post('/applications', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    }),
   getMyApplications: () => api.get('/applications/mine'),
   getForOpportunity: (opportunityId) => api.get(`/applications/opportunity/${opportunityId}`),
+  getApplicationDocuments: (applicationId) => api.get(`/applications/${applicationId}/documents`),
   updateStatus: (id, status) => api.put(`/applications/${id}/status`, { status }),
   withdraw: (id) => api.put(`/applications/${id}/withdraw`),
+  togglePin: (id) => api.put(`/applications/${id}/pin`),
 };
 
 // ── Matching ──
@@ -198,7 +213,7 @@ export const cvAPI = {
 // ── Message ──
 export const messageAPI = {
   getInbox: () => api.get('/messages/inbox'),
-  getConversation: (userId) => api.get(`/messages/conversation/${userId}`),
+  getConversation: (userId, params) => api.get(`/messages/conversation/${userId}`, { params }),
   getUnreadCount: () => api.get('/messages/unread-count'),
   send: (data) => api.post('/messages', data),
 };

@@ -19,12 +19,8 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const notificationService = require('./services/notification.service');
 const logger = require('./utils/logger');
 const { handleMulterError } = require('./middleware/upload');
-
-// Models – required for Socket.IO authentication and status updates
 const User = require('./models/User');
 const Message = require('./models/Message');
-
-// Route imports
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const profileRoutes = require('./routes/profile.routes');
@@ -48,7 +44,6 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Create upload directories (inside /app/uploads) ────────────────────────
-// Inside Docker, __dirname = /app/src, so we go up one level to /app
 const uploadsRoot = path.join(__dirname, '..', 'uploads');
 const uploadDirs = ['avatars', 'messages', 'temp', 'documents'];
 uploadDirs.forEach((dir) => {
@@ -145,6 +140,12 @@ app.use(
   })
 );
 
+const srcUploadsRoot = path.join(__dirname, 'uploads');
+if (fs.existsSync(srcUploadsRoot)) {
+  app.use('/uploads', express.static(srcUploadsRoot));
+  console.log(`Also serving static files from: ${srcUploadsRoot}`);
+}
+
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 app.use('/api/', (req, res, next) => {
   if (req.headers.upgrade === 'websocket') return next();
@@ -172,8 +173,6 @@ app.use('/api/chatbot',       chatbotRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/skills',        skillRoutes);
 app.use('/api/companies',     companyRoutes);
-
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',

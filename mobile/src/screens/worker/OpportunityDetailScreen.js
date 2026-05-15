@@ -14,7 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI, learningAPI } from '../../services/api';
 import ReportBottomSheet from '../../components/ReportBottomSheet';
 
-// ── Signal row helper ─────────────────────────────────────────────────────────
 const SignalRow = ({ icon, label, value, pass }) => (
   <View style={styles.signalRow}>
     <View style={styles.signalLeft}>
@@ -33,7 +32,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     routeOppId || passedOpp?._id || passedOpp?.id || passedOpp?.opportunityId || null;
   const passedHasFullDetails = !!(passedOpp && passedOpp._id && passedOpp.description !== undefined);
 
-  // Single set of state declarations – includes match breakdown extras
+  // State declarations
   const [opportunity, setOpportunity] = useState(passedHasFullDetails ? passedOpp : null);
   const [matchScore, setMatchScore] = useState(passedScore || null);
   const [matchBreakdown, setMatchBreakdown] = useState(null);
@@ -49,10 +48,13 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [bridging, setBridging] = useState(false);
   const [aliasHints, setAliasHints] = useState([]);
   const [proficiencyShortfalls, setProficiencyShortfalls] = useState([]);
+  
+  // NEW: Application options state
+  const [applicationOptions, setApplicationOptions] = useState(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [showMethodSelector, setShowMethodSelector] = useState(false);
 
-  // Opportunity-driven pathway generation — engages the §6.0 matching-engine
-  // consistency contract on the AI service so the resulting pathway targets
-  // the exact same missing-skill names the breakdown card shows.
+  // Opportunity-driven pathway generation
   const handleBridgeSkillGap = async () => {
     const oppId = opportunity?._id || opportunity?.id;
     if (!oppId) return;
@@ -63,9 +65,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       const pathId = path?._id || path?.id || null;
       const alreadyExists = Boolean(data?.alreadyExists || data?.data?.alreadyExists);
       if (path) {
-        // Server-side dedup: if a path for this opportunity already exists
-        // we get the same one back instead of a duplicate. Tell the worker
-        // so they don't think nothing happened.
         const title = alreadyExists ? 'Learning path already exists' : 'Learning path created';
         const body = alreadyExists
           ? 'You already have a pathway for this role. Open it to keep going.'
@@ -73,10 +72,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
         Alert.alert(title, body, [
           {
             text: 'View',
-            // Pass the new path id so LearningScreen auto-expands it
-            // instead of forcing the worker to scan the list. Matches
-            // the spec's 'select pathway → respective path shown'
-            // expectation.
             onPress: () => navigation.navigate('Learning', { focusPathId: pathId }),
           },
           { text: 'OK', style: 'cancel' },
@@ -93,11 +88,30 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  const fetchApplicationOptions = async () => {
+    const oppId = resolvedId || opportunity?._id;
+    if (!oppId) return;
+    
+    setLoadingOptions(true);
+    try {
+      const response = await opportunityAPI.getApplicationOptions(oppId);
+      setApplicationOptions(response.data);
+      if (response.data.hasApplied) {
+        setApplied(true);
+      }
+    } catch (err) {
+      console.log('Failed to fetch application options:', err);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
   useEffect(() => {
     if (!passedHasFullDetails && resolvedId) {
       fetchOpportunity();
     }
     fetchProfileAndScore();
+    fetchApplicationOptions();
   }, [resolvedId]);
 
   const fetchOpportunity = async () => {
@@ -126,10 +140,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           if (d.missingSkills) setMissingSkills(d.missingSkills);
         } catch (_) {}
 
-        // Enrich the breakdown card with the learning-engine's alias hints
-        // and proficiency shortfalls so the worker sees 'did you mean…?'
-        // suggestions BEFORE committing to a pathway. Best-effort: a
-        // failure here just hides the enrichment, never blocks the card.
         try {
           const gapsRes = await learningAPI.skillGaps(resolvedId);
           const g = gapsRes.data || {};
@@ -140,13 +150,47 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     } catch (_) {}
   };
 
-  const handleApply = async () => {
+ 
+  const handleApplyPress = () => {
     if (!profileId) {
-      Alert.alert('Profile Required', 'Please create your profile before applying.');
+      Alert.alert('Profile Required', 'Please complete your profile before applying.');
       return;
     }
-    const submitOppId =
-      resolvedId || opportunity?._id || opportunity?.id || opportunity?.opportunityId;
+    if (applied) {
+      Alert.alert('Already Applied', 'You have already applied to this opportunity.');
+      return;
+    }
+    setShowMethodSelector(true);
+  };
+
+ const handleMethodSelect = (method) => {
+  setShowMethodSelector(false);
+  
+  if (method.type === 'in_app') {
+    navigation.navigate('ApplyForm', {
+      opportunityId: resolvedId || opportunity?._id,
+      opportunityTitle: opportunity?.title,
+      requiredDocuments: opportunity?.requiredDocuments,
+      customQuestions: opportunity?.customQuestions,
+    });
+  } else if (method.type === 'message') {
+    navigation.navigate('ApplyMessage', {
+      opportunityId: resolvedId || opportunity?._id,
+      opportunityTitle: opportunity?.title,
+      employerId: opportunity?.postedByUserId,
+      instructions: method.instructions,
+    });
+  } else if (method.type === 'external_link') {
+    navigation.navigate('ApplyExternal', {
+      opportunityId: resolvedId || opportunity?._id,
+      url: method.url,
+      opportunityTitle: opportunity?.title,
+    });
+  }
+};
+
+  const handleApply = async () => {
+    const submitOppId = resolvedId || opportunity?._id || opportunity?.id || opportunity?.opportunityId;
     if (!submitOppId) {
       Alert.alert('Error', 'Missing opportunity reference. Please reopen this opportunity.');
       return;
@@ -173,7 +217,48 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
   };
 
-  // ─── Loading ────────────────────────────────────────────────────────────────
+  const MethodSelectorModal = () => {
+    if (!showMethodSelector || !applicationOptions?.availableMethods) return null;
+    
+    const methods = applicationOptions.availableMethods;
+    
+    return (
+      <View style={styles.modalOverlay}>
+        <View style={styles.methodSelectorCard}>
+          <Text style={styles.methodSelectorTitle}>How would you like to apply?</Text>
+          <Text style={styles.methodSelectorSubtitle}>
+            Choose your preferred application method for {opportunity?.title}
+          </Text>
+          
+          {methods.map((method) => (
+            <TouchableOpacity
+              key={method.type}
+              style={styles.methodOption}
+              onPress={() => handleMethodSelect(method)}
+            >
+              <View style={[styles.methodIcon, { backgroundColor: method.color + '20' }]}>
+                <Ionicons name={method.icon} size={24} color={method.color} />
+              </View>
+              <View style={styles.methodInfo}>
+                <Text style={styles.methodName}>{method.label}</Text>
+                <Text style={styles.methodDescription}>{method.description}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          ))}
+          
+          <TouchableOpacity
+            style={styles.methodCancelButton}
+            onPress={() => setShowMethodSelector(false)}
+          >
+            <Text style={styles.methodCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+ 
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -184,7 +269,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     );
   }
 
-  // ─── Error ──────────────────────────────────────────────────────────────────
+ 
   if (error || !opportunity) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -223,7 +308,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   };
   const badge = typeBadgeColors[category] || typeBadgeColors.formal;
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -232,7 +316,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Header ── */}
+          {/* Header Section */}
           <View style={styles.headerSection}>
             <View style={styles.headerTop}>
               <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -272,7 +356,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
 
-          {/* ── Compensation ── */}
+          {/* Compensation */}
           {compensationRange && (compensationRange.min || compensationRange.max) && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -289,7 +373,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Experience Level ── */}
+          {/* Experience Level */}
           {experienceLevel && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -302,7 +386,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Deadline ── */}
+          {/* Deadline */}
           {deadline && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -319,13 +403,13 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Description ── */}
+          {/* Description */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Description</Text>
             <Text style={styles.description}>{description || 'No description provided.'}</Text>
           </View>
 
-          {/* ── Required Skills ── */}
+          {/* Required Skills */}
           {displaySkills.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Required Skills</Text>
@@ -345,7 +429,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Match Breakdown (only if matchScore exists) ── */}
+          {/* Match Breakdown */}
           {matchScore != null && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Match Breakdown</Text>
@@ -423,9 +507,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                       score.
                     </Text>
 
-                    {/* §6.0 enrichment — soft "did you mean…?" prompts.
-                        The chips above remain authoritative; these are
-                        suggestions to update the worker's profile. */}
                     {aliasHints.length > 0 && (
                       <View style={styles.hintsBlock}>
                         <Text style={styles.hintsHeader}>Did you mean…?</Text>
@@ -474,7 +555,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Apply Form (only if showApplyForm is true and not applied) ── */}
+          {/* In-App Apply Form */}
           {showApplyForm && !applied && (
             <View style={styles.applyForm}>
               <Text style={styles.sectionTitle}>Cover Letter (Optional)</Text>
@@ -510,7 +591,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Subtle report link at the bottom ── */}
+          {/* Report link */}
           <TouchableOpacity
             style={styles.reportLink}
             onPress={() => setShowReport(true)}
@@ -521,14 +602,12 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* ── Bottom Apply Button (only if form not shown) ── */}
+        {/* Bottom Apply Button */}
         {!showApplyForm && (
           <View style={styles.bottomBar}>
             <TouchableOpacity
               style={[styles.applyButton, applied && styles.appliedButton]}
-              onPress={() => {
-                if (!applied) setShowApplyForm(true);
-              }}
+              onPress={handleApplyPress}
               disabled={applied}
             >
               <Ionicons
@@ -542,7 +621,10 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
         )}
       </SafeAreaView>
 
-      {/* ── Report bottom sheet ── */}
+      {/* Method Selector Modal */}
+      <MethodSelectorModal />
+
+      {/* Report bottom sheet */}
       <ReportBottomSheet
         visible={showReport}
         onClose={() => setShowReport(false)}
@@ -801,6 +883,86 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+
+  // Method Selector Modal
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  methodSelectorCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 20,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  methodSelectorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  methodSelectorSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  methodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    gap: 12,
+  },
+  methodIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  methodInfo: {
+    flex: 1,
+  },
+  methodName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  methodDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  methodCancelButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  methodCancelText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#9CA3AF',
   },
 
   // Report link

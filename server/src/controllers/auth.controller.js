@@ -1,10 +1,15 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const Company = require('../models/Company');
 const LoginAttempt = require('../models/LoginAttempt');
 const logger = require('../utils/logger');
 const emailService = require('../services/email.service');
+const OtpRequest = require('../models/OtpRequest');
+
+// Initialize Google OAuth client
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateTokens = (user) => {
   const accessToken = jwt.sign(
@@ -28,7 +33,6 @@ const logAttempt = async (req, payload) => {
       ...payload,
     });
   } catch (err) {
-    // Never let audit logging break auth flow
     logger.warn('LoginAttempt log failed:', err.message);
   }
 };
@@ -124,6 +128,80 @@ exports.login = async (req, res) => {
 };
 
 /**
+ * POST /api/auth/google
+ * Google OAuth login
+ */
+exports.googleLogin = async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    
+    if (!idToken) {
+      return res.status(400).json({ error: 'ID token is required.' });
+    }
+
+    // Verify Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    
+    const payload = ticket.getPayload();
+    const { email, name, picture, sub: googleId } = payload;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email not provided by Google.' });
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ email });
+    
+    if (!user) {
+      // Create new user for Google sign-in
+      user = await User.create({
+        email,
+        fullName: name || email.split('@')[0],
+        avatar: picture || null,
+        oauthProvider: 'google',
+        oauthId: googleId,
+        isEmailVerified: true, // Google verified the email
+        role: 'skilled_worker', // Default role
+        passwordHash: 'oauth-no-password', // Special marker for OAuth users
+        accountStatus: 'active',
+      });
+      logger.info(`New user created via Google OAuth: ${email}`);
+    } else {
+      // Update existing user's Google info if needed
+      if (!user.oauthProvider) {
+        user.oauthProvider = 'google';
+        user.oauthId = googleId;
+        user.isEmailVerified = true;
+        await user.save();
+        logger.info(`Existing user linked to Google OAuth: ${email}`);
+      }
+    }
+
+    // Check if user is blocked
+    if (user.accountStatus !== 'active') {
+      return res.status(403).json({ 
+        error: `Account is ${user.accountStatus}. Please contact support.` 
+      });
+    }
+
+    // Generate tokens
+    const tokens = generateTokens(user);
+    
+    res.json({
+      message: 'Google login successful.',
+      user: user.toJSON(),
+      ...tokens,
+    });
+  } catch (error) {
+    logger.error('Google login error:', error);
+    res.status(401).json({ error: 'Google authentication failed. Please try again.' });
+  }
+};
+
+/**
  * POST /api/auth/refresh
  */
 exports.refreshToken = async (req, res) => {
@@ -144,6 +222,9 @@ exports.refreshToken = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/auth/forgot-password
+ */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -162,6 +243,9 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/auth/reset-password/:token
+ */
 exports.resetPassword = async (req, res) => {
   try {
     const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
@@ -186,6 +270,9 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/auth/verify-email/:token
+ */
 exports.verifyEmail = async (req, res) => {
   try {
     const user = await User.findOne({ emailVerificationToken: req.params.token });
@@ -200,10 +287,17 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/auth/me
+ */
 exports.getMe = async (req, res) => {
   res.json({ user: req.user });
 };
 
+/**
+ * GET /api/auth/google/callback
+ * Redirect handler for Passport Google OAuth (if you're using Passport)
+ */
 exports.googleCallback = async (req, res) => {
   try {
     const tokens = generateTokens(req.user);
@@ -212,5 +306,111 @@ exports.googleCallback = async (req, res) => {
     );
   } catch (error) {
     res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
+  }
+};
+
+// ==================== OTP Routes ====================
+
+/**
+ * POST /api/auth/send-otp
+ * Send OTP verification code to user's email
+ */
+exports.sendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required.' });
+    }
+
+    // Check if email already registered
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already registered. Please login.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Store OTP in database
+    await OtpRequest.findOneAndUpdate(
+      { email },
+      { otp, expiresAt, channel: 'email' },
+      { upsert: true, new: true }
+    );
+
+    // Send OTP via email
+    await emailService.sendOtpEmail(email, otp);
+    logger.info(`OTP sent to ${email}`);
+
+    res.json({ success: true, message: 'OTP sent to email.' });
+  } catch (error) {
+    logger.error('Send OTP error:', error);
+    res.status(500).json({ error: 'Failed to send OTP.' });
+  }
+};
+
+/**
+ * POST /api/auth/verify-otp
+ * Verify OTP and complete registration
+ */
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { email, otp, userData } = req.body;
+
+    // Validate required fields
+    if (!email || !otp) {
+      return res.status(400).json({ error: 'Email and OTP are required.' });
+    }
+
+    // Find valid OTP record
+    const record = await OtpRequest.findOne({ email, otp });
+
+    if (!record || record.expiresAt < new Date()) {
+      return res.status(400).json({ error: 'Invalid or expired OTP.' });
+    }
+
+    // Extract user data
+    const { fullName, password, role, phoneNumber, companyName } = userData;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already registered.' });
+    }
+
+    // Handle company creation for employers
+    let companyId = null;
+    if (role === 'employer' && companyName) {
+      const existingCompany = await Company.findOne({ name: companyName });
+      const company = existingCompany || (await Company.create({ name: companyName, contactEmail: email }));
+      companyId = company._id;
+    }
+
+    // Create new user
+    const user = await User.create({
+      email,
+      passwordHash: password,
+      fullName,
+      role: role || 'skilled_worker',
+      phoneNumber: phoneNumber || null,
+      companyId,
+      isEmailVerified: true, // Email verified via OTP
+    });
+
+    // Clean up used OTP
+    await OtpRequest.deleteOne({ _id: record._id });
+    logger.info(`User registered via email OTP: ${email}`);
+
+    // Generate tokens and send response
+    const tokens = generateTokens(user);
+    res.status(201).json({
+      message: 'Registration successful.',
+      user: user.toJSON(),
+      ...tokens,
+    });
+  } catch (error) {
+    logger.error(`OTP verification error: ${error.message}`, { stack: error.stack });
+    res.status(500).json({ error: 'Registration failed.' });
   }
 };
