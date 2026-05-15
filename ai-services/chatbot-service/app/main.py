@@ -266,41 +266,82 @@ def _save_turn(user_id: str, user_msg: str, asst_msg: str):
         logger.error(f"Memory save error: {e}")
 
 
-# ── System prompt ─────────────────────────────────────────────────────────────
+# ── System prompts — one per role ────────────────────────────────────────────
+# Edit these to customise Kazi's personality and scope per role.
 
-SYSTEM_PROMPT = """You are Kazi, the intelligent assistant for SBOUP \
-(Skills-Based Opportunity Unleashing Platform) — a job marketplace connecting \
-skilled workers with employers in Uganda and East Africa.
+SYSTEM_PROMPT_WORKER = """You are Kazi, the intelligent assistant for SBOUP \
+(Skills-Based Opportunity Unleashing Platform) — a job marketplace in Uganda \
+and East Africa.
 
-Your role:
-- Help WORKERS find opportunities, improve their profiles, understand their \
-match scores, generate CVs, and upskill.
-- Help EMPLOYERS post opportunities, review applications, and find top candidates.
-- Answer questions about the platform clearly and concisely.
-- Give personalised advice based on the user's actual profile data provided below.
+You are talking to a SKILLED WORKER. Your role:
+- Help them find job opportunities that match their skills.
+- Help them improve their profile, understand their match scores, and upskill.
+- Help them generate CVs and track their applications.
+- Give personalised advice based on their actual profile data below.
 
 Rules:
 - Always be warm, encouraging, and professional.
 - Keep responses concise: 2–4 sentences for simple questions, more for complex ones.
-- When a worker has a low match score, explain why and suggest specific improvements.
-- When a worker's profile is incomplete, tell them exactly what section to add.
+- When their match score is low, explain why and suggest specific improvements.
+- When their profile is incomplete, tell them exactly what section to add.
 - Respond in the same language the user writes in.
 - Do not answer questions unrelated to work, jobs, skills, or the SBOUP platform.
 
 Platform context: Compensation in UGX. \
 Job types: formal, contract, freelance, apprenticeship.
 
---- USER CONTEXT ---
+--- WORKER PROFILE ---
 {user_context}
 
 --- RELEVANT PLATFORM KNOWLEDGE ---
 {knowledge_context}
 """
 
+SYSTEM_PROMPT_EMPLOYER = """You are Kazi, the intelligent assistant for SBOUP \
+(Skills-Based Opportunity Unleashing Platform) — a job marketplace in Uganda \
+and East Africa.
+
+You are talking to an EMPLOYER. Your role:
+- Help them post and manage job opportunities effectively.
+- Help them review applications and identify the best-matched candidates.
+- Help them understand applicant match scores and shortlisting.
+- Help them write better job descriptions to attract the right talent.
+- Answer questions about the platform from an employer's perspective.
+- Give personalised advice based on their actual postings and application data below.
+
+Rules:
+- Always be professional, direct, and helpful.
+- Keep responses concise: 2–4 sentences for simple questions, more for complex ones.
+- When they ask about candidates, refer to their actual application data.
+- Never give worker-focused advice (CV generation, skill gaps, etc.) to an employer.
+- Respond in the same language the user writes in.
+- Do not answer questions unrelated to hiring, jobs, or the SBOUP platform.
+
+Platform context: Compensation in UGX. \
+Job types: formal, contract, freelance, apprenticeship.
+
+--- EMPLOYER DATA ---
+{user_context}
+
+--- RELEVANT PLATFORM KNOWLEDGE ---
+{knowledge_context}
+"""
+
+def _build_system_prompt(user_role: str, user_context: str, knowledge_context: str) -> str:
+    """Select and fill the correct system prompt based on the user's role."""
+    template = (
+        SYSTEM_PROMPT_EMPLOYER if user_role == "employer"
+        else SYSTEM_PROMPT_WORKER
+    )
+    return template.format(
+        user_context=user_context or "No data available.",
+        knowledge_context=knowledge_context or "No relevant knowledge found.",
+    )
+
 
 # ── LLM call ──────────────────────────────────────────────────────────────────
 
-def _call_groq(system_prompt: str, history: list, message: str) -> str:
+def _call_groq(system_prompt: str, history: list, message: str, role: str = "skilled_worker") -> str:
     """
     POST to Groq's OpenAI-compatible chat endpoint and return the reply.
 
@@ -309,7 +350,7 @@ def _call_groq(system_prompt: str, history: list, message: str) -> str:
     Messages : [{"role": "system"|"user"|"assistant", "content": str}, ...]
     """
     if not _groq_ready:
-        return _fallback(message)
+        return _fallback(message, role)
 
     try:
         import requests as _req
@@ -338,11 +379,31 @@ def _call_groq(system_prompt: str, history: list, message: str) -> str:
 
     except Exception as e:
         logger.error(f"Groq error: {e}")
-        return _fallback(message)
+        return _fallback(message, role)
 
 
-def _fallback(message: str) -> str:
+def _fallback(message: str, role: str = "skilled_worker") -> str:
     msg = message.lower()
+    if role == "employer":
+        if any(w in msg for w in ["hello", "hi", "hey"]):
+            return ("Hello! I'm Kazi, your SBOUP employer assistant. I can help you "
+                    "post jobs, review applications, and find top candidates. "
+                    "What would you like to do?")
+        if any(w in msg for w in ["application", "applicant", "candidate"]):
+            return ("Go to My Jobs → View Applications to see all applicants for your "
+                    "postings, ranked by match score. You can shortlist or message "
+                    "candidates directly from there.")
+        if any(w in msg for w in ["post", "job", "opportunit"]):
+            return ("Click 'Post Job' in the top navigation to create a new opportunity. "
+                    "Add required skills, compensation range, and deadline to attract "
+                    "the best-matched candidates.")
+        if any(w in msg for w in ["shortlist", "hire", "offer"]):
+            return ("Open an application and click 'Shortlist' to move a candidate forward. "
+                    "You can then extend an offer or schedule an interview from the "
+                    "application detail page.")
+        return ("I'm having a small issue right now. Please try again in a moment, "
+                "or visit the Help section for support.")
+    # Worker fallback
     if any(w in msg for w in ["hello", "hi", "hey"]):
         return ("Hello! I'm Kazi, your SBOUP assistant. I can help you find "
                 "opportunities, improve your profile, generate CVs, and more. "
@@ -418,12 +479,9 @@ def process_query():
         user_context      = _get_user_context(user_id, user_role)
         history           = _get_history(user_id)
 
-        system_prompt = SYSTEM_PROMPT.format(
-            user_context=user_context or "No profile data available.",
-            knowledge_context=knowledge_context or "No relevant knowledge found.",
-        )
+        system_prompt = _build_system_prompt(user_role, user_context, knowledge_context)
 
-        response_text = _call_groq(system_prompt, history, query)
+        response_text = _call_groq(system_prompt, history, query, user_role)
 
         if user_id and response_text:
             _save_turn(user_id, query, response_text)

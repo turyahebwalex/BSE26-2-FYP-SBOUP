@@ -7,6 +7,7 @@ router.get('/', optionalAuth, ctrl.getCompanies);
 router.get('/:id', optionalAuth, ctrl.getCompanyById);
 router.post('/', authenticate, authorize('employer', 'admin'), validate('createCompany'), ctrl.createCompany);
 router.put('/:id', authenticate, ctrl.updateCompany);
+router.put('/:id/avatar', authenticate, ctrl.updateAvatar);
 router.put('/:id/verification', authenticate, authorize('admin'), ctrl.setVerificationStatus);
 
 module.exports = router;
