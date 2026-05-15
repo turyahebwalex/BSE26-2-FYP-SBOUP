@@ -13,4 +13,13 @@ router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent)
 router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);
 router.put('/users/:userId', authenticate, authorize('admin'), ctrl.updateUserStatus);
 
+// Archived opportunities management
+router.get('/archived-opportunities', authenticate, authorize('admin'), ctrl.getArchivedOpportunities);
+router.post('/archived-opportunities/:id/restore', authenticate, authorize('admin'), ctrl.restoreArchivedOpportunity);
+router.delete('/opportunities/:id/permanent-remove', authenticate, authorize('admin'), ctrl.permanentlyRemoveOpportunity);
+
+// Appeals management
+router.get('/appeals', authenticate, authorize('admin'), ctrl.getAppealsQueue);
+router.post('/appeals/:id/review', authenticate, authorize('admin'), ctrl.reviewAppeal);
+
 module.exports = router;

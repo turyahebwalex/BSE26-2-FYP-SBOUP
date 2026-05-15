@@ -232,6 +232,7 @@ const detectFraud = (opportunity) =>
     category: opportunity.category,
     requiredSkills: (opportunity.requiredSkills || []).map((id) => String(id)),
     compensationRange: opportunity.compensationRange,
+    deadline: opportunity.deadline,
     location: opportunity.location,
     experienceLevel: opportunity.experienceLevel,
     isRemote: Boolean(opportunity.isRemote),

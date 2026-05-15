@@ -16,7 +16,16 @@ const fraudLogSchema = new mongoose.Schema(
     stage: {
       type: String,
       required: true,
-      enum: ['inference', 'create', 'update', 'moderation'],
+      enum: [
+        'inference',
+        'create',
+        'update',
+        'moderation',
+        'appeal',
+        'appeal_review',
+        'restoration',
+        'permanent_removal',
+      ],
     },
     fraudScore: {
       type: Number,
@@ -32,7 +41,16 @@ const fraudLogSchema = new mongoose.Schema(
     decisionOutcome: {
       type: String,
       required: true,
-      enum: ['published', 'under_review', 'blocked'],
+      enum: [
+        'published',
+        'under_review',
+        'blocked',
+        'suspended',
+        'archived',
+        'permanently_removed',
+        'appeal_approved',
+        'appeal_rejected',
+      ],
     },
     decisionReason: {
       type: String,
@@ -63,7 +81,7 @@ const fraudLogSchema = new mongoose.Schema(
     },
     adminAction: {
       type: String,
-      enum: ['approve', 'reject'],
+      enum: ['approve', 'reject', 'suspend', 'appeal_approve', 'appeal_reject', 'restore', 'permanent_remove'],
       default: null,
     },
     adminFeedback: {

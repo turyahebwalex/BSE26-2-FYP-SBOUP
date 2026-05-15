@@ -329,18 +329,26 @@ def _load_model_artifacts():
 
 # Fraud indicators for rule-based fallback
 FRAUD_INDICATORS = [
+    r'urgent\s*hiring',
+    r'immediate\s*start',
+    r'limited\s*slots',
+    r'!!!',
     r'advance\s*(fee|payment)',
     r'wire\s*transfer',
     r'western\s*union',
     r'money\s*gram',
+    r'mobile\s*money',
+    r'airtel\s*money',
     r'guarantee.*income',
-    r'no\s*experience\s*needed.*\$\d{4,}',
-    r'work\s*from\s*home.*\$\d{4,}',
+    r'no\s*experience\s*needed.*(?:\$|UGX|shs|shillings)\s*\d+',
+    r'work\s*from\s*home.*(?:\$|UGX|shs|shillings)\s*\d+',
     r'send\s*(money|payment|fee)',
     r'personal\s*(bank|account)\s*details',
+    r'national\s*id\s*number',
     r'processing\s*fee',
     r'upfront\s*(cost|fee|payment)',
     r'too\s*good\s*to\s*be\s*true',
+    r'get\s*rich\s*quick',
     # Subtle scam patterns
     r'investment\s*required',
     r'small\s*investment',
@@ -374,6 +382,7 @@ HIGH_SEVERITY_PATTERNS = [
     r'advance\s*(fee|payment)',
     r'processing\s*fee',
     r'upfront\s*(cost|fee|payment)',
+    r'mobile\s*money\s*(fee|payment|charge)',
 ]
 
 
@@ -443,6 +452,208 @@ def build_explanation(classification, fraud_score, decision_reason, signals):
     return ' '.join(parts)
 
 
+def _compose_plain_rationale(fraud_score, signals):
+    """Short explanation tied to concrete signal themes (not generic boilerplate)."""
+    texts = [str(s.get('signal', '')).lower() for s in (signals or [])]
+    blob = ' '.join(texts)
+
+    def has_any(*needles):
+        return any(n in blob for n in needles)
+
+    pay_scam = has_any(
+        'wire', 'western union', 'money gram', 'advance', 'processing fee',
+        'upfront', 'payment', 'security deposit', 'transfer agent',
+    )
+    unrealistic_pay = has_any('unrealistic', 'compensation exceeds', 'high compensation', 'high-severity')
+    spam_style = has_any('exclamation', 'uppercase', 'unusually short', 'fraud indicator pattern')
+    contact_risk = has_any('email', 'phone', 'whatsapp', 'telegram', 'external', 'suspicious external')
+    url_risk = has_any('url', 'domain')
+
+    if fraud_score >= 70:
+        parts = []
+        if pay_scam:
+            parts.append('language that asks for fees, transfers, or upfront payments')
+        if unrealistic_pay:
+            parts.append('compensation that looks unrealistic for the role')
+        if spam_style:
+            parts.append('spam-like formatting or very thin job details')
+        if contact_risk or url_risk:
+            parts.append('strong push to move contact or applications off-platform')
+        if not parts:
+            parts.append('several strong automated fraud indicators')
+        return (
+            'This posting was flagged because it contains ' +
+            _english_join(parts[:3]) +
+            '.'
+        )
+    if fraud_score >= 30:
+        parts = []
+        if pay_scam or contact_risk:
+            parts.append('some payment or off-platform contact cues')
+        if unrealistic_pay:
+            parts.append('pay ranges that need a second look')
+        if spam_style:
+            parts.append('style or length issues common in low-quality listings')
+        if not parts:
+            parts.append('mixed signals that are not severe enough to auto-block')
+        return (
+            'This posting was sent for review because it shows ' +
+            _english_join(parts[:2]) +
+            '.'
+        )
+    return (
+        'This posting looks consistent with genuine listings based on current signals '
+        '(always combine with employer context in the admin panel).'
+    )
+
+
+def _english_join(phrases):
+    phrases = [p for p in phrases if p]
+    if not phrases:
+        return ''
+    if len(phrases) == 1:
+        return phrases[0]
+    if len(phrases) == 2:
+        return f'{phrases[0]} and {phrases[1]}'
+    return ', '.join(phrases[:-1]) + f', and {phrases[-1]}'
+
+
+def _load_employer_metrics(payload):
+    """Real employer history from Mongo when employerId is present."""
+    default = {
+        'account_age_days': None,
+        'previous_postings': 0,
+        'blocked_count': 0,
+        'verification_status': 'unknown',
+    }
+    employer_id = payload.get('employerId') or payload.get('postedByUserId')
+    oid = _safe_object_id(employer_id)
+    if not oid:
+        return default
+    try:
+        user = db.users.find_one({'_id': oid}) or {}
+        created = user.get('createdAt')
+        if isinstance(created, datetime):
+            account_age_days = max(0, (datetime.utcnow() - created).days)
+        else:
+            account_age_days = None
+
+        total_posted = db.opportunities.count_documents({'postedByUserId': oid})
+        previous_postings = max(0, int(total_posted) - 1)
+        blocked_count = db.opportunities.count_documents({
+            'postedByUserId': oid,
+            'status': {'$in': ['blocked']},
+        })
+        return {
+            'account_age_days': account_age_days,
+            'previous_postings': previous_postings,
+            'blocked_count': int(blocked_count),
+            'verification_status': 'unknown',
+        }
+    except Exception as exc:
+        logger.warning('Employer metrics lookup skipped: %s', exc)
+        return default
+
+
+def build_rich_explanation(result, payload, numeric_features, company_doc=None):
+    """Build plain-English explanation with quality metrics and confidence indicators."""
+    fraud_score = result['fraudScore']
+    classification = result['classification']
+    signals = result.get('signals', [])
+    
+    rationale = _compose_plain_rationale(fraud_score, signals)
+    
+    # Quality metrics
+    quality_metrics = calculate_quality_metrics(payload, numeric_features, company_doc)
+    
+    # Confidence indicator
+    if fraud_score >= 70 or fraud_score < 20:
+        confidence = "high"
+    elif fraud_score >= 50 or fraud_score < 30:
+        confidence = "medium"
+    else:
+        confidence = "low"
+    
+    em = quality_metrics['employer_metrics']
+    age_days = em.get('account_age_days')
+    age_phrase = f'{age_days} days' if isinstance(age_days, int) else 'unknown (no employer id or user record)'
+    trust_line = (
+        f'Employer context: account age ~{age_phrase}, '
+        f'{em.get("previous_postings", 0)} prior posting(s), '
+        f'{em.get("blocked_count", 0)} blocked posting(s), '
+        f'company verification: {em.get("verification_status", "unknown")}.'
+    )
+
+    explanation_parts = [
+        rationale,
+        f"Quality Score: {quality_metrics['overall_score']}/100 (completeness: {quality_metrics['completeness_score']}/100, content quality: {quality_metrics['content_score']}/100).",
+        trust_line,
+        f"Confidence in fraud assessment: {confidence}.",
+        f"Key risk factors: {'; '.join(signal['signal'] for signal in signals[:3]) if signals else 'None detected'}.",
+    ]
+    
+    return {
+        'plain_english_rationale': rationale,
+        'quality_metrics': quality_metrics,
+        'confidence_level': confidence,
+        'detailed_explanation': ' '.join(explanation_parts),
+        'risk_factors': [signal['signal'] for signal in signals[:5]]
+    }
+
+
+def calculate_quality_metrics(payload, numeric_features, company_doc=None):
+    """Calculate genuine quality metrics for XAI panel."""
+    company_doc = company_doc or {}
+    
+    # Posting completeness score (0-100)
+    req_text = _clean_text(payload.get('requirements'))
+    skill_ids = payload.get('requiredSkills') or []
+    has_requirements = (len(req_text) > 20) or (isinstance(skill_ids, list) and len(skill_ids) > 0)
+
+    completeness_checks = {
+        'has_description': bool(payload.get('description') and len(payload.get('description', '').strip()) > 50),
+        'has_requirements': has_requirements,
+        'has_salary': bool(numeric_features.get('salary_mid_ugx', 0) > 0),
+        'has_location': bool(payload.get('location') and len(payload.get('location', '').strip()) > 2),
+        'has_title': bool(payload.get('title') and len(payload.get('title', '').strip()) > 5),
+        'has_category': bool(payload.get('category')),
+        'has_deadline': bool(payload.get('deadline')),
+        'has_company': bool(payload.get('companyId') or company_doc.get('_id'))
+    }
+    
+    completeness_score = sum(completeness_checks.values()) / len(completeness_checks) * 100
+    
+    # Content quality score (0-100)
+    content_checks = {
+        'adequate_description_length': 10 <= len(payload.get('description', '')) <= 2000,
+        'professional_title': not any(x in payload.get('title', '').lower() for x in ['!!!', 'urgent', 'immediate', 'asap']),
+        'reasonable_compensation': 0 < numeric_features.get('salary_mid_ugx', 0) < 10000000,  # Not too high
+        'no_excessive_punctuation': payload.get('description', '').count('!') <= 2,
+        'no_all_caps': sum(1 for c in payload.get('description', '') if c.isupper()) / max(len(payload.get('description', '')), 1) < 0.3
+    }
+    
+    content_score = sum(content_checks.values()) / len(content_checks) * 100
+    
+    # Overall quality score
+    overall_score = (completeness_score * 0.6) + (content_score * 0.4)
+    
+    employer_metrics = _load_employer_metrics(payload)
+    employer_metrics['verification_status'] = (
+        _clean_text(company_doc.get('verificationStatus'))
+        or employer_metrics.get('verification_status')
+        or 'unverified'
+    )
+    
+    return {
+        'overall_score': round(overall_score, 1),
+        'completeness_score': round(completeness_score, 1),
+        'content_score': round(content_score, 1),
+        'completeness_checks': completeness_checks,
+        'content_checks': content_checks,
+        'employer_metrics': employer_metrics
+    }
+
+
 def extract_features(text, posting_data, raw_text=None):
     """Extract fraud detection features from posting."""
     features = {}
@@ -494,7 +705,8 @@ def compute_fraud_score(features):
     score = 0
 
     # Pattern-based scoring
-    score += features.get('fraud_pattern_count', 0) * 20
+    # Increase weight for Ugandan context keywords
+    score += features.get('fraud_pattern_count', 0) * 25
 
     # Very short or suspiciously formatted descriptions
     if features.get('word_count', 0) < 10:
@@ -626,6 +838,9 @@ def _apply_edge_case_overrides(base_score, heuristic_features, numeric_features)
     if fraud_pattern_count >= 1 and suspicious_tld_count > 0:
         enforce_floor(75, 'Edge-case override: fraud phrase with suspicious external domain')
 
+    if fraud_pattern_count >= 1:
+        enforce_floor(35, 'Edge-case override: suspicious keywords require manual review', weight=15)
+
     # Medium-risk guardrail: suspicious external routing should never auto-publish.
     medium_risk_bundle = (
         external_path
@@ -672,6 +887,17 @@ def _score_payload(payload, persist_log=True):
             feature_matrix = hstack([text_matrix, numeric_matrix]).toarray()
             fraud_prob = float(FRAUD_MODEL.predict_proba(feature_matrix)[0][1])
             fraud_score = int(round(np.clip(fraud_prob * 100, 0, 100)))
+
+            # SYSTEM OPTIMIZATION: Trust internal postings from professional companies.
+            # If the job is internal and the text is professional, reduce the AI's sensitivity.
+            is_internal = payload.get('applicationMethod') == 'internal'
+            if is_internal and fraud_score < 70:
+                # Check for absolute red flags (fees, money collection)
+                high_severity_count = int(heuristic_features.get('high_severity_pattern_count', 0) or 0)
+                if high_severity_count == 0:
+                    # Reduce score to favor auto-publishing for verified internal employers
+                    fraud_score = int(fraud_score * 0.4) 
+
             fraud_score, override_flags = _apply_edge_case_overrides(fraud_score, heuristic_features, numeric_features)
             feature_values = np.concatenate([text_matrix.toarray().ravel(), numeric_row.ravel()])
             feature_contributions = _model_feature_contributions(feature_values)
@@ -703,6 +929,10 @@ def _score_payload(payload, persist_log=True):
                 'modelReady': True,
             }
             result['explanation'] = _model_explanation(result)
+            
+            # Add rich XAI explanation
+            rich_explanation = build_rich_explanation(result, payload, numeric_features, company_doc)
+            result['xaiExplanation'] = rich_explanation
         except Exception as exc:
             logger.warning('Model inference failed, falling back to heuristics: %s', exc)
             model_ready = False
@@ -739,6 +969,10 @@ def _score_payload(payload, persist_log=True):
             'lastTrainedAt': MODEL_LAST_TRAINED_AT,
             'modelReady': False,
         }
+        
+        # Add rich XAI explanation for fallback case
+        rich_explanation = build_rich_explanation(result, payload, numeric_features, company_doc)
+        result['xaiExplanation'] = rich_explanation
 
     if persist_log:
         try:
