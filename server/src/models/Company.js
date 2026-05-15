@@ -39,6 +39,10 @@ const companySchema = new mongoose.Schema(
       default: 'unverified',
     },
     trustScore: { type: Number, min: 0, max: 100, default: 50 },
+    avatarBase64: {
+      type: String,   // base64-encoded logo/photo stored directly in MongoDB
+      default: null,
+    },
   },
   { timestamps: true }
 );

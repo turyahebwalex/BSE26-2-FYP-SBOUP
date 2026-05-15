@@ -24,6 +24,7 @@ import EmployerDashboard from './pages/EmployerDashboard';
 import PostOpportunityPage from './pages/PostOpportunityPage';
 import ManageOpportunitiesPage from './pages/ManageOpportunitiesPage';
 import ViewApplicationsPage from './pages/ViewApplicationsPage';
+import EmployerProfilePage from './pages/EmployerProfilePage';
 
 // Shared Pages
 import MessagesPage from './pages/MessagesPage';
@@ -90,6 +91,7 @@ function AppContent() {
           <Route path="/employer/post" element={<ProtectedRoute roles={['employer']}><PostOpportunityPage /></ProtectedRoute>} />
           <Route path="/employer/opportunities" element={<ProtectedRoute roles={['employer']}><ManageOpportunitiesPage /></ProtectedRoute>} />
           <Route path="/employer/applications/:opportunityId" element={<ProtectedRoute roles={['employer']}><ViewApplicationsPage /></ProtectedRoute>} />
+          <Route path="/employer/profile" element={<ProtectedRoute roles={['employer']}><EmployerProfilePage /></ProtectedRoute>} />
 
           {/* Shared Routes */}
           <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />

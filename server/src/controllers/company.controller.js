@@ -76,6 +76,30 @@ exports.updateCompany = async (req, res) => {
   }
 };
 
+exports.updateAvatar = async (req, res) => {
+  try {
+    const { avatarBase64 } = req.body;
+    if (!avatarBase64 || typeof avatarBase64 !== 'string') {
+      return res.status(400).json({ error: 'avatarBase64 is required.' });
+    }
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+    const isLinkedEmployer =
+      req.user.role === 'employer' &&
+      req.user.companyId?.toString() === company._id.toString();
+    if (req.user.role !== 'admin' && !isLinkedEmployer) {
+      return res.status(403).json({ error: 'Not authorised.' });
+    }
+
+    company.avatarBase64 = avatarBase64;
+    await company.save();
+    res.json({ avatarBase64: company.avatarBase64 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update avatar.' });
+  }
+};
+
 exports.setVerificationStatus = async (req, res) => {
   try {
     const { verificationStatus, trustScore } = req.body;

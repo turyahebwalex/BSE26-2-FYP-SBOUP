@@ -58,6 +58,7 @@ export const profileAPI = {
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
   updateAvatar: (avatarBase64) => api.post('/users/avatar', { avatarBase64 }),
+  updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 })
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (id) => api.delete(`/profiles/skills/${id}`),
   addExperience: (data) => api.post('/profiles/experience', data),
@@ -183,6 +184,9 @@ export const companyAPI = {
   getById: (id) => api.get(`/companies/${id}`),
   create: (data) => api.post('/companies', data),
   update: (id, data) => api.put(`/companies/${id}`, data),
+  update: (id, data) => api.put(`/companies/${id}`, data),
+  updateAvatar: (id, avatarBase64) => api.put(`/companies/${id}/avatar`, { avatarBase64 }),
+
 };
 
 // ─── Skills ───

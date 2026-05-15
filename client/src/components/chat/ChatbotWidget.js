@@ -1,15 +1,42 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiMessageCircle, FiX, FiSend } from 'react-icons/fi';
 import { chatbotAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+
+// Initial greeting and quick-action chips differ by role
+const INITIAL_MESSAGE = {
+  employer: {
+    text: "Hi! I'm Kazi, your SBOUP assistant. I can help you post jobs, review applications, find top candidates, and more. What would you like to do?",
+    actions: ['Post a Job', 'View Applications', 'Find Candidates'],
+  },
+  skilled_worker: {
+    text: "Hello! I'm your SkillBridge assistant. How can I help you today?",
+    actions: ['Find Opportunities', 'Build Profile', 'Generate CV'],
+  },
+  default: {
+    text: "Hello! I'm your SkillBridge assistant. How can I help you today?",
+    actions: ['Find Opportunities', 'Build Profile', 'Help'],
+  },
+};
 
 const ChatbotWidget = () => {
-  const [isOpen, setIsOpen] = useState(false);
+  const { user } = useAuth();
+  const role    = user?.role || 'default';
+  const initial = INITIAL_MESSAGE[role] || INITIAL_MESSAGE.default;
+
+  const [isOpen, setIsOpen]     = useState(false);
   const [messages, setMessages] = useState([
-    { role: 'bot', text: "Hello! I'm your SkillBridge assistant. How can I help you today?", actions: ['Find Opportunities', 'Build Profile', 'Generate CV'] },
+    { role: 'bot', text: initial.text, actions: initial.actions },
   ]);
-  const [input, setInput] = useState('');
+  const [input, setInput]       = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEnd = useRef(null);
+
+  // Reset conversation when the user changes (e.g. logout → login as different role)
+  useEffect(() => {
+    const init = INITIAL_MESSAGE[user?.role] || INITIAL_MESSAGE.default;
+    setMessages([{ role: 'bot', text: init.text, actions: init.actions }]);
+  }, [user?._id, user?.role]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
@@ -23,7 +50,11 @@ const ChatbotWidget = () => {
     setIsLoading(true);
 
     try {
-      const { data } = await chatbotAPI.query({ query: text });
+      const { data } = await chatbotAPI.query({
+        query:    text,
+        userId:   user?._id || user?.id || '',
+        userRole: user?.role || 'skilled_worker',
+      });
       setMessages((prev) => [
         ...prev,
         { role: 'bot', text: data.response, actions: data.suggestedActions },
@@ -37,6 +68,9 @@ const ChatbotWidget = () => {
       setIsLoading(false);
     }
   };
+
+  // Header label by role
+  const headerLabel = role === 'employer' ? 'Kazi — Employer Assistant' : 'Kazi — Assistant';
 
   return (
     <>
@@ -55,7 +89,7 @@ const ChatbotWidget = () => {
         <div className="fixed bottom-24 md:bottom-6 right-4 w-80 sm:w-96 h-[480px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200">
           {/* Header */}
           <div className="bg-primary text-white px-4 py-3 rounded-t-2xl flex justify-between items-center">
-            <span className="font-semibold">Virtual Assistant</span>
+            <span className="font-semibold">{headerLabel}</span>
             <button onClick={() => setIsOpen(false)}><FiX size={20} /></button>
           </div>
 
@@ -69,7 +103,7 @@ const ChatbotWidget = () => {
                     : 'bg-gray-100 text-gray-800 rounded-bl-md'
                 }`}>
                   <p>{msg.text}</p>
-                  {msg.actions && (
+                  {msg.actions && msg.actions.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
                       {msg.actions.map((a) => (
                         <button
