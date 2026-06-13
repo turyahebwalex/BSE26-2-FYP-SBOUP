@@ -531,9 +531,9 @@ def health():
         'status':  'ok',
         'service': 'chatbot-service',
         'components': {
-            'rag':     'ready' if _chroma_col else 'not loaded',
+            'rag':     'ready' if _chroma_col is not None else 'not loaded',
             'llm':     f'ready ({GROQ_MODEL})' if _groq_ready else 'fallback mode',
-            'mongodb': 'connected' if _mongo_db else 'offline',
+            'mongodb': 'connected' if _mongo_db is not None else 'offline',
         },
     })
 
