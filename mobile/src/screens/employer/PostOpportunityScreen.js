@@ -56,6 +56,7 @@ const PostOpportunityScreen = ({ navigation }) => {
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillSearch, setSkillSearch] = useState('');
   const [loadingSkills, setLoadingSkills] = useState(false);
+  const [addingCustom, setAddingCustom] = useState(false);
 
   // Type dropdown
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
@@ -93,8 +94,25 @@ const PostOpportunityScreen = ({ navigation }) => {
     setSelectedSkills((prev) => prev.filter((s) => (s._id || s.id) !== skillId));
   };
 
+  const addCustomSkill = async () => {
+    const name = skillSearch.trim();
+    if (!name) return;
+    setAddingCustom(true);
+    try {
+      const { data } = await skillAPI.addCustom(name);
+      const newSkill = data.skill || data;
+      setAllSkills((prev) => [...prev, newSkill]);
+      setSelectedSkills((prev) => [...prev, newSkill]);
+      setSkillSearch('');
+    } catch (err) {
+      Alert.alert('Error', err.response?.data?.error || 'Could not add custom skill.');
+    } finally {
+      setAddingCustom(false);
+    }
+  };
+
   const filteredSkills = allSkills.filter((s) => {
-    const name = (s.name || s.skill || '').toLowerCase();
+    const name = (s.skillName || s.name || s.skill || '').toLowerCase();
     return name.includes(skillSearch.toLowerCase());
   });
 
@@ -270,7 +288,7 @@ const PostOpportunityScreen = ({ navigation }) => {
               const skillId = skill._id || skill.id;
               return (
                 <View key={skillId} style={styles.selectedSkillChip}>
-                  <Text style={styles.selectedSkillText}>{skill.name}</Text>
+                  <Text style={styles.selectedSkillText}>{skill.skillName || skill.name}</Text>
                   <TouchableOpacity onPress={() => removeSkill(skillId)}>
                     <Ionicons name="close" size={14} color="#EA580C" />
                   </TouchableOpacity>
@@ -444,32 +462,59 @@ const PostOpportunityScreen = ({ navigation }) => {
                 style={{ marginTop: 24 }}
               />
             ) : (
-              <FlatList
-                data={filteredSkills}
-                keyExtractor={(item) => item._id || item.id}
-                renderItem={({ item }) => {
-                  const skillId = item._id || item.id;
-                  const isSelected = selectedSkills.some(
-                    (s) => (s._id || s.id) === skillId
-                  );
-                  return (
-                    <TouchableOpacity
-                      style={styles.modalSkillItem}
-                      onPress={() => toggleSkill(item)}
-                    >
-                      <Text style={styles.modalSkillText}>{item.name}</Text>
-                      <Ionicons
-                        name={isSelected ? 'checkbox' : 'square-outline'}
-                        size={22}
-                        color={isSelected ? '#F97316' : '#D1D5DB'}
-                      />
-                    </TouchableOpacity>
-                  );
-                }}
-                ListEmptyComponent={
-                  <Text style={styles.modalEmpty}>No skills found.</Text>
-                }
-              />
+              <>
+                {/* Add custom skill — shown right below the search bar when
+                    the typed text doesn't match any existing skill */}
+                {skillSearch.trim().length > 0 && (
+                  <TouchableOpacity
+                    style={styles.addCustomButton}
+                    onPress={addCustomSkill}
+                    disabled={addingCustom}
+                    activeOpacity={0.8}
+                  >
+                    {addingCustom ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.addCustomText}>
+                          Add "{skillSearch.trim()}" as new skill
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                <FlatList
+                  data={filteredSkills}
+                  keyExtractor={(item) => item._id || item.id}
+                  renderItem={({ item }) => {
+                    const skillId = item._id || item.id;
+                    const isSelected = selectedSkills.some(
+                      (s) => (s._id || s.id) === skillId
+                    );
+                    return (
+                      <TouchableOpacity
+                        style={styles.modalSkillItem}
+                        onPress={() => toggleSkill(item)}
+                      >
+                        <Text style={styles.modalSkillText}>{item.skillName || item.name}</Text>
+                        <Ionicons
+                          name={isSelected ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={isSelected ? '#F97316' : '#D1D5DB'}
+                        />
+                      </TouchableOpacity>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    skillSearch.trim().length === 0 ? (
+                      <Text style={styles.modalEmpty}>No skills found.</Text>
+                    ) : null   // hide "No skills found" when add-custom button is shown
+                  }
+                  keyboardShouldPersistTaps="handled"
+                />
+              </>
             )}
 
             <TouchableOpacity
@@ -758,6 +803,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
+  },
+  addCustomButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F97316',
+    marginHorizontal: 20,
+    marginBottom: 8,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  addCustomText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
   },
 });
 
