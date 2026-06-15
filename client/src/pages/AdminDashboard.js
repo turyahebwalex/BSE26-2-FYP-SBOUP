@@ -52,6 +52,9 @@ const AdminDashboard = () => {
   const [alerts, setAlerts] = useState(null);
   const [density, setDensity] = useState([]);
   const [fraudInsights, setFraudInsights] = useState(null);
+  const [modelHealth, setModelHealth] = useState(null);
+  const [modelHealthLoading, setModelHealthLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
@@ -92,6 +95,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (tab === 'reports') loadReports();
     if (tab === 'fraud') loadFraudInsights();
+    if (tab === 'model_health') loadModelHealth();
   }, [tab]);
 
   const loadFraudInsights = async () => {
@@ -99,6 +103,33 @@ const AdminDashboard = () => {
       const { data } = await adminAPI.getFraudInsights({ range: '30d', granularity: 'day' });
       setFraudInsights(data);
     } catch {}
+  };
+
+  const loadModelHealth = async () => {
+    setModelHealthLoading(true);
+    try {
+      const { data } = await adminAPI.getModelHealth({ weeks: 12 });
+      setModelHealth(data);
+    } catch {}
+    setModelHealthLoading(false);
+  };
+
+  const downloadTrainingExport = async (days = 90) => {
+    setExportLoading(true);
+    try {
+      const { data } = await adminAPI.getTrainingExport({ days });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fraud_training_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${data.totalRecords} labelled records`);
+    } catch {
+      toast.error('Export failed');
+    }
+    setExportLoading(false);
   };
 
   const moderate = async (contentId, action) => {
@@ -507,6 +538,7 @@ const AdminDashboard = () => {
     { key: 'overview', label: 'Overview', icon: FiShield },
     { key: 'moderation', label: 'Moderation', icon: FiAlertTriangle },
     { key: 'fraud', label: 'Fraud Insights', icon: FiBarChart2 },
+    { key: 'model_health', label: 'Model Health', icon: FiActivity },
     { key: 'users', label: 'Users', icon: FiUsers },
     { key: 'reports', label: 'Reports', icon: FiFlag },
   ];
@@ -1131,6 +1163,349 @@ const AdminDashboard = () => {
                 ) : (
                   <p className="text-gray-400 text-sm text-center py-6">No decision logs yet</p>
                 )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Model Health Tab ─── */}
+      {tab === 'model_health' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-lg">Model Health &amp; Drift Detection</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Live performance metrics, admin override trends, and training data export.
+              </p>
+            </div>
+            <button
+              onClick={loadModelHealth}
+              className="text-xs text-primary hover:underline"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {modelHealthLoading ? (
+            <div className="card text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3" />
+              <p className="text-gray-400">Analysing model health…</p>
+            </div>
+          ) : !modelHealth ? (
+            <div className="card text-center py-12 text-gray-400 text-sm">
+              No data yet — click Refresh to run drift analysis.
+            </div>
+          ) : (
+            <>
+              {/* ── Drift Status Banner ── */}
+              {(() => {
+                const dr = modelHealth.driftReport;
+                if (!dr) return null;
+                const statusCfg = {
+                  ok: { bg: 'bg-green-50 border-green-200', icon: '✓', iconCls: 'text-green-600', label: 'Model OK', labelCls: 'text-green-800' },
+                  warning: { bg: 'bg-yellow-50 border-yellow-200', icon: '⚠', iconCls: 'text-yellow-600', label: 'Warning — early drift signals', labelCls: 'text-yellow-800' },
+                  drift_detected: { bg: 'bg-red-50 border-red-200', icon: '✕', iconCls: 'text-red-600', label: 'Drift Detected', labelCls: 'text-red-800' },
+                };
+                const cfg = statusCfg[dr.overallStatus] || statusCfg.warning;
+                return (
+                  <div className={`rounded-xl border p-4 ${cfg.bg}`}>
+                    <div className="flex items-start gap-3">
+                      <span className={`text-2xl font-bold mt-0.5 ${cfg.iconCls}`}>{cfg.icon}</span>
+                      <div className="flex-1">
+                        <p className={`font-semibold ${cfg.labelCls}`}>{cfg.label}</p>
+                        <p className="text-sm text-gray-700 mt-1">{dr.recommendation}</p>
+                        {dr.signals && dr.signals.length > 0 && (
+                          <ul className="mt-2 space-y-1">
+                            {dr.signals.map((s, i) => (
+                              <li key={i} className="text-sm text-gray-600 flex items-start gap-1.5">
+                                <span className="text-gray-400 mt-0.5">•</span> {s}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-xs text-gray-400 mt-2">
+                          Model: {dr.modelVersion || '—'} · Checked: {dr.checkedAt ? new Date(dr.checkedAt).toLocaleString() : '—'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Model Performance Metrics ── */}
+              {modelHealth.modelStats && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    <FiBarChart2 size={16} className="text-primary" />
+                    Model Performance Metrics
+                    {modelHealth.modelStats.available && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                      { label: 'Accuracy', val: modelHealth.modelStats.accuracy, target: 0.85 },
+                      { label: 'Precision', val: modelHealth.modelStats.precision, target: 0.90 },
+                      { label: 'Recall', val: modelHealth.modelStats.recall, target: null },
+                      { label: 'F1 Score', val: modelHealth.modelStats.f1, target: 0.82 },
+                    ].map(({ label, val, target }) => {
+                      const pct = val != null ? (val * 100).toFixed(1) : null;
+                      const ok = target == null || val == null || val >= target;
+                      return (
+                        <div key={label} className={`rounded-xl p-4 border ${ok ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                          <p className="text-xs text-gray-500 mb-1">{label}</p>
+                          <p className={`text-2xl font-bold ${ok ? 'text-green-700' : 'text-red-700'}`}>
+                            {pct != null ? `${pct}%` : '—'}
+                          </p>
+                          {target != null && (
+                            <p className={`text-xs mt-1 ${ok ? 'text-green-600' : 'text-red-600'}`}>
+                              Target ≥ {(target * 100).toFixed(0)}% {ok ? '✓' : '✕'}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-4 text-sm text-gray-500">
+                    <span>Evaluated on <strong>{modelHealth.modelStats.sampleCount?.toLocaleString() ?? '—'}</strong> test samples</span>
+                    <span>Features: <strong>{modelHealth.modelStats.featureCount ?? '—'}</strong></span>
+                    <span>Version: <strong className="font-mono text-xs">{modelHealth.modelStats.modelVersion ?? '—'}</strong></span>
+                    {modelHealth.modelStats.lastTrainedAt && (
+                      <span>Last trained: <strong>{new Date(modelHealth.modelStats.lastTrainedAt).toLocaleDateString()}</strong></span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Admin Agreement Rate ── */}
+              {modelHealth.driftReport?.adminAgreementRate != null && (
+                <div className="card">
+                  <h3 className="font-semibold mb-3">Admin Override Rate (last 30 days)</h3>
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600">Agreement with model decisions</span>
+                        <span className="font-semibold">
+                          {(modelHealth.driftReport.adminAgreementRate * 100).toFixed(1)}%
+                          <span className="text-gray-400 font-normal ml-1">
+                            ({modelHealth.driftReport.adminAgreementSampleSize} decisions)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            modelHealth.driftReport.adminAgreementRate >= 0.70 ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${(modelHealth.driftReport.adminAgreementRate * 100).toFixed(1)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Threshold: 70% — below this indicates frequent model/human disagreement (drift signal)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Score Distribution Shift ── */}
+              {modelHealth.driftReport?.scoreDistributionShift && (
+                <div className="card">
+                  <h3 className="font-semibold mb-3">Score Distribution Shift</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    {[
+                      { label: 'Recent high-risk rate (7d)', val: `${(modelHealth.driftReport.scoreDistributionShift.recentHighRiskRate * 100).toFixed(1)}%` },
+                      { label: 'Historical high-risk rate (30d)', val: `${(modelHealth.driftReport.scoreDistributionShift.historicalHighRiskRate * 100).toFixed(1)}%` },
+                      { label: 'Recent avg score', val: modelHealth.driftReport.scoreDistributionShift.recentAvgScore },
+                      { label: 'Historical avg score', val: modelHealth.driftReport.scoreDistributionShift.historicalAvgScore },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                        <p className="text-xs text-gray-500">{label}</p>
+                        <p className="text-xl font-bold text-gray-800 mt-1">{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {Math.abs(modelHealth.driftReport.scoreDistributionShift.shift) > 0.15 && (
+                    <p className="text-sm text-yellow-700 mt-3 p-2 bg-yellow-50 rounded-lg">
+                      ⚠ High-risk rate shifted by{' '}
+                      {(modelHealth.driftReport.scoreDistributionShift.shift * 100).toFixed(1)}% — this may indicate
+                      a change in the type of postings being submitted or concept drift.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ── Weekly Decision Trend Chart ── */}
+              {modelHealth.weeklyTrend && modelHealth.weeklyTrend.length > 0 && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4">Weekly Model Decision Trend</h3>
+                  <div className="h-64">
+                    <Bar
+                      data={{
+                        labels: modelHealth.weeklyTrend.map((w) => w.week),
+                        datasets: [
+                          {
+                            label: 'Auto-Published',
+                            data: modelHealth.weeklyTrend.map((w) => w.published),
+                            backgroundColor: '#22C55E',
+                            borderRadius: 3,
+                          },
+                          {
+                            label: 'Sent for Review',
+                            data: modelHealth.weeklyTrend.map((w) => w.underReview),
+                            backgroundColor: '#F59E0B',
+                            borderRadius: 3,
+                          },
+                          {
+                            label: 'Auto-Blocked',
+                            data: modelHealth.weeklyTrend.map((w) => w.blocked),
+                            backgroundColor: '#EF4444',
+                            borderRadius: 3,
+                          },
+                        ],
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+                        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Auto-Approval Rate Trend ── */}
+              {modelHealth.weeklyTrend && modelHealth.weeklyTrend.length > 1 && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4">Auto-Approval Rate Over Time (%)</h3>
+                  <div className="h-48">
+                    <Line
+                      data={{
+                        labels: modelHealth.weeklyTrend.map((w) => w.week),
+                        datasets: [
+                          {
+                            label: 'Auto-Approval Rate %',
+                            data: modelHealth.weeklyTrend.map((w) => w.autoApprovalRate),
+                            borderColor: '#6366F1',
+                            backgroundColor: 'rgba(99,102,241,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 4,
+                          },
+                        ],
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true, max: 100 } },
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    A sudden drop in auto-approval rate (without a matching rise in reported fraud) can signal over-sensitive model behaviour.
+                  </p>
+                </div>
+              )}
+
+              {/* ── Admin Feedback Log ── */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold">Admin Feedback Log (recent 50)</h3>
+                  <span className="text-xs text-gray-400">Used as training labels</span>
+                </div>
+                {modelHealth.feedbackLog && modelHealth.feedbackLog.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-gray-500">
+                          <th className="pb-2 font-medium">Posting</th>
+                          <th className="pb-2 font-medium">Score</th>
+                          <th className="pb-2 font-medium">Admin Action</th>
+                          <th className="pb-2 font-medium">Label</th>
+                          <th className="pb-2 font-medium">Feedback</th>
+                          <th className="pb-2 font-medium">By</th>
+                          <th className="pb-2 font-medium">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modelHealth.feedbackLog.map((log) => {
+                          const isLegit = ['approve', 'appeal_approve', 'restore'].includes(log.adminAction);
+                          return (
+                            <tr key={log._id} className="border-b last:border-0 hover:bg-gray-50">
+                              <td className="py-2 max-w-[140px] truncate">
+                                {log.opportunityId?.title || 'Deleted'}
+                              </td>
+                              <td className="py-2">
+                                <span className={`font-bold text-xs ${log.fraudScore >= 70 ? 'text-red-600' : log.fraudScore >= 30 ? 'text-yellow-600' : 'text-green-600'}`}>
+                                  {log.fraudScore}
+                                </span>
+                              </td>
+                              <td className="py-2">
+                                <span className="badge bg-gray-100 text-gray-600 text-xs">{log.adminAction}</span>
+                              </td>
+                              <td className="py-2">
+                                <span className={`badge text-xs ${isLegit ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                  {isLegit ? 'Legitimate' : 'Fraud'}
+                                </span>
+                              </td>
+                              <td className="py-2 max-w-[200px] truncate text-gray-500 text-xs">
+                                {log.adminFeedback || '—'}
+                              </td>
+                              <td className="py-2 text-gray-400 text-xs">
+                                {log.adminId?.fullName || '—'}
+                              </td>
+                              <td className="py-2 text-gray-400 text-xs">
+                                {new Date(log.createdAt).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-sm text-center py-6">
+                    No admin feedback recorded yet. Add notes when approving/rejecting postings to build training labels.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Training Export ── */}
+              <div className="card border-l-4 border-l-indigo-400">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold mb-1">Export Training Data</h3>
+                    <p className="text-sm text-gray-600">
+                      Download all admin-labelled fraud decisions as a JSON file. Use this with{' '}
+                      <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">scripts/retrain_model.py</code>{' '}
+                      to retrain the model with real platform feedback.
+                    </p>
+                    {modelHealth.driftReport?.overallStatus !== 'ok' && (
+                      <p className="text-sm text-yellow-700 mt-2 font-medium">
+                        ⚠ Drift signals detected — retraining is recommended.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => downloadTrainingExport(90)}
+                      disabled={exportLoading}
+                      className="btn-primary text-sm !py-2 disabled:opacity-50"
+                    >
+                      {exportLoading ? 'Exporting…' : 'Export 90d'}
+                    </button>
+                    <button
+                      onClick={() => downloadTrainingExport(365)}
+                      disabled={exportLoading}
+                      className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full text-sm hover:bg-indigo-200 transition disabled:opacity-50"
+                    >
+                      Export 1yr
+                    </button>
+                  </div>
+                </div>
               </div>
             </>
           )}

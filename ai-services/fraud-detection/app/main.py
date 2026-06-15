@@ -611,11 +611,11 @@ def calculate_quality_metrics(payload, numeric_features, company_doc=None):
     has_requirements = (len(req_text) > 20) or (isinstance(skill_ids, list) and len(skill_ids) > 0)
 
     completeness_checks = {
-        'has_description': bool(payload.get('description') and len(payload.get('description', '').strip()) > 50),
+        'has_description': bool(payload.get('description') and len(str(payload.get('description', '')).strip()) > 50),
         'has_requirements': has_requirements,
         'has_salary': bool(numeric_features.get('salary_mid_ugx', 0) > 0),
-        'has_location': bool(payload.get('location') and len(payload.get('location', '').strip()) > 2),
-        'has_title': bool(payload.get('title') and len(payload.get('title', '').strip()) > 5),
+        'has_location': bool(payload.get('location') and len(str(payload.get('location', '')).strip()) > 2),
+        'has_title': bool(payload.get('title') and len(str(payload.get('title', '')).strip()) > 5),
         'has_category': bool(payload.get('category')),
         'has_deadline': bool(payload.get('deadline')),
         'has_company': bool(payload.get('companyId') or company_doc.get('_id'))
@@ -1097,6 +1097,386 @@ def model_stats():
         'sampleCount': MODEL_STATS['sampleCount'],
         'featureCount': len(MODEL_FEATURE_NAMES),
     })
+
+
+# ─── Drift Detection ──────────────────────────────────────────────────────────
+
+# Baseline thresholds — derived from training-time targets in retrain_model.py.
+# A metric that falls below these values signals potential model drift.
+DRIFT_BASELINES = {
+    'accuracy':  0.85,
+    'precision': 0.90,
+    'f1':        0.82,
+}
+
+# Agreement rate below this % (admin decisions that contradict the model) is
+# treated as a drift warning signal.
+ADMIN_AGREEMENT_THRESHOLD = 0.70
+
+
+def _compute_drift_status():
+    """
+    Compare current model metrics against baselines and inspect admin feedback
+    logs to produce a drift health report.
+
+    Three signals are checked:
+      1. Model performance metrics (accuracy / precision / F1) vs. baselines.
+      2. Admin override rate — how often admins reverse the model's auto-decision.
+      3. Score distribution shift — the ratio of high-risk flags in recent logs
+         vs. the historical average (a large shift can indicate concept drift).
+
+    Returns a dict describing the drift health status.
+    """
+    report = {
+        'checkedAt': datetime.utcnow().isoformat() + 'Z',
+        'modelVersion': MODEL_VERSION,
+        'modelAvailable': MODEL_AVAILABLE,
+        'overallStatus': 'ok',          # 'ok' | 'warning' | 'drift_detected'
+        'signals': [],
+        'metricComparison': {},
+        'adminAgreementRate': None,
+        'adminAgreementSampleSize': 0,
+        'scoreDistributionShift': None,
+        'recommendation': '',
+    }
+
+    # ── 1. Performance metric comparison ─────────────────────────────────────
+    if MODEL_STATS['available']:
+        metric_issues = []
+        comparison = {}
+        for metric, baseline in DRIFT_BASELINES.items():
+            current = MODEL_STATS.get(metric)
+            if current is None:
+                continue
+            gap = round(current - baseline, 4)
+            comparison[metric] = {
+                'current': current,
+                'baseline': baseline,
+                'gap': gap,
+                'ok': current >= baseline,
+            }
+            if current < baseline:
+                metric_issues.append(
+                    f'{metric} degraded to {current:.3f} (baseline {baseline:.3f}, gap {gap:.3f})'
+                )
+        report['metricComparison'] = comparison
+        if metric_issues:
+            report['signals'].extend(metric_issues)
+            report['overallStatus'] = 'drift_detected'
+    else:
+        report['signals'].append('Model metrics unavailable — model not loaded or test set missing.')
+        report['overallStatus'] = 'warning'
+
+    # ── 2. Admin override rate (last 30 days) ─────────────────────────────────
+    try:
+        since_30d = datetime.utcnow().__class__.utcnow() if False else \
+            datetime(datetime.utcnow().year, datetime.utcnow().month, datetime.utcnow().day) \
+            .__class__.utcnow()
+        from datetime import timedelta
+        since_30d = datetime.utcnow() - timedelta(days=30)
+
+        # Admin logs where a human made a different decision than the model
+        admin_logs = list(db.fraudlogs.aggregate([
+            {'$match': {
+                'source': 'admin',
+                'stage': 'moderation',
+                'createdAt': {'$gte': since_30d},
+            }},
+            {'$group': {
+                '_id': '$opportunityId',
+                'adminOutcome': {'$last': '$decisionOutcome'},
+            }},
+        ]))
+
+        model_logs_map = {}
+        if admin_logs:
+            opp_ids = [row['_id'] for row in admin_logs if row.get('_id')]
+            model_logs = list(db.fraudlogs.aggregate([
+                {'$match': {
+                    'source': {'$in': ['model', 'workflow']},
+                    'opportunityId': {'$in': opp_ids},
+                }},
+                {'$sort': {'createdAt': 1}},
+                {'$group': {
+                    '_id': '$opportunityId',
+                    'modelOutcome': {'$last': '$decisionOutcome'},
+                }},
+            ]))
+            model_logs_map = {str(row['_id']): row['modelOutcome'] for row in model_logs}
+
+        agreements = 0
+        total = len(admin_logs)
+        for row in admin_logs:
+            model_outcome = model_logs_map.get(str(row.get('_id')), None)
+            admin_outcome = row.get('adminOutcome')
+            if model_outcome and admin_outcome:
+                # Treat "approve" admin action as agreeing with the model if model
+                # also said published, or disagreeing if the model blocked/flagged.
+                if admin_outcome == model_outcome:
+                    agreements += 1
+                elif admin_outcome == 'published' and model_outcome == 'published':
+                    agreements += 1
+
+        if total > 0:
+            agreement_rate = round(agreements / total, 4)
+            report['adminAgreementRate'] = agreement_rate
+            report['adminAgreementSampleSize'] = total
+            if agreement_rate < ADMIN_AGREEMENT_THRESHOLD:
+                msg = (
+                    f'Admin override rate is high — agreement rate {agreement_rate:.1%} '
+                    f'(threshold {ADMIN_AGREEMENT_THRESHOLD:.0%}, {total} decisions). '
+                    'Admins are frequently reversing model decisions, suggesting concept drift.'
+                )
+                report['signals'].append(msg)
+                if report['overallStatus'] == 'ok':
+                    report['overallStatus'] = 'warning'
+        else:
+            report['adminAgreementRate'] = None
+            report['adminAgreementSampleSize'] = 0
+    except Exception as exc:
+        logger.warning('Admin agreement computation skipped: %s', exc)
+
+    # ── 3. Score distribution shift ───────────────────────────────────────────
+    try:
+        from datetime import timedelta
+        recent_cutoff = datetime.utcnow() - timedelta(days=7)
+        historical_cutoff = datetime.utcnow() - timedelta(days=37)
+
+        recent_agg = list(db.fraudlogs.aggregate([
+            {'$match': {
+                'source': {'$in': ['model', 'workflow']},
+                'createdAt': {'$gte': recent_cutoff},
+            }},
+            {'$group': {
+                '_id': None,
+                'total': {'$sum': 1},
+                'highRisk': {'$sum': {'$cond': [{'$gte': ['$fraudScore', 70]}, 1, 0]}},
+                'avgScore': {'$avg': '$fraudScore'},
+            }},
+        ]))
+
+        historical_agg = list(db.fraudlogs.aggregate([
+            {'$match': {
+                'source': {'$in': ['model', 'workflow']},
+                'createdAt': {'$gte': historical_cutoff, '$lt': recent_cutoff},
+            }},
+            {'$group': {
+                '_id': None,
+                'total': {'$sum': 1},
+                'highRisk': {'$sum': {'$cond': [{'$gte': ['$fraudScore', 70]}, 1, 0]}},
+                'avgScore': {'$avg': '$fraudScore'},
+            }},
+        ]))
+
+        recent = recent_agg[0] if recent_agg else None
+        historical = historical_agg[0] if historical_agg else None
+
+        if recent and historical and recent['total'] > 0 and historical['total'] > 0:
+            recent_rate = recent['highRisk'] / recent['total']
+            hist_rate = historical['highRisk'] / historical['total']
+            shift = round(recent_rate - hist_rate, 4)
+            report['scoreDistributionShift'] = {
+                'recentHighRiskRate': round(recent_rate, 4),
+                'historicalHighRiskRate': round(hist_rate, 4),
+                'shift': shift,
+                'recentAvgScore': round(recent['avgScore'] or 0, 2),
+                'historicalAvgScore': round(historical['avgScore'] or 0, 2),
+                'recentSamples': recent['total'],
+                'historicalSamples': historical['total'],
+            }
+            if abs(shift) > 0.15:
+                direction = 'increase' if shift > 0 else 'decrease'
+                msg = (
+                    f'Score distribution shift detected — high-risk rate {direction}d by '
+                    f'{abs(shift):.1%} vs. prior 30-day baseline '
+                    f'(recent {recent_rate:.1%} vs. historical {hist_rate:.1%}).'
+                )
+                report['signals'].append(msg)
+                if report['overallStatus'] == 'ok':
+                    report['overallStatus'] = 'warning'
+    except Exception as exc:
+        logger.warning('Score distribution shift computation skipped: %s', exc)
+
+    # ── Recommendation text ───────────────────────────────────────────────────
+    if report['overallStatus'] == 'drift_detected':
+        report['recommendation'] = (
+            'Model performance has dropped below baseline targets. '
+            'Export admin-labelled training data and retrain the model '
+            'using scripts/retrain_model.py with the exported feedback CSV.'
+        )
+    elif report['overallStatus'] == 'warning':
+        report['recommendation'] = (
+            'Early drift signals detected. Monitor closely over the next 7 days. '
+            'If signals persist, export training data and schedule a retrain.'
+        )
+    else:
+        report['recommendation'] = (
+            'Model performance is within acceptable bounds. '
+            'Continue monitoring weekly via this endpoint.'
+        )
+
+    return report
+
+
+@app.route('/api/drift/status', methods=['GET'])
+def drift_status():
+    """
+    Drift detection endpoint.
+    Compares current model metrics against training-time baselines and checks
+    admin override patterns to flag potential concept drift.
+    """
+    try:
+        report = _compute_drift_status()
+        return jsonify(report)
+    except Exception as exc:
+        logger.error('Drift status error: %s', exc)
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/training-export', methods=['GET'])
+def training_export():
+    """
+    Export admin-labelled decisions from the fraud log for model retraining.
+
+    Returns JSONL-style records where each row contains the opportunity features
+    and the final human-verified label (1 = fraud, 0 = legitimate).
+
+    Query params:
+      - days (int, default 90): how far back to look
+      - min_feedback (bool, default false): if true, only include rows with admin feedback text
+    """
+    try:
+        from datetime import timedelta
+
+        days = int(request.args.get('days', 90))
+        require_feedback = request.args.get('min_feedback', 'false').lower() == 'true'
+        since = datetime.utcnow() - timedelta(days=days)
+
+        match_filter = {
+            'source': 'admin',
+            'stage': {'$in': ['moderation', 'appeal_review']},
+            'createdAt': {'$gte': since},
+        }
+        if require_feedback:
+            match_filter['adminFeedback'] = {'$exists': True, '$ne': ''}
+
+        logs = list(db.fraudlogs.aggregate([
+            {'$match': match_filter},
+            # Keep the latest admin decision per opportunity
+            {'$sort': {'createdAt': -1}},
+            {'$group': {
+                '_id': '$opportunityId',
+                'decisionOutcome': {'$first': '$decisionOutcome'},
+                'adminAction': {'$first': '$adminAction'},
+                'adminFeedback': {'$first': '$adminFeedback'},
+                'fraudScore': {'$first': '$fraudScore'},
+                'classification': {'$first': '$classification'},
+                'signals': {'$first': '$signals'},
+                'features': {'$first': '$features'},
+                'explanation': {'$first': '$explanation'},
+                'createdAt': {'$first': '$createdAt'},
+            }},
+            {'$sort': {'createdAt': -1}},
+            {'$limit': 5000},
+        ]))
+
+        # Resolve ground-truth label from admin decision:
+        # approve / appeal_approve  → 0 (legitimate)
+        # reject / suspend / remove → 1 (fraud)
+        # Skipped if action is ambiguous
+        ACTION_TO_LABEL = {
+            'approve': 0,
+            'appeal_approve': 0,
+            'restore': 0,
+            'reject': 1,
+            'suspend': 1,
+            'appeal_reject': 1,
+            'permanent_remove': 1,
+        }
+
+        records = []
+        for log in logs:
+            action = log.get('adminAction') or ''
+            label = ACTION_TO_LABEL.get(action)
+            if label is None:
+                continue  # skip ambiguous entries
+
+            opp_id = log.get('_id')
+            # Optionally fetch opportunity fields for richer training data
+            opp = {}
+            try:
+                if opp_id:
+                    opp = db.opportunities.find_one(
+                        {'_id': opp_id},
+                        {
+                            'title': 1, 'description': 1, 'location': 1,
+                            'compensationRange': 1, 'isRemote': 1,
+                            'experienceLevel': 1, 'category': 1,
+                            'applicationMethod': 1, 'externalLink': 1,
+                        }
+                    ) or {}
+            except Exception:
+                pass
+
+            features = log.get('features') or {}
+            records.append({
+                'opportunityId': str(opp_id) if opp_id else None,
+                'fraudulent': label,
+                'fraudScore': log.get('fraudScore', 0),
+                'classification': log.get('classification', ''),
+                'adminAction': action,
+                'adminFeedback': log.get('adminFeedback', ''),
+                'decisionOutcome': log.get('decisionOutcome', ''),
+                'decidedAt': log.get('createdAt').isoformat() + 'Z' if log.get('createdAt') else None,
+                # Posting text fields
+                'title': opp.get('title', ''),
+                'description': opp.get('description', ''),
+                'location': opp.get('location', ''),
+                'category': opp.get('category', ''),
+                'experienceLevel': opp.get('experienceLevel', ''),
+                'isRemote': opp.get('isRemote', False),
+                'applicationMethod': opp.get('applicationMethod', ''),
+                # Numeric features captured at scoring time
+                'title_length': features.get('title_length', 0),
+                'description_length': features.get('description_length', 0),
+                'fraud_pattern_count': features.get('fraud_pattern_count', 0),
+                'high_severity_pattern_count': features.get('high_severity_pattern_count', 0),
+                'email_count': features.get('email_count', 0),
+                'phone_count': features.get('phone_count', 0),
+                'contact_handle_count': features.get('contact_handle_count', 0),
+                'url_count': features.get('url_count', 0),
+                'uppercase_ratio': features.get('uppercase_ratio', 0),
+                'word_count': features.get('word_count', 0),
+                'has_unrealistic_pay': features.get('has_unrealistic_pay', 0),
+                'signals': log.get('signals', []),
+                'explanation': log.get('explanation', ''),
+            })
+
+        # Sanitise any remaining ObjectId / datetime values that slipped through
+        import json as _json
+
+        def _serialise(obj):
+            if isinstance(obj, ObjectId):
+                return str(obj)
+            if isinstance(obj, datetime):
+                return obj.isoformat() + 'Z'
+            raise TypeError(f'Not serialisable: {type(obj)}')
+
+        safe_records = _json.loads(_json.dumps(records, default=_serialise))
+
+        return jsonify({
+            'exportedAt': datetime.utcnow().isoformat() + 'Z',
+            'days': days,
+            'totalRecords': len(safe_records),
+            'labelDistribution': {
+                'legitimate': sum(1 for r in safe_records if r['fraudulent'] == 0),
+                'fraud': sum(1 for r in safe_records if r['fraudulent'] == 1),
+            },
+            'records': safe_records,
+        })
+    except Exception as exc:
+        logger.error('Training export error: %s', exc)
+        return jsonify({'error': str(exc)}), 500
 
 
 @app.route('/api/health', methods=['GET'])

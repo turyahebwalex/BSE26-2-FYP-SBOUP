@@ -162,6 +162,8 @@ export const adminAPI = {
   getArchivedOpportunities: (params) => api.get('/admin/archived-opportunities', { params }),
   restoreArchivedOpportunity: (id) => api.post(`/admin/archived-opportunities/${id}/restore`),
   permanentlyRemoveOpportunity: (id) => api.delete(`/admin/opportunities/${id}/permanent-remove`),
+  getModelHealth: (params) => api.get('/admin/model-health', { params }),
+  getTrainingExport: (params) => api.get('/admin/training-export', { params }),
 };
 
 export default api;

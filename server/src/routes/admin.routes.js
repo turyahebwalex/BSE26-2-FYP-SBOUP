@@ -22,4 +22,8 @@ router.delete('/opportunities/:id/permanent-remove', authenticate, authorize('ad
 router.get('/appeals', authenticate, authorize('admin'), ctrl.getAppealsQueue);
 router.post('/appeals/:id/review', authenticate, authorize('admin'), ctrl.reviewAppeal);
 
+// Model health, drift detection & training export
+router.get('/model-health', authenticate, authorize('admin'), ctrl.getModelHealth);
+router.get('/training-export', authenticate, authorize('admin'), ctrl.getTrainingExport);
+
 module.exports = router;
