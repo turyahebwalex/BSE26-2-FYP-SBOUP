@@ -8,6 +8,7 @@ router.get('/dashboard/user-distribution', authenticate, authorize('admin'), ctr
 router.get('/dashboard/alerts', authenticate, authorize('admin'), ctrl.getUrgentAlerts);
 router.get('/dashboard/user-density', authenticate, authorize('admin'), ctrl.getUserDensity);
 router.get('/flagged', authenticate, authorize('admin'), ctrl.getFlaggedContent);
+router.get('/cases', authenticate, authorize('admin'), ctrl.getModerationCases);
 router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent);
 router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);
 router.put('/users/:userId', authenticate, authorize('admin'), ctrl.updateUserStatus);

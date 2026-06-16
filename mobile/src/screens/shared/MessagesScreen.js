@@ -23,16 +23,18 @@ import { useAuth } from '../../context/AuthContext';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FILTER_CHIPS = ['Workers', 'Employers', 'Companies'];
 
-// ─── Helper: navigate to Opportunities (handles nested navigators) ────────────
-// Replace 'MainStack' below with whatever your root stack navigator is named
-// e.g. 'HomeStack', 'AppStack', 'RootStack', etc.
-const ROOT_STACK_NAME = 'MainStack';
+// ─── Helper: open the real company jobs/profile screen ───────────────────
+const navigateToCompanyProfile = (navigation, companyId) => {
+  if (!navigation || !companyId) return;
 
-const navigateToOpportunities = (navigation, companyId, companyName) => {
-  navigation.navigate(ROOT_STACK_NAME, {
-    screen: 'Opportunities',
-    params: { companyId, companyName },
-  });
+  try {
+    navigation.navigate('CompanyProfile', { companyId });
+  } catch {
+    navigation.getParent()?.navigate('MessagesTab', {
+      screen: 'CompanyProfile',
+      params: { companyId },
+    });
+  }
 };
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
@@ -86,8 +88,7 @@ const AvatarCircle = ({ name, size = 48, online = false, avatar }) => (
 );
 
 // ─── People Card ──────────────────────────────────────────────────────────────
-// FIX 1: Match badge moved to top-right corner of the card (absolute position)
-// FIX 2: navigation.navigate uses nested navigator pattern via navigateToOpportunities()
+// Match badge sits in the top-right corner of the card.
 const PeopleCard = ({ item, onMessage, navigation }) => (
   <View style={styles.personCard}>
     {/* ── Match badge — top-right corner ── */}

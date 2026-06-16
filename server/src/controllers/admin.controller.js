@@ -2,7 +2,10 @@ const User = require('../models/User');
 const Opportunity = require('../models/Opportunity');
 const Application = require('../models/Application');
 const Report = require('../models/Report');
+const Message = require('../models/Message');
 const Profile = require('../models/Profile');
+const ModerationCase = require('../models/ModerationCase');
+const AuditLog = require('../models/AuditLog');
 const logger = require('../utils/logger');
 const opportunityController = require('./opportunity.controller');
 
@@ -55,43 +58,103 @@ exports.getFlaggedContent = async (req, res) => {
 
 exports.moderateContent = async (req, res) => {
   try {
-    const { contentId, action, contentType } = req.body; // action: approve, remove, ban
+    const { contentId, action, contentType } = req.body; // action: approve, remove, ban, restore, reactivate, deactivate
 
-    let publishedOpportunity = null;
+    let responseMessage = 'Content moderated successfully.';
+    const auditNotes = [];
+
     if (contentType === 'opportunity') {
-      // Fetch the pre-approval state so we can detect the
-      // not-published → published transition. Re-approving an
-      // already-published opp shouldn't re-fan-out notifications.
-      const existing = await Opportunity.findById(contentId).select('status');
-      const wasPublished = existing && existing.status === 'published';
+      const existing = await Opportunity.findById(contentId).select('status postedByUserId');
+      if (!existing) return res.status(404).json({ error: 'Opportunity not found.' });
 
       const update = action === 'approve' ? { status: 'published' } : { status: 'blocked' };
       const updated = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
-      if (action === 'approve' && !wasPublished && updated) {
-        publishedOpportunity = updated;
+      if (!updated) return res.status(404).json({ error: 'Opportunity not found.' });
+
+      if (action === 'approve' && existing.status !== 'published') {
+        setImmediate(async () => {
+          try {
+            await opportunityController.onOpportunityPublished(updated);
+          } catch (err) {
+            logger.warn(`onOpportunityPublished fan-out: ${err.message}`);
+          }
+        });
       }
+
+      responseMessage = `Opportunity ${action === 'approve' ? 'restored' : 'removed'} successfully.`;
+      auditNotes.push(`Opportunity status changed from ${existing.status} to ${updated.status}`);
+    } else if (contentType === 'user') {
+      const existing = await User.findById(contentId).select('accountStatus fullName email');
+      if (!existing) return res.status(404).json({ error: 'User not found.' });
+
+      let update = {};
+      if (action === 'deactivate' || action === 'remove' || action === 'ban') {
+        update.accountStatus = 'deactivated';
+      } else if (action === 'suspend') {
+        update.accountStatus = 'suspended';
+      } else if (action === 'reactivate' || action === 'restore') {
+        update.accountStatus = 'active';
+      }
+
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ error: 'Unsupported user moderation action.' });
+      }
+
+      const updated = await User.findByIdAndUpdate(contentId, update, { new: true });
+      responseMessage = `User account ${updated.accountStatus} successfully.`;
+      auditNotes.push(`User accountStatus changed from ${existing.accountStatus} to ${updated.accountStatus}`);
+    } else if (contentType === 'message') {
+      const existing = await Message.findById(contentId).select('moderationStatus senderId receiverId');
+      if (!existing) return res.status(404).json({ error: 'Message not found.' });
+
+      let update = {};
+      if (action === 'remove') {
+        update.moderationStatus = 'blocked';
+      } else if (action === 'restore') {
+        update.moderationStatus = 'normal';
+      } else if (action === 'under_review') {
+        update.moderationStatus = 'under_review';
+      }
+
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ error: 'Unsupported message moderation action.' });
+      }
+
+      await Message.findByIdAndUpdate(contentId, update);
+      responseMessage = `Message ${action === 'remove' ? 'removed' : action === 'restore' ? 'restored' : 'marked for review'} successfully.`;
+      auditNotes.push(`Message moderationStatus set to ${update.moderationStatus}`);
+    } else {
+      return res.status(400).json({ error: 'Unsupported content type.' });
     }
 
-    // Log admin action
+    const auditTargetType = contentType === 'user' ? 'user' : contentType === 'message' ? 'message' : 'opportunity';
+    await AuditLog.create({
+      adminId: req.user._id,
+      action,
+      targetType: auditTargetType,
+      targetId: contentId,
+      notes: auditNotes.join('; '),
+      metadata: { contentType, action },
+    });
+
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
-
-    // Respond immediately — the worker fan-out runs in the background so
-    // the admin doesn't wait on per-worker scoring. setImmediate keeps it
-    // out of this request's lifecycle without blocking the event loop.
-    if (publishedOpportunity) {
-      const oppForFanout = publishedOpportunity;
-      setImmediate(async () => {
-        try {
-          await opportunityController.onOpportunityPublished(oppForFanout);
-        } catch (err) {
-          logger.warn(`onOpportunityPublished fan-out: ${err.message}`);
-        }
-      });
-    }
-
-    res.json({ message: `Content ${action}d successfully.` });
+    res.json({ message: responseMessage });
   } catch (error) {
+    logger.error('Moderate content error:', error);
     res.status(500).json({ error: 'Failed to moderate content.' });
+  }
+};
+
+exports.getModerationCases = async (req, res) => {
+  try {
+    const cases = await ModerationCase.find({ status: { $in: ['open', 'under_review'] } })
+      .populate('assignedAdmin', 'fullName email')
+      .sort({ updatedAt: -1 });
+
+    res.json({ cases });
+  } catch (error) {
+    logger.error('Get moderation cases error:', error);
+    res.status(500).json({ error: 'Failed to fetch moderation cases.' });
   }
 };
 

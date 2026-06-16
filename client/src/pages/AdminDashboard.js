@@ -36,6 +36,7 @@ const AdminDashboard = () => {
   const [flagged, setFlagged] = useState({ flaggedOpportunities: [], pendingReports: [] });
   const [users, setUsers] = useState([]);
   const [reports, setReports] = useState([]);
+  const [cases, setCases] = useState([]);
   const [trends, setTrends] = useState([]);
   const [alerts, setAlerts] = useState(null);
   const [density, setDensity] = useState([]);
@@ -74,18 +75,29 @@ const AdminDashboard = () => {
     } catch {}
   };
 
+  const loadCases = async () => {
+    try {
+      const { data } = await adminAPI.getCases();
+      setCases(data.cases || []);
+    } catch {}
+  };
+
   useEffect(() => {
     if (tab === 'reports') loadReports();
+    if (tab === 'cases') loadCases();
   }, [tab]);
 
-  const moderate = async (contentId, action) => {
+  const moderateContent = async (contentId, contentType, action) => {
     try {
-      await adminAPI.moderate({ contentId, action, contentType: 'opportunity' });
+      await adminAPI.moderate({ contentId, contentType, action });
       toast.success(`Content ${action}d`);
-      setFlagged((prev) => ({
-        ...prev,
-        flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
-      }));
+      if (contentType === 'opportunity') {
+        setFlagged((prev) => ({
+          ...prev,
+          flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
+        }));
+      }
+      setCases((prev) => prev.filter((c) => c.targetId !== contentId || c.targetType !== contentType));
     } catch {
       toast.error('Action failed');
     }
@@ -213,6 +225,7 @@ const AdminDashboard = () => {
   const tabs = [
     { key: 'overview', label: 'Overview', icon: FiShield },
     { key: 'moderation', label: 'Moderation', icon: FiAlertTriangle },
+    { key: 'cases', label: 'Cases', icon: FiCheckSquare },
     { key: 'users', label: 'Users', icon: FiUsers },
     { key: 'reports', label: 'Reports', icon: FiFlag },
   ];
@@ -507,11 +520,11 @@ const AdminDashboard = () => {
                 </div>
                 <p className="text-sm text-gray-600 mt-2 line-clamp-3">{opp.description}</p>
                 <div className="flex gap-2 mt-3">
-                  <button onClick={() => moderate(opp._id, 'approve')} className="btn-primary text-sm !py-1.5 !px-4">
+                  <button onClick={() => moderateContent(opp._id, 'opportunity', 'approve')} className="btn-primary text-sm !py-1.5 !px-4">
                     Approve
                   </button>
                   <button
-                    onClick={() => moderate(opp._id, 'remove')}
+                    onClick={() => moderateContent(opp._id, 'opportunity', 'remove')}
                     className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
                   >
                     Remove
@@ -523,6 +536,92 @@ const AdminDashboard = () => {
             <div className="card text-center py-12">
               <FiAlertTriangle size={32} className="mx-auto text-gray-300 mb-3" />
               <p className="text-gray-400">No flagged content — everything looks good!</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Cases Tab ─── */}
+      {tab === 'cases' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-lg">Moderation Cases</h2>
+              <p className="text-sm text-gray-500">Review content that reached admin moderation.</p>
+            </div>
+            <span className="text-xs text-gray-400">{cases.length} open case{cases.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          {cases.length > 0 ? (
+            cases.map((c) => (
+              <div key={c._id} className="card border-l-4 border-l-blue-400">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-500 uppercase tracking-wide">{c.targetType}</p>
+                    <p className="font-semibold">Target ID: <span className="font-normal text-gray-600 break-all">{c.targetId}</span></p>
+                    <p className="text-sm text-gray-500">Reports: {c.reportCount}</p>
+                    <p className="text-sm text-gray-500">Status: <span className="font-medium">{c.status?.replace('_', ' ')}</span></p>
+                    {c.assignedAdmin ? (
+                      <p className="text-sm text-gray-500">Assigned admin: {c.assignedAdmin.fullName || c.assignedAdmin.email}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {c.targetType === 'opportunity' && (
+                      <>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'opportunity', 'approve')}
+                          className="badge bg-blue-100 text-blue-700 hover:bg-blue-200"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'opportunity', 'remove')}
+                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                    {c.targetType === 'user' && (
+                      <>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'user', 'suspend')}
+                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Suspend
+                        </button>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'user', 'reactivate')}
+                          className="badge bg-green-100 text-green-700 hover:bg-green-200"
+                        >
+                          Reactivate
+                        </button>
+                      </>
+                    )}
+                    {c.targetType === 'message' && (
+                      <>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'message', 'remove')}
+                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Remove
+                        </button>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'message', 'restore')}
+                          className="badge bg-green-100 text-green-700 hover:bg-green-200"
+                        >
+                          Restore
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="card text-center py-12">
+              <FiShield size={32} className="mx-auto text-gray-300 mb-3" />
+              <p className="text-gray-400">No moderation cases available.</p>
             </div>
           )}
         </div>

@@ -41,6 +41,11 @@ const messageSchema = new mongoose.Schema({
     enum: ['sent', 'delivered', 'read', 'failed'],
     default: 'sent'
   },
+  moderationStatus: {
+    type: String,
+    enum: ['normal', 'under_review', 'blocked'],
+    default: 'normal',
+  },
   sentAt: { 
     type: Date, 
     default: Date.now 

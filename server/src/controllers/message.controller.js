@@ -128,7 +128,8 @@ exports.getConversation = async (req, res) => {
         { senderId: req.user._id, receiverId: userId },
         { senderId: userId, receiverId: req.user._id },
       ],
-      deletedBy: { $ne: req.user._id } // Exclude deleted messages
+      deletedBy: { $ne: req.user._id }, // Exclude deleted messages
+      moderationStatus: 'normal',
     })
       .sort({ sentAt: -1 }) // Get newest first for pagination
       .skip((parseInt(page) - 1) * parseInt(limit))
@@ -181,7 +182,8 @@ exports.getConversation = async (req, res) => {
         { senderId: req.user._id, receiverId: userId },
         { senderId: userId, receiverId: req.user._id },
       ],
-      deletedBy: { $ne: req.user._id }
+      deletedBy: { $ne: req.user._id },
+      moderationStatus: 'normal',
     });
 
     res.json({ 
@@ -208,7 +210,8 @@ exports.getInbox = async (req, res) => {
       {
         $match: {
           $or: [{ senderId: userId }, { receiverId: userId }],
-          deletedBy: { $ne: userId }
+          deletedBy: { $ne: userId },
+          moderationStatus: 'normal',
         },
       },
       { $sort: { sentAt: -1 } },

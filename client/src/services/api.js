@@ -152,6 +152,7 @@ export const adminAPI = {
   getAlerts: () => api.get('/admin/dashboard/alerts'),
   getUserDensity: () => api.get('/admin/dashboard/user-density'),
   getFlagged: () => api.get('/admin/flagged'),
+  getCases: () => api.get('/admin/cases'),
   moderate: (data) => api.post('/admin/moderate', data),
   getUsers: (params) => api.get('/admin/users', { params }),
   updateUser: (userId, data) => api.put(`/admin/users/${userId}`, data),
