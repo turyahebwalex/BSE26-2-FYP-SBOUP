@@ -171,7 +171,7 @@ const CompanyProfileScreen = ({ route, navigation }) => {
   const [posLoading, setPosLoading] = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [showReport, setShowReport] = useState(false);   // ← report sheet
+  const [showReport, setShowReport] = useState(false);   
 
   // ── Fetch company ──────────────────────────────────────────────────────────
   const fetchCompany = useCallback(async () => {
@@ -335,7 +335,7 @@ const CompanyProfileScreen = ({ route, navigation }) => {
             </>
           ) : null}
 
-          {/* ── Subtle report link at the bottom of the company card ── */}
+          
           <TouchableOpacity
             style={styles.reportLink}
             onPress={() => setShowReport(true)}

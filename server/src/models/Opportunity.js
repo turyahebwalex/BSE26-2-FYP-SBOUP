@@ -7,6 +7,11 @@ const mongoose = require('mongoose');
  * written by the fraud-detection microservice; status transitions
  * follow the 30 / 70 risk thresholds (auto-publish < 30, admin
  * review 30-70, block >= 70).
+ * 
+ * Updated to support multiple application methods:
+ * - in_app: Submit CV, cover letter, and documents directly in the app
+ * - message: Send a direct message to the employer
+ * - external_link: Redirect to external form (Google Forms, Typeform, etc.)
  */
 const opportunitySchema = new mongoose.Schema(
   {
@@ -64,12 +69,64 @@ const opportunitySchema = new mongoose.Schema(
     },
     schedule: { type: String, maxlength: 100 },
     mediaUrls: [{ type: String }],
+    
+    // ─── UPDATED: Application Methods (supports multiple options) ───
+    // Allowed application methods for this opportunity
+    applicationMethods: {
+      type: [String],
+      enum: ['in_app', 'message', 'external_link'],
+      default: ['in_app'],
+    },
+    
+    // External application link (for Google Forms, Typeform, company website, etc.)
+    externalApplyUrl: {
+      type: String,
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          return /^https?:\/\//.test(v);
+        },
+        message: 'External URL must start with http:// or https://'
+      }
+    },
+    
+    // Instructions for message-based applications
+    messageInstructions: {
+      type: String,
+      maxlength: 1000,
+      default: 'Send a message introducing yourself, your skills, and why you are interested in this position.'
+    },
+    
+    // Required documents for in-app applications
+    requiredDocuments: [{
+      type: String,
+      enum: ['cv', 'cover_letter', 'portfolio', 'certificates', 'references']
+    }],
+    
+    // Custom questions for in-app application form
+    customQuestions: [{
+      question: { type: String, required: true },
+      type: { 
+        type: String, 
+        enum: ['text', 'textarea', 'file', 'select'],
+        default: 'textarea'
+      },
+      required: { type: Boolean, default: false },
+      options: [String], // For select type
+      maxLength: { type: Number, default: 500 },
+    }],
+    
+    // Track external link clicks for analytics
+    externalClickCount: { type: Number, default: 0 },
+    
+    // Legacy fields (keep for backward compatibility)
     applicationMethod: {
       type: String,
       enum: ['internal', 'external'],
       default: 'internal',
     },
     externalLink: { type: String },
+    
     viewCount: { type: Number, default: 0 },
     applicationCount: { type: Number, default: 0 },
   },
@@ -80,9 +137,64 @@ const opportunitySchema = new mongoose.Schema(
 opportunitySchema.virtual('employerId').get(function () {
   return this.postedByUserId;
 });
+
+// Virtual to check if external link is available
+opportunitySchema.virtual('hasExternalLink').get(function () {
+  return this.applicationMethods.includes('external_link') && this.externalApplyUrl;
+});
+
+// Virtual to check if message application is available
+opportunitySchema.virtual('hasMessageApplication').get(function () {
+  return this.applicationMethods.includes('message');
+});
+
+// Virtual to check if in-app application is available
+opportunitySchema.virtual('hasInAppApplication').get(function () {
+  return this.applicationMethods.includes('in_app');
+});
+
+// Virtual to get available application methods with details
+opportunitySchema.virtual('availableApplicationMethods').get(function () {
+  const methods = [];
+  
+  if (this.applicationMethods.includes('in_app')) {
+    methods.push({
+      type: 'in_app',
+      label: 'In-App Application',
+      description: 'Submit your CV, cover letter, and supporting documents directly',
+      icon: 'document-text-outline',
+      color: '#F59E0B'
+    });
+  }
+  
+  if (this.applicationMethods.includes('message')) {
+    methods.push({
+      type: 'message',
+      label: 'Apply via Message',
+      description: this.messageInstructions || 'Send a direct message to the employer',
+      icon: 'chatbubble-outline',
+      color: '#3B82F6'
+    });
+  }
+  
+  if (this.applicationMethods.includes('external_link') && this.externalApplyUrl) {
+    methods.push({
+      type: 'external_link',
+      label: 'External Application',
+      description: 'Apply through an external form',
+      icon: 'link-outline',
+      color: '#10B981',
+      url: this.externalApplyUrl
+    });
+  }
+  
+  return methods;
+});
+
 opportunitySchema.set('toJSON', { virtuals: true });
 opportunitySchema.set('toObject', { virtuals: true });
 
+// Indexes
 opportunitySchema.index({ postedByUserId: 1 });
 opportunitySchema.index({ companyId: 1 });
 opportunitySchema.index({ status: 1, category: 1 });
@@ -90,5 +202,6 @@ opportunitySchema.index({ location: 1 });
 opportunitySchema.index({ deadline: 1 });
 opportunitySchema.index({ fraudRiskScore: 1 });
 opportunitySchema.index({ title: 'text', description: 'text' });
+opportunitySchema.index({ applicationMethods: 1 }); // For filtering by application type
 
 module.exports = mongoose.model('Opportunity', opportunitySchema);

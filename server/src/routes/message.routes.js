@@ -4,9 +4,6 @@ const { validate } = require('../validators');
 const ctrl = require('../controllers/message.controller');
 const { uploadMessageAttachments } = require('../middleware/upload');
 
-// ========== CORE MESSAGING ROUTES ==========
-// Send message with optional file attachments
-
 
 router.post('/', 
   authenticate, 
@@ -18,9 +15,9 @@ router.post('/',
     console.log('====================');
     next();
   },
-  validate('sendMessage'), 
   ctrl.sendMessage
 );
+
 // Get inbox conversations
 router.get('/inbox', authenticate, ctrl.getInbox);
 
