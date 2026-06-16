@@ -78,7 +78,7 @@ def _try(label: str, fn) -> bool:
 
 
 def preload_semantic() -> None:
-    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
 
     SentenceTransformer(
         "sentence-transformers/all-MiniLM-L6-v2", cache_folder=CACHE
@@ -86,14 +86,14 @@ def preload_semantic() -> None:
 
 
 def preload_summary() -> None:
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  # pyright: ignore[reportMissingImports]
 
     AutoTokenizer.from_pretrained("google/flan-t5-small", cache_dir=CACHE)
     AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small", cache_dir=CACHE)
 
 
 def preload_ner() -> bool:
-    from transformers import pipeline
+    from transformers import pipeline  # pyright: ignore[reportMissingImports]
 
     for model_id in NER_CANDIDATES:
         if not model_id:
