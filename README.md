@@ -111,6 +111,24 @@ Then `dev.sh` brings the rest of the stack up (Docker compose, mobile Expo). Whe
 
 > **Important — don't skip `setup.sh` on first run.** It's the only thing that creates `.env` files. If you go straight to `dev.sh`, Docker compose will fall back to placeholders and the API will boot without a working JWT secret.
 
+### Connecting to the shared MongoDB Atlas database
+
+The team shares one **MongoDB Atlas** cluster so everyone reads and writes the same data, and any change you push is visible to everyone else automatically. The connection string is a **secret** (it contains the database password), so it is **never committed to git** — it lives only in your local, gitignored `.env`.
+
+Set it up **once** per machine:
+
+1. After `setup.sh` has created your `.env` files, get the Atlas connection string from the team lead — it's shared privately (group chat / password manager / pinned message), not in the repo.
+2. Open the root `.env` and set:
+   ```
+   MONGODB_URI=mongodb+srv://<user>:<password>@sboup-cluster.xxxxx.mongodb.net/sboup?retryWrites=true&w=majority
+   ```
+   (paste the exact value you were given — don't retype it).
+3. Save. That's it — you never edit this again. Every future `git pull` + `dev.sh` connects to the shared cluster automatically.
+
+> Prefer a throwaway local database instead of the shared one? Leave the default `MONGODB_URI=mongodb://localhost:27017/sboup_dev` and the Dockerized Mongo will be used. Just know your data won't be shared with the team.
+>
+> ⚠️ **Never paste the Atlas URI into `.env.example`, a commit, or a PR.** If it ever leaks, rotate the password in Atlas → Database Access immediately.
+
 ### Subsequent runs (everyday dev loop)
 
 ```bash

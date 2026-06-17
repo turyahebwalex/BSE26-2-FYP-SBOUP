@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -11,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI, learningAPI } from '../../services/api';
 import ReportBottomSheet from '../../components/ReportBottomSheet';
 
@@ -42,6 +45,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [applying, setApplying] = useState(false);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
+  const [attachments, setAttachments] = useState([]);   // { name, uri, type, size }
   const [applied, setApplied] = useState(false);
   const [error, setError] = useState(null);
   const [profileId, setProfileId] = useState(null);
@@ -126,6 +130,17 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           if (d.missingSkills) setMissingSkills(d.missingSkills);
         } catch (_) {}
 
+        // Check if the worker already applied to this opportunity
+        try {
+          const appsRes = await applicationAPI.getMyApplications();
+          const apps = appsRes.data.applications || appsRes.data || [];
+          const alreadyApplied = apps.some((a) => {
+            const appOppId = a.opportunityId?._id || a.opportunityId || '';
+            return String(appOppId) === String(resolvedId);
+          });
+          if (alreadyApplied) setApplied(true);
+        } catch (_) {}
+
         // Enrich the breakdown card with the learning-engine's alias hints
         // and proficiency shortfalls so the worker sees 'did you mean…?'
         // suggestions BEFORE committing to a pathway. Best-effort: a
@@ -138,6 +153,71 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
         } catch (_) {}
       }
     } catch (_) {}
+  };
+
+  // ── Attachment helpers ────────────────────────────────────────────────────
+  const MAX_ATTACHMENTS = 5;
+
+  const pickDocument = async () => {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      Alert.alert('Limit reached', `You can attach up to ${MAX_ATTACHMENTS} files.`);
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword',
+               'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+               'text/plain'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        setAttachments((prev) => [
+          ...prev,
+          { name: asset.name, uri: asset.uri, type: asset.mimeType || 'application/octet-stream', size: asset.size },
+        ]);
+      }
+    } catch {
+      Alert.alert('Error', 'Could not pick document.');
+    }
+  };
+
+  const pickImage = async () => {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      Alert.alert('Limit reached', `You can attach up to ${MAX_ATTACHMENTS} files.`);
+      return;
+    }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      const name = asset.uri.split('/').pop() || 'image.jpg';
+      setAttachments((prev) => [
+        ...prev,
+        { name, uri: asset.uri, type: 'image/jpeg', size: asset.fileSize || 0 },
+      ]);
+    }
+  };
+
+  const showAttachmentOptions = () => {
+    Alert.alert('Add Attachment', 'Choose what to attach', [
+      { text: 'Document (PDF / Word)', onPress: pickDocument },
+      { text: 'Photo from Gallery',    onPress: pickImage },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const removeAttachment = (index) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleApply = async () => {
@@ -153,13 +233,41 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
     setApplying(true);
     try {
+      // Upload each attachment to the server first so the employer gets a real URL
+      const uploadedAttachments = [];
+      for (const att of attachments) {
+        try {
+          const formData = new FormData();
+          formData.append('file', {
+            uri:  att.uri,
+            name: att.name,
+            type: att.type || 'application/octet-stream',
+          });
+          const { data } = await applicationAPI.uploadAttachment(formData);
+          uploadedAttachments.push({
+            fileName: data.fileName,
+            fileUrl:  data.fileUrl,
+            fileType: data.fileType,
+          });
+        } catch {
+          // If upload fails, fall back to local URI so the application still submits
+          uploadedAttachments.push({
+            fileName: att.name,
+            fileUrl:  att.uri,
+            fileType: att.type,
+          });
+        }
+      }
+
       await applicationAPI.apply({
         opportunityId: submitOppId,
         profileId,
         coverLetter: coverLetter.trim(),
+        attachments: uploadedAttachments,
       });
       setApplied(true);
       setShowApplyForm(false);
+      setAttachments([]);
       Alert.alert('Success', 'Your application has been submitted!');
     } catch (err) {
       const data = err.response?.data;
@@ -478,20 +586,59 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           {showApplyForm && !applied && (
             <View style={styles.applyForm}>
               <Text style={styles.sectionTitle}>Cover Letter (Optional)</Text>
-              <TextInput
-                style={styles.coverLetterInput}
-                placeholder="Tell the employer why you're a great fit..."
-                placeholderTextColor="#9CA3AF"
-                multiline
-                numberOfLines={5}
-                textAlignVertical="top"
-                value={coverLetter}
-                onChangeText={setCoverLetter}
-              />
+
+              {/* Cover letter input with attachment icon inside */}
+              <View style={styles.coverLetterWrapper}>
+                <TextInput
+                  style={styles.coverLetterInput}
+                  placeholder="Tell the employer why you're a great fit..."
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={5}
+                  textAlignVertical="top"
+                  value={coverLetter}
+                  onChangeText={setCoverLetter}
+                />
+                {/* Attachment icon — bottom-right of the text area */}
+                <TouchableOpacity
+                  style={styles.attachIconBtn}
+                  onPress={showAttachmentOptions}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="attach" size={20} color="#F97316" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Attachment chips */}
+              {attachments.length > 0 && (
+                <View style={styles.attachmentList}>
+                  {attachments.map((att, idx) => (
+                    <View key={idx} style={styles.attachmentChip}>
+                      <Ionicons
+                        name={att.type?.startsWith('image') ? 'image-outline' : 'document-outline'}
+                        size={14}
+                        color="#F97316"
+                      />
+                      <Text style={styles.attachmentName} numberOfLines={1}>
+                        {att.name}
+                      </Text>
+                      <TouchableOpacity onPress={() => removeAttachment(idx)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                        <Ionicons name="close-circle" size={16} color="#9CA3AF" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Helper text */}
+              <Text style={styles.attachHint}>
+                <Ionicons name="attach" size={12} color="#9CA3AF" /> Tap the clip icon to attach documents or photos (up to 5)
+              </Text>
+
               <View style={styles.applyFormButtons}>
                 <TouchableOpacity
                   style={styles.cancelButton}
-                  onPress={() => setShowApplyForm(false)}
+                  onPress={() => { setShowApplyForm(false); setAttachments([]); }}
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -765,9 +912,53 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    paddingBottom: 36,   // extra bottom padding so text doesn't hide behind the icon
     fontSize: 15,
     color: '#1F2937',
     minHeight: 120,
+  },
+  coverLetterWrapper: {
+    position: 'relative',
+    marginBottom: 8,
+  },
+  attachIconBtn: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFF7ED',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  attachmentList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  attachmentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    maxWidth: 200,
+  },
+  attachmentName: {
+    flex: 1,
+    fontSize: 12,
+    color: '#EA580C',
+    fontWeight: '500',
+  },
+  attachHint: {
+    fontSize: 11,
+    color: '#9CA3AF',
     marginBottom: 12,
   },
   applyFormButtons: {

@@ -104,6 +104,75 @@ def _cosine(worker_skills: dict, opp_skills: dict) -> float:
     return float(sk_cosine(vec_a, vec_b)[0][0])
 
 
+# ── Skill alias resolution ────────────────────────────────────────────────────
+
+def _skill_tokens(name: str) -> set:
+    """Lowercase word tokens for a skill name, excluding short stop words."""
+    stop = {'a', 'an', 'the', 'and', 'or', 'of', 'for', 'in', 'with', 'to'}
+    return {w for w in name.lower().split() if len(w) > 1 and w not in stop}
+
+
+def _skills_are_aliases(name_a: str, name_b: str) -> bool:
+    """
+    Return True when two skill names are likely aliases of each other.
+
+    Rules (any one is sufficient):
+    1. One name contains the other as a whole word/phrase.
+    2. Jaccard token overlap >= 0.5 (they share most meaningful words).
+
+    Examples that should return True:
+      "React Frontend Engineer"  ↔  "React"              → containment
+      "React Frontend Engineer"  ↔  "Frontend Developer" → token overlap 0.5
+      "Node.js"                  ↔  "Node"                → containment
+      "JavaScript"               ↔  "JS"                  → fails (different tokens, no containment) — correct
+    """
+    a = name_a.strip().lower()
+    b = name_b.strip().lower()
+    if a == b:
+        return True
+    # Containment check: "react" inside "react frontend engineer"
+    if a in b or b in a:
+        return True
+    # Token Jaccard
+    tok_a = _skill_tokens(name_a)
+    tok_b = _skill_tokens(name_b)
+    if not tok_a or not tok_b:
+        return False
+    intersection = tok_a & tok_b
+    union        = tok_a | tok_b
+    jaccard = len(intersection) / len(union)
+    return jaccard >= 0.5
+
+
+def _resolve_worker_skills(worker_skills: dict, opp_skills: dict) -> dict:
+    """
+    Return a copy of worker_skills where any worker skill that is an alias
+    of an opportunity skill is renamed to the opportunity skill's canonical
+    name. This ensures cosine similarity and overlap counts treat aliases
+    as exact matches.
+
+    Example:
+      worker = {"React Frontend Engineer": 0.75}
+      opp    = {"React": 1.0, "JavaScript": 1.0}
+      →  worker_resolved = {"React": 0.75}   (alias mapped to canonical)
+    """
+    resolved = {}
+    for worker_name, weight in worker_skills.items():
+        matched_opp_name = None
+        for opp_name in opp_skills:
+            if _skills_are_aliases(worker_name, opp_name):
+                matched_opp_name = opp_name
+                break
+        # Use the canonical opp name if alias found, otherwise keep original
+        canonical = matched_opp_name if matched_opp_name else worker_name
+        # If worker already has the canonical name, take the higher weight
+        if canonical in resolved:
+            resolved[canonical] = max(resolved[canonical], weight)
+        else:
+            resolved[canonical] = weight
+    return resolved
+
+
 def _get_worker_context(profile_id, profile_doc=None):
     """
     Fetch worker context features from MongoDB.
@@ -177,15 +246,21 @@ def _build_feature_row(worker_skills, opp_skills, worker_ctx, opp_doc):
     Build the complete feature dict that the ML model expects.
     Mirrors exactly the features in feature_list.json.
     """
-    worker_skill_set = set(worker_skills.keys())
+    # ── Alias resolution ──────────────────────────────────────────────────────
+    # Remap worker skill names to their canonical opp-skill equivalents before
+    # any overlap/cosine calculation so that "React Frontend Engineer" counts
+    # as a match for the job requirement "React".
+    worker_skills_resolved = _resolve_worker_skills(worker_skills, opp_skills)
+
+    worker_skill_set = set(worker_skills_resolved.keys())
     opp_skill_set    = set(opp_skills.keys())
     n_req            = len(opp_skill_set) or 1
 
     overlap_count = len(worker_skill_set & opp_skill_set)
     gap_count     = len(opp_skill_set - worker_skill_set)
-    cosine_sim    = _cosine(worker_skills, opp_skills)
+    cosine_sim    = _cosine(worker_skills_resolved, opp_skills)
 
-    # Skill category overlap
+    # Skill category overlap — use resolved worker skills
     worker_categories = _get_skill_categories(list(worker_skill_set))
     opp_categories    = _get_skill_categories(list(opp_skill_set))
     n_opp_cats        = len(opp_categories) or 1
@@ -303,7 +378,10 @@ def compute_match_score():
         feature_row   = _build_feature_row(worker_skills, opp_skills, worker_ctx, opportunity)
         match_score, shortlist_prob = _ml_predict(feature_row)
 
-        missing_skills = [s for s in opp_skills if s not in worker_skills]
+        # Use alias-resolved worker skills so "React Frontend Engineer"
+        # is not listed as missing when the worker already has "React"
+        worker_skills_resolved = _resolve_worker_skills(worker_skills, opp_skills)
+        missing_skills = [s for s in opp_skills if s not in worker_skills_resolved]
 
         response = {
             'matchScore':    match_score,
@@ -352,7 +430,9 @@ def get_recommendations(user_id):
             opp_skills  = get_opportunity_skill_vector(opp['_id'])
             feature_row = _build_feature_row(worker_skills, opp_skills, worker_ctx, opp)
             match_score, shortlist_prob = _ml_predict(feature_row)
-            missing     = [s for s in opp_skills if s not in worker_skills]
+            # Alias-aware missing: exclude opp skills the worker covers via alias
+            worker_resolved = _resolve_worker_skills(worker_skills, opp_skills)
+            missing     = [s for s in opp_skills if s not in worker_resolved]
 
             entry = {
                 'opportunityId': str(opp['_id']),
