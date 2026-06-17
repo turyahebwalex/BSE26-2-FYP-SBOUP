@@ -62,6 +62,19 @@ const skills = [
   // Marketing / business extras (these names align with curated catalog keys
   // so the learning-engine fallback returns rich resources for them).
   { skillName: 'Digital Marketing', category: 'Business' },
+  // Healthcare (referenced by the nurse worker + Equator Health opportunity)
+  { skillName: 'Nursing', category: 'Other' },
+  { skillName: 'Patient Care', category: 'Other' },
+  { skillName: 'Medication Administration', category: 'Other' },
+  { skillName: 'First Aid', category: 'Other' },
+  { skillName: 'Laboratory Testing', category: 'Technical' },
+  // Agriculture (referenced by the agronomist worker + Savannah Agri opportunity)
+  { skillName: 'Crop Management', category: 'Other' },
+  { skillName: 'Irrigation', category: 'Other' },
+  { skillName: 'Farming', category: 'Other' },
+  { skillName: 'Livestock Management', category: 'Other' },
+  // Technical extras referenced by worker profiles
+  { skillName: 'Docker', category: 'Technical' },
   // Other
   { skillName: 'Cleaning', category: 'Other' },
   { skillName: 'Cooking', category: 'Other' },

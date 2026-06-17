@@ -167,7 +167,13 @@ export const applicationAPI = {
   getApplicationDocuments: (applicationId) => api.get(`/applications/${applicationId}/documents`),
   updateStatus: (id, status) => api.put(`/applications/${id}/status`, { status }),
   withdraw: (id) => api.put(`/applications/${id}/withdraw`),
+
   togglePin: (id) => api.put(`/applications/${id}/pin`),
+  uploadAttachment: (formData) => api.post('/applications/upload-attachment', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  }),
+
 };
 
 // ── Matching ──
