@@ -408,6 +408,11 @@ exports.submitAppeal = async (req, res) => {
       });
     }
 
+    // Initialize appeal object for older opportunities where it might be undefined
+    if (!opportunity.appeal) {
+      opportunity.appeal = { status: 'none' };
+    }
+
     if (opportunity.appeal.status !== 'none') {
       return res.status(400).json({ 
         error: 'An appeal has already been submitted for this opportunity.' 
