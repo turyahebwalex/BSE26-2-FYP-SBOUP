@@ -38,7 +38,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=5000
-      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      - MONGODB_URI=${MONGODB_URI}
       - REDIS_HOST=localhost
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
@@ -87,9 +87,7 @@ services:
       - "5001:5001"
     environment:
       - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
-    depends_on:
-      - mongodb
+      - MONGODB_URI=${MONGODB_URI}
     networks:
       - sboup-network
 
@@ -188,11 +186,9 @@ services:
       - "5005:5005"
     environment:
       - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - MONGODB_URI=${MONGODB_URI}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-    depends_on:
-      - mongodb
     networks:
       - sboup-network
 
