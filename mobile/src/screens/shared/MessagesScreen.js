@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -23,139 +22,24 @@ import { useAuth } from '../../context/AuthContext';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FILTER_CHIPS = ['Workers', 'Employers', 'Companies'];
 
-// ─── Helper: open the real company jobs/profile screen ───────────────────
-const navigateToCompanyProfile = (navigation, companyId) => {
-  if (!navigation || !companyId) return;
+// ─── Helper: Build image URL ──────────────────────────────────────────────────
 const getImageUrl = (imagePath) => {
   if (!imagePath) return null;
-  
-  
   if (imagePath.startsWith('http')) return imagePath;
-  
+
   const staticBaseUrl = BASE_URL.replace('/api', '');
-  
-
   const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
-  const fullUrl = `${staticBaseUrl}${cleanPath}`;
-  
-  console.log(' Image URL:', fullUrl); // Debug log
-  
-  return fullUrl;
+  return `${staticBaseUrl}${cleanPath}`;
 };
-
-
-const ROOT_STACK_NAME = 'MainStack';
-
-  try {
-    navigation.navigate('CompanyProfile', { companyId });
-  } catch {
-    navigation.getParent()?.navigate('MessagesTab', {
-      screen: 'CompanyProfile',
-      params: { companyId },
-    });
-  }
-};
-
-
 
 // ─── People Card ──────────────────────────────────────────────────────────────
-// Match badge sits in the top-right corner of the card.
-const PeopleCard = ({ item, onMessage, navigation }) => (
-  <View style={styles.personCard}>
-    {/* ── Match badge — top-right corner ── */}
-    {item.match != null && (
-      <View style={styles.matchBadge}>
-        <Ionicons name="sparkles" size={11} color="#059669" />
-        <Text style={styles.matchText}>{item.match}% Match</Text>
-      </View>
-    )}
-const AvatarCircle = ({ name, size = 48, online = false, avatar }) => {
-  const [imageError, setImageError] = useState(false);
-  const [imageLoading, setImageLoading] = useState(true);
-  const imageUrl = getImageUrl(avatar);
-
-  return (
-    <View style={{ position: 'relative' }}>
-      {avatar && imageUrl && !imageError ? (
-        <>
-          {imageLoading && (
-            <View
-              style={{
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                backgroundColor: '#F3F4F6',
-                justifyContent: 'center',
-                alignItems: 'center',
-                position: 'absolute',
-                zIndex: 1,
-              }}
-            >
-              <ActivityIndicator size="small" color="#F97316" />
-            </View>
-          )}
-          <Image
-            source={{ uri: imageUrl }}
-            style={{
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-              borderWidth: 2,
-              borderColor: '#fff',
-            }}
-            onLoadStart={() => setImageLoading(true)}
-            onLoadEnd={() => setImageLoading(false)}
-            onError={() => {
-              setImageError(true);
-              setImageLoading(false);
-            }}
-          />
-        </>
-      ) : (
-        <View
-          style={{
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: '#F97316',
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 2,
-            borderColor: '#fff',
-          }}
-        >
-          <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: '#fff' }}>
-            {name ? name.charAt(0).toUpperCase() : '?'}
-          </Text>
-        </View>
-      )}
-      {online && (
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 1,
-            right: 1,
-            width: 12,
-            height: 12,
-            borderRadius: 6,
-            backgroundColor: '#22C55E',
-            borderWidth: 2,
-            borderColor: '#fff',
-          }}
-        />
-      )}
-    </View>
-  );
-};
-
-
 const PeopleCard = ({ item, onMessage, navigation }) => {
   const [avatarError, setAvatarError] = useState(false);
   const imageUrl = getImageUrl(item.avatar);
 
   return (
     <View style={styles.personCard}>
-    
+      {/* Match badge */}
       {item.match != null && (
         <View style={styles.matchBadge}>
           <Ionicons name="sparkles" size={11} color="#059669" />
@@ -163,6 +47,7 @@ const PeopleCard = ({ item, onMessage, navigation }) => {
         </View>
       )}
 
+      {/* Avatar */}
       <View style={{ width: 64, alignItems: 'center' }}>
         {item.avatar && imageUrl && !avatarError ? (
           <Image
@@ -196,6 +81,7 @@ const PeopleCard = ({ item, onMessage, navigation }) => {
         )}
       </View>
 
+      {/* Details */}
       <View style={styles.personDetails}>
         <View style={styles.nameRow}>
           <Text style={styles.personName} numberOfLines={1}>
@@ -258,12 +144,12 @@ const PeopleCard = ({ item, onMessage, navigation }) => {
 
 // ─── Search Tab ───────────────────────────────────────────────────────────────
 const SearchTab = ({ navigation }) => {
-  const [query, setQuery]           = useState('');
+  const [query, setQuery] = useState('');
   const [activeChip, setActiveChip] = useState('Workers');
-  const [results, setResults]       = useState([]);
-  const [loading, setLoading]       = useState(false);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     setResults([]);
@@ -327,10 +213,10 @@ const SearchTab = ({ navigation }) => {
 
   const handleMessage = (item) => {
     navigation.navigate('Chat', {
-      userId:     item.id || item._id,
-      userName:   item.name,
+      userId: item.id || item._id,
+      userName: item.name,
       userAvatar: item.avatar,
-      userRole:   item.role,
+      userRole: item.role,
     });
   };
 
@@ -546,7 +432,7 @@ const MessagesScreen = ({ navigation }) => {
 
   const headerConfig = {
     search: { title: 'Messaging Hub', rightAction: null },
-    inbox:  { title: 'Inbox',         rightAction: null },
+    inbox: { title: 'Inbox', rightAction: null },
     notifications: {
       title: 'Notifications',
       rightAction: (
@@ -555,9 +441,7 @@ const MessagesScreen = ({ navigation }) => {
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Ionicons
-            name={
-              unreadNotificationCount > 0 ? 'checkbox-outline' : 'checkbox'
-            }
+            name={unreadNotificationCount > 0 ? 'checkbox-outline' : 'checkbox'}
             size={24}
             color="#F97316"
           />
@@ -602,8 +486,8 @@ const MessagesScreen = ({ navigation }) => {
 
       <View style={styles.tabBar}>
         {[
-          { key: 'search',        label: 'Search' },
-          { key: 'inbox',         label: 'Messages',      count: unreadMessageCount },
+          { key: 'search', label: 'Search' },
+          { key: 'inbox', label: 'Messages', count: unreadMessageCount },
           { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
         ].map(({ key, label, count }) => (
           <TouchableOpacity
@@ -642,40 +526,126 @@ const MessagesScreen = ({ navigation }) => {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  center:    { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
 
-  header:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 12 },
-  backBtn:     { width: 40, padding: 2 },
-  headerTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  backBtn: { width: 40, padding: 2 },
+  headerTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#1F2937',
+    textAlign: 'center',
+  },
   headerRight: { width: 40, alignItems: 'flex-end' },
 
-  tabBar:         { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#fff', marginBottom: 4 },
-  tabItem:        { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
-  tabLabel:       { fontSize: 14, fontWeight: '500', color: '#9CA3AF' },
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#fff',
+    marginBottom: 4,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    position: 'relative',
+  },
+  tabLabel: { fontSize: 14, fontWeight: '500', color: '#9CA3AF' },
   tabLabelActive: { color: '#F97316', fontWeight: '700' },
-  tabIndicator:   { position: 'absolute', bottom: 0, left: '20%', right: '20%', height: 2, borderRadius: 2, backgroundColor: '#F97316' },
-  tabBadge:       { marginLeft: 6, backgroundColor: '#F97316', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
-  tabBadgeText:   { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: '20%',
+    right: '20%',
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#F97316',
+  },
+  tabBadge: {
+    marginLeft: 6,
+    backgroundColor: '#F97316',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
 
   scrollContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 16 },
-  searchBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 25, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 14 },
-  searchInput:   { flex: 1, fontSize: 14, color: '#1F2937' },
-  chipsRow:      { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  chip:          { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#fff' },
-  chipActive:    { borderColor: '#F97316', backgroundColor: '#FFF7ED' },
-  chipText:      { fontSize: 13, fontWeight: '500', color: '#6B7280' },
-  chipTextActive:{ color: '#F97316' },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 25,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 14,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: '#1F2937' },
+  chipsRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  chip: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+  },
+  chipActive: { borderColor: '#F97316', backgroundColor: '#FFF7ED' },
+  chipText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  chipTextActive: { color: '#F97316' },
 
-  sectionInfo:     { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+  sectionInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
   sectionInfoText: { fontSize: 12, color: '#6B7280', flex: 1, lineHeight: 17 },
 
-  personCard:    { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2, position: 'relative' },
-  avatarIcon:    { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  personCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    position: 'relative',
+  },
+  avatarIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
   personDetails: { flex: 1, marginLeft: 14 },
-  nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
-  personName:    { fontSize: 15, fontWeight: '700', color: '#1F2937', flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  personName: { fontSize: 15, fontWeight: '700', color: '#1F2937', flex: 1 },
 
-  matchBadge:    {
+  matchBadge: {
     position: 'absolute',
     top: 12,
     right: 12,
@@ -688,26 +658,53 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     zIndex: 1,
   },
-  matchText:     { fontSize: 11, fontWeight: '700', color: '#059669' },
+  matchText: { fontSize: 11, fontWeight: '700', color: '#059669' },
 
-  personRole:    { fontSize: 13, color: '#6B7280', marginBottom: 4 },
-  metaRow:       { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
-  metaText:      { fontSize: 12, color: '#6B7280', flex: 1 },
-  locationText:  { fontSize: 12, color: '#9CA3AF', flex: 1 },
+  personRole: { fontSize: 13, color: '#6B7280', marginBottom: 4 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
+  metaText: { fontSize: 12, color: '#6B7280', flex: 1 },
+  locationText: { fontSize: 12, color: '#9CA3AF', flex: 1 },
 
-  cardActions:         { flexDirection: 'row', gap: 8, marginTop: 10 },
-  profileBtn:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderColor: '#F97316', borderRadius: 10, paddingVertical: 9 },
-  profileBtnText:      { fontSize: 13, fontWeight: '600', color: '#F97316' },
-  messageBtn:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#F97316', borderRadius: 10, paddingVertical: 10 },
+  cardActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  profileBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderWidth: 1.5,
+    borderColor: '#F97316',
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  profileBtnText: { fontSize: 13, fontWeight: '600', color: '#F97316' },
+  messageBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#F97316',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
   messageBtnSecondary: { flex: 1 },
-  messageBtnText:      { fontSize: 13, fontWeight: '700', color: '#fff' },
+  messageBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
 
-  errorBanner:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', borderRadius: 8, padding: 10, gap: 6, marginTop: 10 },
-  errorText:      { fontSize: 13, color: '#EF4444', flex: 1 },
-  retryText:      { fontSize: 13, color: '#F97316', fontWeight: '600' },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+    marginTop: 10,
+  },
+  errorText: { fontSize: 13, color: '#EF4444', flex: 1 },
+  retryText: { fontSize: 13, color: '#F97316', fontWeight: '600' },
   emptyContainer: { alignItems: 'center', paddingVertical: 48, gap: 8 },
-  emptyTitle:     { fontSize: 15, fontWeight: '600', color: '#374151' },
-  emptyText:      { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
+  emptyTitle: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  emptyText: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
 });
 
 export default MessagesScreen;

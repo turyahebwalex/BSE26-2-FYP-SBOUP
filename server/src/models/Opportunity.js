@@ -84,9 +84,10 @@ const opportunitySchema = new mongoose.Schema(
       validate: {
         validator: function(v) {
           if (!v) return true;
-          return /^https?:\/\//.test(v);
+          // Allow http(s) links, mailto:, tel: and whatsapp links
+          return /^(https?:\/\/|mailto:|tel:|whatsapp:)/.test(v);
         },
-        message: 'External URL must start with http:// or https://'
+        message: 'External URL must start with http://, https://, mailto:, tel:, or whatsapp:'
       }
     },
     

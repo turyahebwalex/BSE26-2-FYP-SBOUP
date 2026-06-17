@@ -76,7 +76,7 @@ const createOpportunity = Joi.object({
   applicationMethods: Joi.array()
     .items(Joi.string().valid('in_app', 'message', 'external_link'))
     .default(['in_app']),
-  externalApplyUrl: Joi.string().uri().allow('', null),
+  externalApplyUrl: Joi.string().allow('', null),
   messageInstructions: Joi.string().max(1000).allow('', null),
   requiredDocuments: Joi.array()
     .items(Joi.string().valid('cv', 'cover_letter', 'portfolio', 'certificates', 'references'))
@@ -94,7 +94,20 @@ const createOpportunity = Joi.object({
   applicationMethod: Joi.string().valid('internal', 'external').default('internal'),
   externalLink: Joi.string().uri().allow(''),
   mediaUrls: Joi.array().items(Joi.string().uri()).default([]),
-});
+}).custom((value, helpers) => {
+  // If employer selected external_link as an application method, ensure an external URL is provided
+  try {
+    if (Array.isArray(value.applicationMethods) && value.applicationMethods.includes('external_link')) {
+      const url = value.externalApplyUrl || value.externalLink || '';
+      if (!String(url).trim()) {
+        return helpers.message('externalApplyUrl is required when applicationMethods includes external_link');
+      }
+    }
+  } catch (err) {
+    // ignore and let other validation handle it
+  }
+  return value;
+}, 'Application Creation Validation');
 
 const applyForOpportunity = Joi.object({
   opportunityId: Joi.string().hex().length(24).required(),
