@@ -176,9 +176,19 @@ def _load_skill_names(skill_ids):
 
 def _coerce_salary_range(payload):
     comp = payload.get('compensationRange') or {}
+    # Support multiple payload shapes: modern 'compensationRange', legacy
+    # snake_case salary fields, or camelCase fields used by some test scripts.
     min_value = payload.get('salary_min_ugx')
     max_value = payload.get('salary_max_ugx')
     mid_value = payload.get('salary_mid_ugx')
+
+    # Common alternate names (camelCase / different conventions)
+    if min_value in {None, '', 'Unknown'}:
+        min_value = payload.get('compensationMin') or payload.get('compensation_min') or comp.get('min')
+    if max_value in {None, '', 'Unknown'}:
+        max_value = payload.get('compensationMax') or payload.get('compensation_max') or comp.get('max')
+    if mid_value in {None, '', 'Unknown'}:
+        mid_value = payload.get('compensationMid') or payload.get('compensation_mid') or comp.get('mid')
     currency = _clean_text(comp.get('currency') or payload.get('salary_currency') or 'UGX') or 'UGX'
     source = _clean_text(payload.get('salary_currency_source') or comp.get('currencySource') or 'manual') or 'manual'
 
@@ -212,43 +222,121 @@ def _coerce_salary_range(payload):
     }
 
 
+def _parse_description(desc):
+    """Splits a single description string into desc, reqs, bens based on common keywords."""
+    desc = _clean_text(desc)
+    if not desc:
+        return '', '', ''
+    
+    import re
+    req_match = re.search(r'\b(requirements|qualifications|what you need)\b[:\n-]', desc, re.IGNORECASE)
+    ben_match = re.search(r'\b(benefits|what we offer|perks)\b[:\n-]', desc, re.IGNORECASE)
+    
+    req_idx = req_match.start() if req_match else -1
+    ben_idx = ben_match.start() if ben_match else -1
+    
+    if req_idx != -1 and ben_idx != -1:
+        if req_idx < ben_idx:
+            return desc[:req_idx].strip(), desc[req_idx:ben_idx].strip(), desc[ben_idx:].strip()
+        else:
+            return desc[:ben_idx].strip(), desc[req_idx:].strip(), desc[ben_idx:req_idx].strip()
+    elif req_idx != -1:
+        return desc[:req_idx].strip(), desc[req_idx:].strip(), ''
+    elif ben_idx != -1:
+        return desc[:ben_idx].strip(), '', desc[ben_idx:].strip()
+    
+    # If no headers found, we don't want empty reqs/bens because the ML model penalizes it.
+    # We share the description content to populate the features.
+    half = len(desc) // 2
+    return desc, desc[half:], desc[half:]
+
+
 def _compose_model_text(payload, company_doc=None, skill_names=None):
+    """Build text blob for TF-IDF — must match retrain_model.py build_text() exactly.
+
+    Training format: 'field: value' for each non-empty field, joined by space.
+    Training fields (13): title, description, requirements, benefits, location,
+        department, industry, function, employment_type, required_experience,
+        required_education, salary_currency, salary_currency_source.
+    """
     company_doc = company_doc or {}
     skill_names = skill_names or []
 
-    # Match notebook's combine_text exactly:
-    # fields = ['title', 'company_profile', 'description', 'requirements', 'benefits']
-    # plain values joined by space, no field: prefixes
-    text_fields = ['title', 'description', 'requirements', 'benefits']
+    compensation = _coerce_salary_range(payload)
+
+    # Extract hidden fields from monolithic description
+    raw_desc = payload.get('description', '')
+    parsed_desc, parsed_reqs, parsed_bens = _parse_description(raw_desc)
+
+    # Map SBOUP payload keys → training CSV column names
+    requirements_text = _clean_text(payload.get('requirements')) or parsed_reqs
+    if not requirements_text and skill_names:
+        requirements_text = ' '.join(skill_names)
+
+    benefits_text = _clean_text(payload.get('benefits')) or parsed_bens
+
+    mapped = {
+        'title': _clean_text(payload.get('title')),
+        'description': parsed_desc or _clean_text(raw_desc),
+        'requirements': requirements_text,
+        'benefits': benefits_text,
+        'location': _clean_text(payload.get('location')),
+        'department': _clean_text(payload.get('department')),
+        'industry': _clean_text(payload.get('industry') or payload.get('category')),
+        'function': _clean_text(payload.get('function') or payload.get('category')),
+        'employment_type': _clean_text(
+            payload.get('employment_type') or payload.get('employmentType')
+        ),
+        'required_experience': _clean_text(
+            payload.get('required_experience') or payload.get('experienceLevel')
+        ),
+        'required_education': _clean_text(payload.get('required_education')),
+        'salary_currency': compensation.get('currency', ''),
+        'salary_currency_source': compensation.get('currencySource', ''),
+    }
+
+    # company_profile from company doc or payload (present in training CSV)
+    company_profile = (
+        _clean_text(company_doc.get('description'))
+        or _clean_text(payload.get('company_profile'))
+    )
+
+    # Build text exactly like retrain_model.py build_text(): "field: value"
+    training_text_fields = [
+        'title', 'description', 'requirements', 'benefits',
+        'location', 'department', 'industry', 'function',
+        'employment_type', 'required_experience', 'required_education',
+        'salary_currency', 'salary_currency_source',
+    ]
 
     parts = []
-    for field in text_fields:
-        value = _clean_text(payload.get(field))
+    for field in training_text_fields:
+        value = mapped.get(field, '')
         if value and value.lower() != 'unknown':
-            parts.append(value)
+            parts.append(f'{field}: {value}')
 
-    # company_profile from company doc or payload
-    company_profile = _clean_text(company_doc.get('description')) or _clean_text(payload.get('company_profile'))
     if company_profile and company_profile.lower() != 'unknown':
-        parts.append(company_profile)
+        parts.append(f'company_profile: {company_profile}')
 
-    # skill names as plain text
-    if skill_names:
-        parts.append(' '.join(skill_names))
-
-    compensation = _coerce_salary_range(payload)
     return ' '.join(parts), compensation
 
 
 def _build_numeric_features(payload, company_doc=None, skill_names=None):
     company_doc = company_doc or {}
     skill_names = skill_names or []
-    requirements_text = _clean_text(payload.get('requirements')) or ' '.join(skill_names)
+    
+    raw_desc = payload.get('description', '')
+    parsed_desc, parsed_reqs, parsed_bens = _parse_description(raw_desc)
+    
+    requirements_text = _clean_text(payload.get('requirements')) or parsed_reqs or ' '.join(skill_names)
     company_profile_text = _clean_text(company_doc.get('description')) or _clean_text(payload.get('company_profile'))
-    benefits_text = _clean_text(payload.get('benefits')) or company_profile_text
+    benefits_text = _clean_text(payload.get('benefits')) or parsed_bens or company_profile_text
 
     compensation = _coerce_salary_range(payload)
-    company_logo_flag = _normalize_bool(company_doc.get('logoUrl') or payload.get('has_company_logo'))
+    # Default to 1 (logo present) because SBOUP has no logo upload UI — permanently
+    # penalising all employers with 0 creates a systematic false-positive bias.
+    raw_logo = company_doc.get('logoUrl') or payload.get('has_company_logo')
+    company_logo_flag = _normalize_bool(raw_logo) if raw_logo is not None else 1
     telecommuting_flag = _normalize_bool(payload.get('isRemote') or payload.get('telecommuting'))
     questions_flag = _normalize_bool(payload.get('has_questions') or payload.get('applicationMethod') == 'external' or payload.get('externalLink'))
 
@@ -1035,7 +1123,7 @@ def _evaluate_model_metrics():
 
 
 _load_model_artifacts()
-_evaluate_model_metrics()
+# _evaluate_model_metrics()  # Disable blocking evaluation at startup
 
 
 @app.route('/api/detect', methods=['POST'])
@@ -1481,12 +1569,21 @@ def training_export():
 
 @app.route('/api/health', methods=['GET'])
 def health():
+    # Determine database connection type
+    db_type = 'hosted (MongoDB Atlas)' if 'mongodb+srv' in MONGODB_URI or 'mongodb.net' in MONGODB_URI else 'local'
+    db_name = db.name
+    
     return jsonify({
         'status': 'ok',
         'service': 'fraud-detection',
         'model_version': MODEL_VERSION,
         'last_trained_at': MODEL_LAST_TRAINED_AT,
         'model_available': MODEL_AVAILABLE,
+        'database': {
+            'type': db_type,
+            'name': db_name,
+            'uri': MONGODB_URI.split('@')[0] + '@***' if '@' in MONGODB_URI else MONGODB_URI.split(':')[0] + ':***',
+        }
     })
 
 
