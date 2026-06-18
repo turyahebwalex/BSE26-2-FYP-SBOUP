@@ -121,47 +121,42 @@ exports.getConversation = async (req, res) => {
   try {
     const { userId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-    
-    // Get messages between the two users
+
+    // ✅ Fetch ALL messages (including blocked) – do NOT filter by moderationStatus
     const messages = await Message.find({
       $or: [
         { senderId: req.user._id, receiverId: userId },
         { senderId: userId, receiverId: req.user._id },
       ],
-      deletedBy: { $ne: req.user._id }, // Exclude deleted messages
-      moderationStatus: 'normal',
+      deletedBy: { $ne: req.user._id }, // Exclude messages the current user deleted
+      // ❌ moderationStatus: 'normal',  // REMOVED – so blocked messages appear
     })
-      .sort({ sentAt: -1 }) // Get newest first for pagination
+      .sort({ sentAt: -1 })
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit))
       .populate('senderId', 'fullName email role avatar isOnline lastSeenAt')
       .populate('receiverId', 'fullName email role avatar isOnline lastSeenAt')
       .lean();
 
-    // Get unread messages that belong to current user
+    // Mark unread messages as read (only for normal ones – skip blocked)
     const unreadMessageIds = messages
-      .filter(msg => 
-        msg.receiverId._id.toString() === req.user._id.toString() && 
-        !msg.readStatus
+      .filter(msg =>
+        msg.receiverId._id.toString() === req.user._id.toString() &&
+        !msg.readStatus &&
+        msg.moderationStatus === 'normal' // ✅ Only mark normal messages as read
       )
       .map(msg => msg._id);
-    
-    // Mark unread messages as read
+
     if (unreadMessageIds.length > 0) {
       await Message.updateMany(
         { _id: { $in: unreadMessageIds } },
-        { 
-          readStatus: true, 
-          status: 'read',
-          readAt: new Date()
-        }
+        { readStatus: true, status: 'read', readAt: new Date() }
       );
-      
-      // Notify sender that messages were read
+
       const io = req.app.get('io');
       if (io) {
-        io.to(userId.toString()).emit('messages_read', { 
-          messageIds: unreadMessageIds, 
+        io.to(userId.toString()).emit('messages_read', {
+          messageIds: unreadMessageIds,
           readerId: req.user._id,
           conversationId: userId
         });
@@ -176,17 +171,17 @@ exports.getConversation = async (req, res) => {
       isOwnMessage: msg.senderId._id.toString() === req.user._id.toString(),
     })).reverse();
 
-    // Get total count for pagination
+    // ✅ Count ALL messages (including blocked) for pagination
     const total = await Message.countDocuments({
       $or: [
         { senderId: req.user._id, receiverId: userId },
         { senderId: userId, receiverId: req.user._id },
       ],
       deletedBy: { $ne: req.user._id },
-      moderationStatus: 'normal',
+      // ❌ moderationStatus: 'normal',  // REMOVED – count ALL messages
     });
 
-    res.json({ 
+    res.json({
       success: true,
       messages: formattedMessages,
       pagination: {
@@ -211,7 +206,7 @@ exports.getInbox = async (req, res) => {
         $match: {
           $or: [{ senderId: userId }, { receiverId: userId }],
           deletedBy: { $ne: userId },
-          moderationStatus: 'normal',
+          moderationStatus: 'normal', // Keep this – only show conversations with at least one normal message
         },
       },
       { $sort: { sentAt: -1 } },
@@ -287,6 +282,7 @@ exports.getUnreadCount = async (req, res) => {
     const count = await Message.countDocuments({
       receiverId: req.user._id,
       readStatus: false,
+      moderationStatus: 'normal', // Only count normal messages as unread
     });
     res.json({ unreadCount: count });
   } catch (error) {

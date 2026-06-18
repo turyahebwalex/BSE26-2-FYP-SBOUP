@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native'; // ← new import
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -57,6 +58,7 @@ const ChatScreen = ({ route, navigation }) => {
   const [messages,           setMessages]           = useState([]);
   const [messageText,        setMessageText]        = useState('');
   const [loading,            setLoading]            = useState(true);
+  const [refreshing,         setRefreshing]         = useState(false); // ← new state
   const [sending,            setSending]            = useState(false);
   const [error,              setError]              = useState(null);
   const [showAttachments,    setShowAttachments]    = useState(false);
@@ -193,9 +195,16 @@ const ChatScreen = ({ route, navigation }) => {
       else setError('Failed to load messages. Check your connection.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
       setLoadingMore(false);
     }
   }, [userId, currentUserId, navigation, markMessagesAsRead]);
+
+  // ─── Pull-to-refresh handler ──────────────────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchMessages(1, false);
+  }, [fetchMessages]);
 
   // ─── Send message ─────────────────────────────────────────────────────────────
   const sendMessage = async (content, type = 'text', attachment = null) => {
@@ -739,6 +748,15 @@ const ChatScreen = ({ route, navigation }) => {
   useEffect(() => { fetchCurrentUser(); },          [fetchCurrentUser]);
   useEffect(() => { fetchMessages(1, false); },     [fetchMessages]);
 
+  // ─── NEW: Refresh on focus ──────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      if (!loading) {
+        fetchMessages(1, false);
+      }
+    }, [fetchMessages, loading])
+  );
+
   // ─── Attachment modal ─────────────────────────────────────────────────────────
   const AttachmentModal = () => (
     <Modal
@@ -888,6 +906,8 @@ const ChatScreen = ({ route, navigation }) => {
               if (nativeEvent.contentOffset.y < 50) loadMoreMessages();
             }}
             scrollEventThrottle={200}
+            refreshing={refreshing}           // ← new prop
+            onRefresh={handleRefresh}         // ← new prop
             ListHeaderComponent={
               loadingMore ? (
                 <View style={{ paddingVertical: 10, alignItems: 'center' }}>
