@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -23,158 +22,152 @@ import { useAuth } from '../../context/AuthContext';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FILTER_CHIPS = ['Workers', 'Employers', 'Companies'];
 
-// ─── Helper: open the real company jobs/profile screen ───────────────────
-const navigateToCompanyProfile = (navigation, companyId) => {
-  if (!navigation || !companyId) return;
+// ─── Helper: Build image URL ──────────────────────────────────────────────────
+const getImageUrl = (imagePath) => {
+  if (!imagePath) return null;
+  if (imagePath.startsWith('http')) return imagePath;
 
-  try {
-    navigation.navigate('CompanyProfile', { companyId });
-  } catch {
-    navigation.getParent()?.navigate('MessagesTab', {
-      screen: 'CompanyProfile',
-      params: { companyId },
-    });
-  }
+  const staticBaseUrl = BASE_URL.replace('/api', '');
+  const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+  return `${staticBaseUrl}${cleanPath}`;
 };
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-const AvatarCircle = ({ name, size = 48, online = false, avatar }) => (
-  <View style={{ position: 'relative' }}>
-    {avatar ? (
-      <Image
-        source={{ uri: avatar }}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: 2,
-          borderColor: '#fff',
-        }}
-      />
-    ) : (
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: '#F97316',
-          justifyContent: 'center',
-          alignItems: 'center',
-          borderWidth: 2,
-          borderColor: '#fff',
-        }}
-      >
-        <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: '#fff' }}>
-          {name ? name.charAt(0).toUpperCase() : '?'}
-        </Text>
-      </View>
-    )}
-    {online && (
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 1,
-          right: 1,
-          width: 12,
-          height: 12,
-          borderRadius: 6,
-          backgroundColor: '#22C55E',
-          borderWidth: 2,
-          borderColor: '#fff',
-        }}
-      />
-    )}
-  </View>
-);
-
 // ─── People Card ──────────────────────────────────────────────────────────────
-// Match badge sits in the top-right corner of the card.
-const PeopleCard = ({ item, onMessage, navigation }) => (
-  <View style={styles.personCard}>
-    {/* ── Match badge — top-right corner ── */}
-    {item.match != null && (
-      <View style={styles.matchBadge}>
-        <Ionicons name="sparkles" size={11} color="#059669" />
-        <Text style={styles.matchText}>{item.match}% Match</Text>
+const PeopleCard = ({ item, onMessage, navigation }) => {
+  const [avatarError, setAvatarError] = useState(false);
+  const avatarValue =
+    item.avatar || item.profileImage || item.image || item.userAvatar || item.profile?.avatar;
+  const imageUrl = getImageUrl(avatarValue);
+
+  return (
+    <View style={styles.personCard}>
+      {/* Match badge */}
+      {item.match != null && (
+        <View style={styles.matchBadge}>
+          <Ionicons name="sparkles" size={11} color="#059669" />
+          <Text style={styles.matchText}>{item.match}% Match</Text>
+        </View>
+      )}
+
+      {/* Avatar */}
+      <View style={{ width: 64, alignItems: 'center' }}>
+        {item.avatar && imageUrl && !avatarError ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              borderWidth: 2,
+              borderColor: '#fff',
+            }}
+            onError={() => setAvatarError(true)}
+          />
+        ) : (
+          <View
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor: '#F97316',
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderWidth: 2,
+              borderColor: '#fff',
+            }}
+          >
+            <Text style={{ fontSize: 28, fontWeight: '700', color: '#fff' }}>
+              {item.name ? item.name.charAt(0).toUpperCase() : '?'}
+            </Text>
+          </View>
+        )}
       </View>
-    )}
 
-    <AvatarCircle name={item.name} size={64} avatar={item.avatar} />
+      {/* Details */}
+      <View style={styles.personDetails}>
+        <View style={styles.nameRow}>
+          <Text style={styles.personName} numberOfLines={1}>
+            {item.name}
+          </Text>
+        </View>
 
-    <View style={styles.personDetails}>
-      {/* Name */}
-      <View style={styles.nameRow}>
-        <Text style={styles.personName} numberOfLines={1}>
-          {item.name}
+        <Text style={styles.personRole} numberOfLines={1}>
+          {item.title ||
+            item.headline ||
+            (item.role === 'employer' ? 'Employer' : 'Skilled Worker')}
         </Text>
-      </View>
 
-      {/* Title / headline */}
-      <Text style={styles.personRole} numberOfLines={1}>
-        {item.title ||
-          item.headline ||
-          (item.role === 'employer' ? 'Employer' : 'Skilled Worker')}
-      </Text>
-
-      {/* Company (employers only) */}
-      {item.companyName && (
-        <View style={styles.metaRow}>
-          <Ionicons name="business-outline" size={13} color="#6B7280" />
-          <Text style={styles.metaText} numberOfLines={1}>
-            {item.companyName}
-          </Text>
-        </View>
-      )}
-
-      {/* Location */}
-      {item.location && (
-        <View style={styles.metaRow}>
-          <Ionicons name="location-outline" size={13} color="#9CA3AF" />
-          <Text style={styles.locationText} numberOfLines={1}>
-            {item.location}
-          </Text>
-        </View>
-      )}
-
-      {/* Action buttons */}
-      <View style={styles.cardActions}>
-        {/* View Jobs — FIX 2: uses nested navigator helper */}
-        {item.role === 'employer' && item.companyId && (
-          <TouchableOpacity
-  style={styles.profileBtn}
-  onPress={() => navigation.navigate('CompanyProfile', { companyId: item.companyId })}
-  activeOpacity={0.8}
->
-  <Ionicons name="eye-outline" size={15} color="#F97316" />
-  <Text style={styles.profileBtnText}>View Jobs</Text>
-</TouchableOpacity>
+        {item.companyName && (
+          <View style={styles.metaRow}>
+            <Ionicons name="business-outline" size={13} color="#6B7280" />
+            <Text style={styles.metaText} numberOfLines={1}>
+              {item.companyName}
+            </Text>
+          </View>
         )}
 
-        {/* Message button */}
-        <TouchableOpacity
-          style={[
-            styles.messageBtn,
-            item.companyId && styles.messageBtnSecondary,
-          ]}
-          onPress={() => onMessage(item)}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="chatbubble-outline" size={15} color="#fff" />
-          <Text style={styles.messageBtnText}>Message</Text>
-        </TouchableOpacity>
+        {item.location && (
+          <View style={styles.metaRow}>
+            <Ionicons name="location-outline" size={13} color="#9CA3AF" />
+            <Text style={styles.locationText} numberOfLines={1}>
+              {item.location}
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.cardActions}>
+          {item.role === 'employer' && item.companyId ? (
+            <TouchableOpacity
+              style={styles.profileBtn}
+              onPress={() => navigation.navigate('CompanyProfile', { companyId: item.companyId })}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="eye-outline" size={15} color="#F97316" />
+              <Text style={styles.profileBtnText}>View Jobs</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.profileBtn}
+              onPress={() =>
+                navigation.navigate('UserProfile', {
+                  userId: item.id || item._id,
+                  userName: item.name,
+                  userAvatar: item.avatar,
+                  userRole: item.role,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Ionicons name="eye-outline" size={15} color="#F97316" />
+              <Text style={styles.profileBtnText}>View Profile</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.messageBtn,
+              item.companyId && styles.messageBtnSecondary,
+            ]}
+            onPress={() => onMessage(item)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="chatbubble-outline" size={15} color="#fff" />
+            <Text style={styles.messageBtnText}>Message</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
-  </View>
-);
+  );
+};
 
 // ─── Search Tab ───────────────────────────────────────────────────────────────
 const SearchTab = ({ navigation }) => {
-  const [query, setQuery]           = useState('');
+  const [query, setQuery] = useState('');
   const [activeChip, setActiveChip] = useState('Workers');
-  const [results, setResults]       = useState([]);
-  const [loading, setLoading]       = useState(false);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     setResults([]);
@@ -238,14 +231,13 @@ const SearchTab = ({ navigation }) => {
 
   const handleMessage = (item) => {
     navigation.navigate('Chat', {
-      userId:     item.id || item._id,
-      userName:   item.name,
+      userId: item.id || item._id,
+      userName: item.name,
       userAvatar: item.avatar,
-      userRole:   item.role,
+      userRole: item.role,
     });
   };
 
-  // Company card — FIX 2: uses nested navigator helper
   const renderCompanyCard = (item) => (
     <View key={item.id} style={styles.personCard}>
       <View style={[styles.avatarIcon, { backgroundColor: '#3B82F6' }]}>
@@ -255,13 +247,13 @@ const SearchTab = ({ navigation }) => {
         <Text style={styles.personName}>{item.name}</Text>
         <Text style={styles.personRole}>{item.industry || 'Company'}</Text>
         <Text style={styles.locationText}>{item.location}</Text>
-       <TouchableOpacity
-  style={[styles.messageBtn, { backgroundColor: '#3B82F6', marginTop: 10 }]}
-  activeOpacity={0.8}
-  onPress={() => navigation.navigate('CompanyProfile', { companyId: item.id })}
->
-  <Text style={styles.messageBtnText}>View Company Jobs</Text>
-</TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.messageBtn, { backgroundColor: '#3B82F6', marginTop: 10 }]}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('CompanyProfile', { companyId: item.id })}
+        >
+          <Text style={styles.messageBtnText}>View Company Jobs</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -311,7 +303,6 @@ const SearchTab = ({ navigation }) => {
         />
       }
     >
-      {/* Search bar */}
       <View style={styles.searchBar}>
         <Ionicons
           name="search-outline"
@@ -339,7 +330,6 @@ const SearchTab = ({ navigation }) => {
         )}
       </View>
 
-      {/* Filter chips */}
       <View style={styles.chipsRow}>
         {FILTER_CHIPS.map((chip) => (
           <TouchableOpacity
@@ -363,7 +353,6 @@ const SearchTab = ({ navigation }) => {
         ))}
       </View>
 
-      {/* Content */}
       {error ? (
         <View style={styles.errorBanner}>
           <Ionicons name="alert-circle-outline" size={15} color="#EF4444" />
@@ -429,11 +418,17 @@ const NotificationsTab = ({ navigation, notificationsRef }) => (
 );
 
 // ─── Main MessagesScreen ──────────────────────────────────────────────────────
-const MessagesScreen = ({ navigation }) => {
+const MessagesScreen = ({ navigation, route }) => {
   const [activeTab, setActiveTab] = useState('search');
   const { unreadMessageCount, unreadNotificationCount, setUnreadNotificationCount } =
     useAuth();
   const notificationsRef = useRef(null);
+
+  useEffect(() => {
+    if (route?.params?.focusTab === 'search') {
+      setActiveTab('search');
+    }
+  }, [route?.params?.focusTab]);
 
   const markAllNotificationsRead = async () => {
     if (!unreadNotificationCount || unreadNotificationCount === 0) return;
@@ -461,7 +456,7 @@ const MessagesScreen = ({ navigation }) => {
 
   const headerConfig = {
     search: { title: 'Messaging Hub', rightAction: null },
-    inbox:  { title: 'Inbox',         rightAction: null },
+    inbox: { title: 'Inbox', rightAction: null },
     notifications: {
       title: 'Notifications',
       rightAction: (
@@ -470,9 +465,7 @@ const MessagesScreen = ({ navigation }) => {
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Ionicons
-            name={
-              unreadNotificationCount > 0 ? 'checkbox-outline' : 'checkbox'
-            }
+            name={unreadNotificationCount > 0 ? 'checkbox-outline' : 'checkbox'}
             size={24}
             color="#F97316"
           />
@@ -502,104 +495,184 @@ const MessagesScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-back" size={24} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{title}</Text>
-        <View style={styles.headerRight}>{rightAction}</View>
-      </View>
-
-      {/* Tab bar */}
-      <View style={styles.tabBar}>
-        {[
-          { key: 'search',        label: 'Search' },
-          { key: 'inbox',         label: 'Messages',      count: unreadMessageCount },
-          { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
-        ].map(({ key, label, count }) => (
+    <>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
           <TouchableOpacity
-            key={key}
-            style={styles.tabItem}
-            onPress={() => setActiveTab(key)}
-            activeOpacity={0.7}
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === key && styles.tabLabelActive,
-                ]}
-              >
-                {label}
-              </Text>
-              {count > 0 && (
-                <View style={styles.tabBadge}>
-                  <Text style={styles.tabBadgeText}>
-                    {count > 99 ? '99+' : count}
-                  </Text>
-                </View>
-              )}
-            </View>
-            {activeTab === key && <View style={styles.tabIndicator} />}
+            <Ionicons name="chevron-back" size={24} color="#1F2937" />
           </TouchableOpacity>
-        ))}
-      </View>
+          <Text style={styles.headerTitle}>{title}</Text>
+          <View style={styles.headerRight}>{rightAction}</View>
+        </View>
 
-      {renderTabContent()}
-    </SafeAreaView>
+        <View style={styles.tabBar}>
+          {[
+            { key: 'search', label: 'Search' },
+            { key: 'inbox', label: 'Messages', count: unreadMessageCount },
+            { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
+          ].map(({ key, label, count }) => (
+            <TouchableOpacity
+              key={key}
+              style={styles.tabItem}
+              onPress={() => setActiveTab(key)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    activeTab === key && styles.tabLabelActive,
+                  ]}
+                >
+                  {label}
+                </Text>
+                {count > 0 && (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>
+                      {count > 99 ? '99+' : count}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {activeTab === key && <View style={styles.tabIndicator} />}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {renderTabContent()}
+      </SafeAreaView>
+
+    </>
   );
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  center:    { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
 
-  // Header
-  header:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 12 },
-  backBtn:     { width: 40, padding: 2 },
-  headerTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  backBtn: { width: 40, padding: 2 },
+  headerTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#1F2937',
+    textAlign: 'center',
+  },
   headerRight: { width: 40, alignItems: 'flex-end' },
 
-  // Tab bar
-  tabBar:         { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#fff', marginBottom: 4 },
-  tabItem:        { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
-  tabLabel:       { fontSize: 14, fontWeight: '500', color: '#9CA3AF' },
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#fff',
+    marginBottom: 4,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    position: 'relative',
+  },
+  tabLabel: { fontSize: 14, fontWeight: '500', color: '#9CA3AF' },
   tabLabelActive: { color: '#F97316', fontWeight: '700' },
-  tabIndicator:   { position: 'absolute', bottom: 0, left: '20%', right: '20%', height: 2, borderRadius: 2, backgroundColor: '#F97316' },
-  tabBadge:       { marginLeft: 6, backgroundColor: '#F97316', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
-  tabBadgeText:   { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: '20%',
+    right: '20%',
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#F97316',
+  },
+  tabBadge: {
+    marginLeft: 6,
+    backgroundColor: '#F97316',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
 
-  // Scroll / search
   scrollContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 16 },
-  searchBar:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 25, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 14 },
-  searchInput:   { flex: 1, fontSize: 14, color: '#1F2937' },
-  chipsRow:      { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  chip:          { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#fff' },
-  chipActive:    { borderColor: '#F97316', backgroundColor: '#FFF7ED' },
-  chipText:      { fontSize: 13, fontWeight: '500', color: '#6B7280' },
-  chipTextActive:{ color: '#F97316' },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 25,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 14,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: '#1F2937' },
+  chipsRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  chip: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+  },
+  chipActive: { borderColor: '#F97316', backgroundColor: '#FFF7ED' },
+  chipText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  chipTextActive: { color: '#F97316' },
 
-  // Section header
-  sectionInfo:     { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+  sectionInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
   sectionInfoText: { fontSize: 12, color: '#6B7280', flex: 1, lineHeight: 17 },
 
-  // ── Person card ──
-  // FIX: position: 'relative' enables the absolute match badge
-  personCard:    { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2, position: 'relative' },
-  avatarIcon:    { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  personCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    position: 'relative',
+  },
+  avatarIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
   personDetails: { flex: 1, marginLeft: 14 },
-  nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
-  personName:    { fontSize: 15, fontWeight: '700', color: '#1F2937', flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  personName: { fontSize: 15, fontWeight: '700', color: '#1F2937', flex: 1 },
 
-  // FIX: Match badge now sits in top-right corner via absolute positioning
-  matchBadge:    {
+  matchBadge: {
     position: 'absolute',
     top: 12,
     right: 12,
@@ -612,28 +685,63 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     zIndex: 1,
   },
-  matchText:     { fontSize: 11, fontWeight: '700', color: '#059669' },
+  matchText: { fontSize: 11, fontWeight: '700', color: '#059669' },
 
-  personRole:    { fontSize: 13, color: '#6B7280', marginBottom: 4 },
-  metaRow:       { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
-  metaText:      { fontSize: 12, color: '#6B7280', flex: 1 },
-  locationText:  { fontSize: 12, color: '#9CA3AF', flex: 1 },
+  personRole: { fontSize: 13, color: '#6B7280', marginBottom: 4 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
+  metaText: { fontSize: 12, color: '#6B7280', flex: 1 },
+  locationText: { fontSize: 12, color: '#9CA3AF', flex: 1 },
 
-  // Card action buttons
-  cardActions:         { flexDirection: 'row', gap: 8, marginTop: 10 },
-  profileBtn:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderColor: '#F97316', borderRadius: 10, paddingVertical: 9 },
-  profileBtnText:      { fontSize: 13, fontWeight: '600', color: '#F97316' },
-  messageBtn:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#F97316', borderRadius: 10, paddingVertical: 10 },
+  cardActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  reportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
+  },
+  profileBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderWidth: 1.5,
+    borderColor: '#F97316',
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  profileBtnText: { fontSize: 13, fontWeight: '600', color: '#F97316' },
+  messageBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#F97316',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
   messageBtnSecondary: { flex: 1 },
-  messageBtnText:      { fontSize: 13, fontWeight: '700', color: '#fff' },
+  messageBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
 
-  // Errors / empty
-  errorBanner:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', borderRadius: 8, padding: 10, gap: 6, marginTop: 10 },
-  errorText:      { fontSize: 13, color: '#EF4444', flex: 1 },
-  retryText:      { fontSize: 13, color: '#F97316', fontWeight: '600' },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+    marginTop: 10,
+  },
+  errorText: { fontSize: 13, color: '#EF4444', flex: 1 },
+  retryText: { fontSize: 13, color: '#F97316', fontWeight: '600' },
   emptyContainer: { alignItems: 'center', paddingVertical: 48, gap: 8 },
-  emptyTitle:     { fontSize: 15, fontWeight: '600', color: '#374151' },
-  emptyText:      { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
+  emptyTitle: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  emptyText: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
 });
 
 export default MessagesScreen;

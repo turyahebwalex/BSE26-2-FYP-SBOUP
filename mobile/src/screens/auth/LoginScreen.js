@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,57 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const LoginScreen = ({ navigation }) => {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+ // Google OAuth configuration with Web Client ID (for backend verification)
+const [request, response, promptAsync] = Google.useAuthRequest({
+  webClientId: '917017536836-kkdis5dpuv1p4n8rb3jtfeqtd6i3sqv4.apps.googleusercontent.com', 
+  androidClientId: '917017536836-ighp9ct2srnob7lqpne9u802h5muo3ju.apps.googleusercontent.com', 
+  redirectUri: makeRedirectUri({
+    scheme: 'skillbridge',
+  }),
+});
+
+  // Handle Google OAuth response
+  useEffect(() => {
+    const handleGoogleResponse = async () => {
+      if (response?.type === 'success') {
+        const { authentication } = response;
+        const idToken = authentication?.idToken;
+        
+        if (idToken) {
+          setGoogleLoading(true);
+          const result = await googleLogin(idToken);
+          setGoogleLoading(false);
+          
+          if (result.success) {
+            Alert.alert('Success', 'Logged in with Google successfully!');
+            navigation.replace('MainApp');
+          } else {
+            Alert.alert('Google Login Failed', result.error);
+          }
+        }
+      } else if (response?.type === 'error') {
+        Alert.alert('Google Login Error', response.error?.message || 'Something went wrong');
+      }
+    };
+    
+    handleGoogleResponse();
+  }, [response]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -36,6 +79,16 @@ const LoginScreen = ({ navigation }) => {
         result.adminBlocked ? 'Admin Access Restricted' : 'Login Failed',
         result.error
       );
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      console.log("Generated Redirect URI:", request?.redirectUri);
+      await promptAsync();
+    } catch (error) {
+      console.error('Google Sign-In error:', error);
+      Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
     }
   };
 
@@ -106,6 +159,29 @@ const LoginScreen = ({ navigation }) => {
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.loginButtonText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={styles.dividerContainer}>
+              <View style={styles.divider} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.divider} />
+            </View>
+
+            {/* Google Sign-In Button */}
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={handleGoogleSignIn}
+              disabled={googleLoading || !request}
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#757575" />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={20} color="#757575" />
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </>
               )}
             </TouchableOpacity>
 
@@ -229,6 +305,38 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    marginHorizontal: 10,
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginBottom: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  googleButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#757575',
   },
   registerRow: {
     flexDirection: 'row',

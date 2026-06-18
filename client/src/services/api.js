@@ -26,11 +26,13 @@ api.interceptors.response.use(
         const refreshToken = localStorage.getItem('refreshToken');
         const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
         localStorage.setItem('accessToken', data.accessToken);
+        if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
         originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('user');
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
@@ -46,14 +48,17 @@ export const authAPI = {
   getMe: () => api.get('/auth/me'),
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword: (token, password) => api.post(`/auth/reset-password/${token}`, { password }),
+  refreshToken: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
 };
 
 // ─── Profile ───
 export const profileAPI = {
   getMyProfile: () => api.get('/profiles/me'),
+  getProfile: (id) => api.get(`/profiles/${id}`),
   createProfile: (data) => api.post('/profiles', data),
   updateProfile: (data) => api.put('/profiles/me', data),
   updateAvatar: (avatarBase64) => api.put('/profiles/avatar', { avatarBase64 }),
+  updateUserAvatar: (avatarBase64) => api.post('/users/avatar', { avatarBase64 }),
   addSkill: (data) => api.post('/profiles/skills', data),
   removeSkill: (id) => api.delete(`/profiles/skills/${id}`),
   addExperience: (data) => api.post('/profiles/experience', data),
@@ -62,6 +67,8 @@ export const profileAPI = {
   addEducation: (data) => api.post('/profiles/education', data),
   deleteEducation: (id) => api.delete(`/profiles/education/${id}`),
   updatePreference: (data) => api.put('/profiles/preferences', data),
+  addPortfolioItem: (data) => api.post('/profiles/portfolio', data),
+  removePortfolioItem: (itemId) => api.delete(`/profiles/portfolio/${itemId}`),
 };
 
 // ─── Opportunities ───
@@ -72,14 +79,28 @@ export const opportunityAPI = {
   update: (id, data) => api.put(`/opportunities/${id}`, data),
   archive: (id) => api.delete(`/opportunities/${id}`),
   getMine: () => api.get('/opportunities/employer/mine'),
+  // Application methods
+  getApplicationOptions: (opportunityId) => api.get(`/opportunities/${opportunityId}/apply-options`),
+  getExternalApplyUrl: (opportunityId) => api.get(`/opportunities/${opportunityId}/external-url`),
+  getApplicationForm: (opportunityId) => api.get(`/opportunities/${opportunityId}/application-form`),
+  checkApplicationStatus: (opportunityId) => api.get(`/opportunities/${opportunityId}/check-application`),
+  applyViaMessage: (data) => api.post('/opportunities/apply-by-message', data),
 };
 
 // ─── Applications ───
 export const applicationAPI = {
   apply: (data) => api.post('/applications', data),
+  applyWithFiles: (formData, onUploadProgress) => 
+    api.post('/applications', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    }),
   getMine: () => api.get('/applications/mine'),
   getForOpportunity: (oppId) => api.get(`/applications/opportunity/${oppId}`),
+  getApplicationDocuments: (applicationId) => api.get(`/applications/${applicationId}/documents`),
   updateStatus: (id, status) => api.put(`/applications/${id}/status`, { status }),
+  withdraw: (id) => api.put(`/applications/${id}/withdraw`),
+  togglePin: (id) => api.put(`/applications/${id}/pin`),
 };
 
 // ─── Matching ───
@@ -93,21 +114,46 @@ export const learningAPI = {
   generate: (data) => api.post('/learning/generate', data),
   getMine: () => api.get('/learning/mine'),
   updateProgress: (id, data) => api.put(`/learning/${id}/progress`, data),
+  skillGaps: (opportunityId) => api.post('/learning/skill-gaps', { opportunityId }),
+  dashboardFit: () => api.post('/learning/dashboard-fit', {}),
+  autoSuggest: ({ max = 3, force = false } = {}) => api.post('/learning/auto-suggest', { max, force }),
 };
 
 // ─── CV ───
 export const cvAPI = {
   generate: (data) => api.post('/cv/generate', data),
   getMine: () => api.get('/cv/mine'),
+  getOne: (id) => api.get(`/cv/${id}`),
   delete: (id) => api.delete(`/cv/${id}`),
 };
 
 // ─── Messages ───
 export const messageAPI = {
-  send: (data) => api.post('/messages', data),
+  send: (data) => {
+    // Check if data contains files (FormData)
+    if (data instanceof FormData) {
+      // For file uploads - send as multipart/form-data
+      return api.post('/messages', data, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+    }
+    
+    return api.post('/messages', data);
+  },
+  
   getInbox: () => api.get('/messages/inbox'),
-  getConversation: (userId) => api.get(`/messages/conversation/${userId}`),
+  getConversation: (userId, params) => api.get(`/messages/conversation/${userId}`, { params }),
   getUnreadCount: () => api.get('/messages/unread-count'),
+  markAsRead: (messageIds) => api.post('/messages/mark-read', { messageIds }),
+  getUserStatus: (userId) => api.get(`/users/status/${userId}`),
+};
+
+// ─── Users ───
+export const userAPI = {
+  getSuggested: (role) => api.get('/users/suggested', { params: { role } }),
+  searchUsers: (query, role) => api.get('/users/search', { params: { query, role } }),
+  getUserStatus: (userId) => api.get(`/users/status/${userId}`),
+  updateOnlineStatus: (data) => api.post('/users/online-status', data),
 };
 
 // ─── Chatbot ───
@@ -118,8 +164,10 @@ export const chatbotAPI = {
 // ─── Notifications ───
 export const notificationAPI = {
   getAll: (params) => api.get('/notifications', { params }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
   markAsRead: (id) => api.put(`/notifications/${id}/read`),
   markAllAsRead: () => api.put('/notifications/read-all'),
+  delete: (id) => api.delete(`/notifications/${id}`),
 };
 
 // ─── Reports ───
@@ -132,14 +180,19 @@ export const reportAPI = {
 
 // ─── Companies ───
 export const companyAPI = {
+  getAll: (params) => api.get('/companies', { params }),
   getById: (id) => api.get(`/companies/${id}`),
+  create: (data) => api.post('/companies', data),
+  update: (id, data) => api.put(`/companies/${id}`, data),
   update: (id, data) => api.put(`/companies/${id}`, data),
   updateAvatar: (id, avatarBase64) => api.put(`/companies/${id}/avatar`, { avatarBase64 }),
+
 };
 
 // ─── Skills ───
 export const skillAPI = {
   getAll: (params) => api.get('/skills', { params }),
+  getCategories: () => api.get('/skills/categories'),
   suggest: (data) => api.post('/skills/suggest', data),
   addCustom: (name) => api.post('/skills/custom', { name }),
 };
@@ -159,3 +212,4 @@ export const adminAPI = {
 };
 
 export default api;
+export const BASE_URL = API_URL;

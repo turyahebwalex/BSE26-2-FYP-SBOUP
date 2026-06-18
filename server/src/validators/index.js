@@ -72,49 +72,81 @@ const createOpportunity = Joi.object({
   isRemote: Joi.boolean().default(false),
   experienceLevel: Joi.string().valid('entry', 'mid', 'senior', 'any').default('any'),
   schedule: Joi.string().max(100).allow(''),
+  
+  applicationMethods: Joi.array()
+    .items(Joi.string().valid('in_app', 'message', 'external_link'))
+    .default(['in_app']),
+  externalApplyUrl: Joi.string().allow('', null),
+  messageInstructions: Joi.string().max(1000).allow('', null),
+  requiredDocuments: Joi.array()
+    .items(Joi.string().valid('cv', 'cover_letter', 'portfolio', 'certificates', 'references'))
+    .default([]),
+  customQuestions: Joi.array().items(
+    Joi.object({
+      question: Joi.string().required(),
+      type: Joi.string().valid('text', 'textarea', 'file', 'select').default('textarea'),
+      required: Joi.boolean().default(false),
+      options: Joi.array().items(Joi.string()),
+      maxLength: Joi.number().default(500),
+    })
+  ).default([]),
+  
   applicationMethod: Joi.string().valid('internal', 'external').default('internal'),
   externalLink: Joi.string().uri().allow(''),
   mediaUrls: Joi.array().items(Joi.string().uri()).default([]),
-});
+}).custom((value, helpers) => {
+  // If employer selected external_link as an application method, ensure an external URL is provided
+  try {
+    if (Array.isArray(value.applicationMethods) && value.applicationMethods.includes('external_link')) {
+      const url = value.externalApplyUrl || value.externalLink || '';
+      if (!String(url).trim()) {
+        return helpers.message('externalApplyUrl is required when applicationMethods includes external_link');
+      }
+    }
+  } catch (err) {
+    // ignore and let other validation handle it
+  }
+  return value;
+}, 'Application Creation Validation');
 
-// ─── Application ─────────────────────────────────────────────────
 const applyForOpportunity = Joi.object({
   opportunityId: Joi.string().hex().length(24).required(),
-  profileId: Joi.string().hex().length(24).required(),
+  profileId: Joi.string().hex().length(24).optional(),
   cvId: Joi.string().hex().length(24).allow(null, ''),
-  coverLetter: Joi.string().max(3000).allow(''),
+  coverLetter: Joi.string().max(5000).allow('', null),
+  notes: Joi.string().max(2000).allow('', null),
   attachments: Joi.array().items(
     Joi.object({
       fileName: Joi.string().required(),
       fileUrl: Joi.string().uri().required(),
       fileType: Joi.string().optional(),
-    })
-  ).default([]),
-});
-
-// ─── Messaging (UPDATED) ─────────────────────────────────────────
-const sendMessage = Joi.object({
-  receiverId: Joi.string().hex().length(24).required(),
-  content: Joi.string().max(5000).allow(''),
-  applicationRef: Joi.string().hex().length(24).allow(null, ''),
-  tempId: Joi.string().allow(null, ''),
-  attachments: Joi.array().items(
-    Joi.object({
-      fileName: Joi.string().required(),
-      fileUrl: Joi.string().uri().required(),
-      fileSize: Joi.number().max(10 * 1024 * 1024),
-      fileType: Joi.string().optional(),
-      mimeType: Joi.string().optional(),
     })
   ).default([]),
 }).custom((value, helpers) => {
-  if (!value.content && (!value.attachments || value.attachments.length === 0)) {
-    return helpers.error('any.invalid', { 
-      message: 'Message must have either content or at least one attachment' 
-    });
-  }
   return value;
-}, 'Message Content or Attachment Validation');
+}, 'Application Content Validation');
+
+const applyViaMessage = Joi.object({
+  opportunityId: Joi.string().hex().length(24).required(),
+  message: Joi.string().min(10).max(2000).required(),
+  conversationId: Joi.string().optional(),
+});
+
+const getApplicationOptions = Joi.object({
+  opportunityId: Joi.string().hex().length(24).required(),
+});
+
+const externalUrlRequest = Joi.object({
+  opportunityId: Joi.string().hex().length(24).required(),
+});
+// ─── Messaging (SIMPLIFIED - validation handled by controller) ─────────────────
+const sendMessage = Joi.object({
+  receiverId: Joi.string().hex().length(24).required(),
+  content: Joi.string().max(5000).allow('', null).optional(),
+  applicationRef: Joi.string().hex().length(24).allow(null, ''),
+  tempId: Joi.string().allow(null, ''),
+  // attachments validation removed - handled by multer and controller
+});
 
 const markMessages = Joi.object({
   messageIds: Joi.array().items(Joi.string().hex().length(24)).min(1).required(),
@@ -194,9 +226,6 @@ const generateCV = Joi.object({
 });
 
 // ─── Learning ────────────────────────────────────────────────────
-// Exactly one of targetSkill / opportunityId is required (opportunity-driven
-// engages the §6.0 matching-engine consistency contract; target-skill is
-// standalone). Mirrors the AI service's contract on /api/learning/generate.
 const generateLearningPath = Joi.object({
   targetSkill: Joi.string().max(150).allow(null, ''),
   opportunityId: Joi.string().hex().length(24).allow(null, ''),
@@ -210,10 +239,6 @@ const analyseSkillGaps = Joi.object({
   opportunityId: Joi.string().hex().length(24).required(),
 });
 
-// Auto-suggest: server picks the targets, so the body only carries optional
-// tuning knobs. `max` caps how many paths get generated in one batch — we
-// default to 3 because each generation walks Flan-T5 + external providers
-// and a worker doesn't need more than a handful of fresh suggestions at once.
 const autoSuggestLearning = Joi.object({
   max: Joi.number().integer().min(1).max(5).default(3),
   force: Joi.boolean().default(false),
@@ -231,6 +256,9 @@ const schemas = {
   addEducation,
   createOpportunity,
   applyForOpportunity,
+  applyViaMessage,
+  getApplicationOptions,
+  externalUrlRequest,
   sendMessage,
   markMessages,
   typingIndicator,

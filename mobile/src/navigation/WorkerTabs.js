@@ -4,26 +4,24 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-// Worker Screens
 import WorkerDashboardScreen from '../screens/worker/WorkerDashboardScreen';
 import DiscoverScreen from '../screens/worker/DiscoverScreen';
 import OpportunityDetailScreen from '../screens/worker/OpportunityDetailScreen';
 import ApplicationsScreen from '../screens/worker/ApplicationsScreen';
 import GenerateCVScreen from '../screens/worker/GenerateCVScreen';
 import LearningScreen from '../screens/worker/LearningScreen';
-
-// Shared Screens
+import ApplyMessageScreen from '../screens/worker/ApplyMessageScreen';
+import ApplyExternalScreen from '../screens/worker/ApplyExternalScreen';
+import ApplyFormScreen from '../screens/worker/ApplyFormScreen';
 import MessagesScreen from '../screens/shared/MessagesScreen';
 import ChatScreen from '../screens/shared/ChatScreen';
+import UserProfileScreen from '../screens/shared/UserProfileScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
 import EditProfileScreen from '../screens/shared/EditProfileScreen';
 import NotificationsScreen from '../screens/shared/NotificationsScreen';
 
 import CompanyProfileScreen from '../screens/worker/CompanyProfileScreen';   
 import PeopleByLocationScreen from '../screens/worker/PeopleByLocationScreen';
-
-// Import AuthContext to get unread count
 import { useAuth } from '../context/AuthContext';
 
 const Tab = createBottomTabNavigator();
@@ -44,6 +42,9 @@ const HomeStackScreen = () => (
     <HomeStack.Screen name="Applications" component={ApplicationsScreen} />
     <HomeStack.Screen name="GenerateCV" component={GenerateCVScreen} />
     <HomeStack.Screen name="Learning" component={LearningScreen} />
+    <HomeStack.Screen name="ApplyMessage" component={ApplyMessageScreen} />
+    <HomeStack.Screen name="ApplyExternal" component={ApplyExternalScreen} />
+    <HomeStack.Screen name="ApplyForm" component={ApplyFormScreen} />
   </HomeStack.Navigator>
 );
 
@@ -51,11 +52,10 @@ const DiscoverStackScreen = () => (
   <DiscoverStack.Navigator screenOptions={screenOptions}>
     <DiscoverStack.Screen name="DiscoverMain" component={DiscoverScreen} />
     <DiscoverStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
-    {/* OpportunityDetail's "Bridge a skill gap" alert navigates to Learning;
-        without this route the navigator throws when the alert is fired from
-        the Discover tab. Same screen component as the Home stack — React
-        Navigation re-uses the registered name within each stack. */}
     <DiscoverStack.Screen name="Learning" component={LearningScreen} />
+    <DiscoverStack.Screen name="ApplyMessage" component={ApplyMessageScreen} />
+    <DiscoverStack.Screen name="ApplyExternal" component={ApplyExternalScreen} />
+    <DiscoverStack.Screen name="ApplyForm" component={ApplyFormScreen} />
   </DiscoverStack.Navigator>
 );
 
@@ -63,10 +63,14 @@ const MessagesStackScreen = () => (
   <MessagesStack.Navigator screenOptions={screenOptions}>
     <MessagesStack.Screen name="MessagesMain" component={MessagesScreen} />
     <MessagesStack.Screen name="Chat" component={ChatScreen} />
+    <MessagesStack.Screen name="UserProfile" component={UserProfileScreen} />
     <MessagesStack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
     <MessagesStack.Screen name="PeopleByLocation" component={PeopleByLocationScreen} />
     <MessagesStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
     <MessagesStack.Screen name="Learning" component={LearningScreen} />
+    <MessagesStack.Screen name="ApplyMessage" component={ApplyMessageScreen} />
+    <MessagesStack.Screen name="ApplyExternal" component={ApplyExternalScreen} />
+    <MessagesStack.Screen name="ApplyForm" component={ApplyFormScreen} />
   </MessagesStack.Navigator>
 );
 
@@ -75,12 +79,16 @@ const ProfileStackScreen = () => (
     <ProfileStack.Screen name="Profile" component={ProfileScreen} />
     <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} />
     <ProfileStack.Screen name="Notifications" component={NotificationsScreen} />
+    <ProfileStack.Screen name="ApplyMessage" component={ApplyMessageScreen} />
+    <ProfileStack.Screen name="ApplyExternal" component={ApplyExternalScreen} />
+    <ProfileStack.Screen name="ApplyForm" component={ApplyFormScreen} />
+    <ProfileStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />
   </ProfileStack.Navigator>
 );
 
 const WorkerTabs = () => {
   const insets = useSafeAreaInsets();
-  const { unreadMessageCount } = useAuth();   // get unread count from context
+  const { unreadMessageCount } = useAuth();  
 
   return (
     <Tab.Navigator

@@ -12,12 +12,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import { opportunityAPI, applicationAPI, matchingAPI, profileAPI, learningAPI } from '../../services/api';
 import ReportBottomSheet from '../../components/ReportBottomSheet';
 
-// ── Signal row helper ─────────────────────────────────────────────────────────
 const SignalRow = ({ icon, label, value, pass }) => (
   <View style={styles.signalRow}>
     <View style={styles.signalLeft}>
@@ -36,7 +33,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     routeOppId || passedOpp?._id || passedOpp?.id || passedOpp?.opportunityId || null;
   const passedHasFullDetails = !!(passedOpp && passedOpp._id && passedOpp.description !== undefined);
 
-  // Single set of state declarations – includes match breakdown extras
+  // State declarations
   const [opportunity, setOpportunity] = useState(passedHasFullDetails ? passedOpp : null);
   const [matchScore, setMatchScore] = useState(passedScore || null);
   const [matchBreakdown, setMatchBreakdown] = useState(null);
@@ -45,7 +42,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [applying, setApplying] = useState(false);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
-  const [attachments, setAttachments] = useState([]);   // { name, uri, type, size }
+  const [attachments, setAttachments] = useState([]);
   const [applied, setApplied] = useState(false);
   const [error, setError] = useState(null);
   const [profileId, setProfileId] = useState(null);
@@ -53,10 +50,11 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   const [bridging, setBridging] = useState(false);
   const [aliasHints, setAliasHints] = useState([]);
   const [proficiencyShortfalls, setProficiencyShortfalls] = useState([]);
+  const [applicationOptions, setApplicationOptions] = useState(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [showMethodSelector, setShowMethodSelector] = useState(false);
 
-  // Opportunity-driven pathway generation — engages the §6.0 matching-engine
-  // consistency contract on the AI service so the resulting pathway targets
-  // the exact same missing-skill names the breakdown card shows.
+  // Opportunity-driven pathway generation
   const handleBridgeSkillGap = async () => {
     const oppId = opportunity?._id || opportunity?.id;
     if (!oppId) return;
@@ -67,9 +65,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       const pathId = path?._id || path?.id || null;
       const alreadyExists = Boolean(data?.alreadyExists || data?.data?.alreadyExists);
       if (path) {
-        // Server-side dedup: if a path for this opportunity already exists
-        // we get the same one back instead of a duplicate. Tell the worker
-        // so they don't think nothing happened.
         const title = alreadyExists ? 'Learning path already exists' : 'Learning path created';
         const body = alreadyExists
           ? 'You already have a pathway for this role. Open it to keep going.'
@@ -77,10 +72,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
         Alert.alert(title, body, [
           {
             text: 'View',
-            // Pass the new path id so LearningScreen auto-expands it
-            // instead of forcing the worker to scan the list. Matches
-            // the spec's 'select pathway → respective path shown'
-            // expectation.
             onPress: () => navigation.navigate('Learning', { focusPathId: pathId }),
           },
           { text: 'OK', style: 'cancel' },
@@ -97,11 +88,29 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  const fetchApplicationOptions = async () => {
+    const oppId = resolvedId || opportunity?._id;
+    if (!oppId) return;
+    setLoadingOptions(true);
+    try {
+      const response = await opportunityAPI.getApplicationOptions(oppId);
+      setApplicationOptions(response.data);
+      if (response.data.hasApplied) {
+        setApplied(true);
+      }
+    } catch (err) {
+      console.log('Failed to fetch application options:', err);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
   useEffect(() => {
     if (!passedHasFullDetails && resolvedId) {
       fetchOpportunity();
     }
     fetchProfileAndScore();
+    fetchApplicationOptions();
   }, [resolvedId]);
 
   const fetchOpportunity = async () => {
@@ -130,7 +139,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           if (d.missingSkills) setMissingSkills(d.missingSkills);
         } catch (_) {}
 
-        // Check if the worker already applied to this opportunity
         try {
           const appsRes = await applicationAPI.getMyApplications();
           const apps = appsRes.data.applications || appsRes.data || [];
@@ -141,10 +149,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           if (alreadyApplied) setApplied(true);
         } catch (_) {}
 
-        // Enrich the breakdown card with the learning-engine's alias hints
-        // and proficiency shortfalls so the worker sees 'did you mean…?'
-        // suggestions BEFORE committing to a pathway. Best-effort: a
-        // failure here just hides the enrichment, never blocks the card.
         try {
           const gapsRes = await learningAPI.skillGaps(resolvedId);
           const g = gapsRes.data || {};
@@ -155,133 +159,91 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     } catch (_) {}
   };
 
-  // ── Attachment helpers ────────────────────────────────────────────────────
-  const MAX_ATTACHMENTS = 5;
+  // ─── Apply handlers ──────────────────────────────────────────────────────────
 
-  const pickDocument = async () => {
-    if (attachments.length >= MAX_ATTACHMENTS) {
-      Alert.alert('Limit reached', `You can attach up to ${MAX_ATTACHMENTS} files.`);
-      return;
-    }
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'application/msword',
-               'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-               'text/plain'],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        const asset = result.assets[0];
-        setAttachments((prev) => [
-          ...prev,
-          { name: asset.name, uri: asset.uri, type: asset.mimeType || 'application/octet-stream', size: asset.size },
-        ]);
-      }
-    } catch {
-      Alert.alert('Error', 'Could not pick document.');
-    }
-  };
-
-  const pickImage = async () => {
-    if (attachments.length >= MAX_ATTACHMENTS) {
-      Alert.alert('Limit reached', `You can attach up to ${MAX_ATTACHMENTS} files.`);
-      return;
-    }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photo library.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      const asset = result.assets[0];
-      const name = asset.uri.split('/').pop() || 'image.jpg';
-      setAttachments((prev) => [
-        ...prev,
-        { name, uri: asset.uri, type: 'image/jpeg', size: asset.fileSize || 0 },
-      ]);
-    }
-  };
-
-  const showAttachmentOptions = () => {
-    Alert.alert('Add Attachment', 'Choose what to attach', [
-      { text: 'Document (PDF / Word)', onPress: pickDocument },
-      { text: 'Photo from Gallery',    onPress: pickImage },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const removeAttachment = (index) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleApply = async () => {
+  const handleApplyPress = () => {
     if (!profileId) {
-      Alert.alert('Profile Required', 'Please create your profile before applying.');
+      Alert.alert('Profile Required', 'Please complete your profile before applying.');
       return;
     }
-    const submitOppId =
-      resolvedId || opportunity?._id || opportunity?.id || opportunity?.opportunityId;
-    if (!submitOppId) {
-      Alert.alert('Error', 'Missing opportunity reference. Please reopen this opportunity.');
+    if (applied) {
+      Alert.alert('Already Applied', 'You have already applied to this opportunity.');
       return;
     }
-    setApplying(true);
-    try {
-      // Upload each attachment to the server first so the employer gets a real URL
-      const uploadedAttachments = [];
-      for (const att of attachments) {
-        try {
-          const formData = new FormData();
-          formData.append('file', {
-            uri:  att.uri,
-            name: att.name,
-            type: att.type || 'application/octet-stream',
-          });
-          const { data } = await applicationAPI.uploadAttachment(formData);
-          uploadedAttachments.push({
-            fileName: data.fileName,
-            fileUrl:  data.fileUrl,
-            fileType: data.fileType,
-          });
-        } catch {
-          // If upload fails, fall back to local URI so the application still submits
-          uploadedAttachments.push({
-            fileName: att.name,
-            fileUrl:  att.uri,
-            fileType: att.type,
-          });
-        }
-      }
+    setShowMethodSelector(true);
+  };
 
-      await applicationAPI.apply({
-        opportunityId: submitOppId,
-        profileId,
-        coverLetter: coverLetter.trim(),
-        attachments: uploadedAttachments,
+  const handleMethodSelect = (method) => {
+    setShowMethodSelector(false);
+    const oppId = resolvedId || opportunity?._id;
+
+    if (method.type === 'in_app') {
+      navigation.navigate('ApplyForm', {
+        opportunityId: oppId,
+        opportunityTitle: opportunity?.title,
+        requiredDocuments: opportunity?.requiredDocuments,
+        customQuestions: opportunity?.customQuestions,
       });
-      setApplied(true);
-      setShowApplyForm(false);
-      setAttachments([]);
-      Alert.alert('Success', 'Your application has been submitted!');
-    } catch (err) {
-      const data = err.response?.data;
-      const detailMsg = Array.isArray(data?.details)
-        ? data.details.map((d) => `${d.field}: ${d.message}`).join('\n')
-        : null;
-      const msg = data?.message || detailMsg || data?.error || 'Failed to apply.';
-      Alert.alert('Error', msg);
-    } finally {
-      setApplying(false);
+    } else if (method.type === 'message') {
+      navigation.navigate('ApplyMessage', {
+        opportunityId: oppId,
+        opportunityTitle: opportunity?.title,
+        employerId: opportunity?.postedByUserId,
+        instructions: method.instructions,
+      });
+    } else if (method.type === 'external_link') {
+      navigation.navigate('ApplyExternal', {
+        opportunityId: oppId,
+        url: method.url,
+        opportunityTitle: opportunity?.title,
+      });
     }
   };
 
-  // ─── Loading ────────────────────────────────────────────────────────────────
+  // ─── Method selector modal ──────────────────────────────────────────────────
+
+  const MethodSelectorModal = () => {
+    if (!showMethodSelector || !applicationOptions?.availableMethods) return null;
+    const methods = applicationOptions.availableMethods;
+
+    return (
+      <View style={styles.modalOverlay}>
+        <View style={styles.methodSelectorCard}>
+          <Text style={styles.methodSelectorTitle}>How would you like to apply?</Text>
+          <Text style={styles.methodSelectorSubtitle}>
+            Choose your preferred application method for {opportunity?.title}
+          </Text>
+
+          {methods.map((method) => (
+            <TouchableOpacity
+              key={method.type}
+              style={styles.methodOption}
+              onPress={() => handleMethodSelect(method)}
+            >
+              <View style={[styles.methodIcon, { backgroundColor: method.color + '20' }]}>
+                <Ionicons name={method.icon} size={24} color={method.color} />
+              </View>
+              <View style={styles.methodInfo}>
+                <Text style={styles.methodName}>{method.label}</Text>
+                <Text style={styles.methodDescription}>{method.description}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          ))}
+
+          <TouchableOpacity
+            style={styles.methodCancelButton}
+            onPress={() => setShowMethodSelector(false)}
+          >
+            <Text style={styles.methodCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  // ─── Loading / error ────────────────────────────────────────────────────────
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -292,7 +254,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
     );
   }
 
-  // ─── Error ──────────────────────────────────────────────────────────────────
   if (error || !opportunity) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -331,7 +292,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   };
   const badge = typeBadgeColors[category] || typeBadgeColors.formal;
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -340,7 +300,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Header ── */}
+          {/* Header Section */}
           <View style={styles.headerSection}>
             <View style={styles.headerTop}>
               <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -380,7 +340,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
 
-          {/* ── Compensation ── */}
+          {/* Compensation */}
           {compensationRange && (compensationRange.min || compensationRange.max) && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -397,7 +357,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Experience Level ── */}
+          {/* Experience Level */}
           {experienceLevel && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -410,7 +370,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Deadline ── */}
+          {/* Deadline */}
           {deadline && (
             <View style={styles.infoCard}>
               <View style={styles.infoHeader}>
@@ -427,13 +387,13 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Description ── */}
+          {/* Description */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Description</Text>
             <Text style={styles.description}>{description || 'No description provided.'}</Text>
           </View>
 
-          {/* ── Required Skills ── */}
+          {/* Required Skills */}
           {displaySkills.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Required Skills</Text>
@@ -453,7 +413,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Match Breakdown (only if matchScore exists) ── */}
+          {/* Match Breakdown */}
           {matchScore != null && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Match Breakdown</Text>
@@ -531,9 +491,6 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                       score.
                     </Text>
 
-                    {/* §6.0 enrichment — soft "did you mean…?" prompts.
-                        The chips above remain authoritative; these are
-                        suggestions to update the worker's profile. */}
                     {aliasHints.length > 0 && (
                       <View style={styles.hintsBlock}>
                         <Text style={styles.hintsHeader}>Did you mean…?</Text>
@@ -582,82 +539,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Apply Form (only if showApplyForm is true and not applied) ── */}
-          {showApplyForm && !applied && (
-            <View style={styles.applyForm}>
-              <Text style={styles.sectionTitle}>Cover Letter (Optional)</Text>
-
-              {/* Cover letter input with attachment icon inside */}
-              <View style={styles.coverLetterWrapper}>
-                <TextInput
-                  style={styles.coverLetterInput}
-                  placeholder="Tell the employer why you're a great fit..."
-                  placeholderTextColor="#9CA3AF"
-                  multiline
-                  numberOfLines={5}
-                  textAlignVertical="top"
-                  value={coverLetter}
-                  onChangeText={setCoverLetter}
-                />
-                {/* Attachment icon — bottom-right of the text area */}
-                <TouchableOpacity
-                  style={styles.attachIconBtn}
-                  onPress={showAttachmentOptions}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="attach" size={20} color="#F97316" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Attachment chips */}
-              {attachments.length > 0 && (
-                <View style={styles.attachmentList}>
-                  {attachments.map((att, idx) => (
-                    <View key={idx} style={styles.attachmentChip}>
-                      <Ionicons
-                        name={att.type?.startsWith('image') ? 'image-outline' : 'document-outline'}
-                        size={14}
-                        color="#F97316"
-                      />
-                      <Text style={styles.attachmentName} numberOfLines={1}>
-                        {att.name}
-                      </Text>
-                      <TouchableOpacity onPress={() => removeAttachment(idx)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                        <Ionicons name="close-circle" size={16} color="#9CA3AF" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Helper text */}
-              <Text style={styles.attachHint}>
-                <Ionicons name="attach" size={12} color="#9CA3AF" /> Tap the clip icon to attach documents or photos (up to 5)
-              </Text>
-
-              <View style={styles.applyFormButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => { setShowApplyForm(false); setAttachments([]); }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.submitButton, applying && styles.buttonDisabled]}
-                  onPress={handleApply}
-                  disabled={applying}
-                >
-                  {applying ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
-                  ) : (
-                    <Text style={styles.submitButtonText}>Submit Application</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {/* ── Subtle report link at the bottom ── */}
+          {/* Report link */}
           <TouchableOpacity
             style={styles.reportLink}
             onPress={() => setShowReport(true)}
@@ -668,28 +550,27 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* ── Bottom Apply Button (only if form not shown) ── */}
-        {!showApplyForm && (
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={[styles.applyButton, applied && styles.appliedButton]}
-              onPress={() => {
-                if (!applied) setShowApplyForm(true);
-              }}
-              disabled={applied}
-            >
-              <Ionicons
-                name={applied ? 'checkmark-circle' : 'paper-plane-outline'}
-                size={20}
-                color="#FFFFFF"
-              />
-              <Text style={styles.applyButtonText}>{applied ? 'Applied' : 'Apply Now'}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Bottom Apply Button */}
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={[styles.applyButton, applied && styles.appliedButton]}
+            onPress={handleApplyPress}
+            disabled={applied}
+          >
+            <Ionicons
+              name={applied ? 'checkmark-circle' : 'paper-plane-outline'}
+              size={20}
+              color="#FFFFFF"
+            />
+            <Text style={styles.applyButtonText}>{applied ? 'Applied' : 'Apply Now'}</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
-      {/* ── Report bottom sheet ── */}
+      {/* Method Selector Modal */}
+      <MethodSelectorModal />
+
+      {/* Report bottom sheet */}
       <ReportBottomSheet
         visible={showReport}
         onClose={() => setShowReport(false)}
@@ -894,104 +775,84 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Apply form
-  applyForm: {
+  // Method Selector Modal
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  methodSelectorCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 20,
+    width: '90%',
+    maxWidth: 400,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  coverLetterInput: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    paddingBottom: 36,   // extra bottom padding so text doesn't hide behind the icon
-    fontSize: 15,
+  methodSelectorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
     color: '#1F2937',
-    minHeight: 120,
-  },
-  coverLetterWrapper: {
-    position: 'relative',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  attachIconBtn: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FFF7ED',
+  methodSelectorSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  methodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    gap: 12,
+  },
+  methodIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  attachmentList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 6,
-  },
-  attachmentChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#FFF7ED',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: '#FDBA74',
-    maxWidth: 200,
-  },
-  attachmentName: {
+  methodInfo: {
     flex: 1,
-    fontSize: 12,
-    color: '#EA580C',
-    fontWeight: '500',
   },
-  attachHint: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginBottom: 12,
-  },
-  applyFormButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cancelButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 14,
+  methodName: {
+    fontSize: 15,
     fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  methodDescription: {
+    fontSize: 12,
     color: '#6B7280',
   },
-  submitButton: {
-    flex: 2,
-    backgroundColor: '#F97316',
-    borderRadius: 10,
+  methodCancelButton: {
+    marginTop: 16,
     paddingVertical: 12,
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
   },
-  submitButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
+  methodCancelText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#9CA3AF',
   },
 
   // Report link

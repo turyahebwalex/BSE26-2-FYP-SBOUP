@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -58,12 +59,7 @@ const TYPE_COLORS = {
   job_alert:          '#F97316',
 };
 
-// ─── Action button config per notification ────────────────────────────────────
-// Takes the full notification so the match-type case can branch on
-// metadata.readyToApply — when the server has determined the worker now
-// meets every required skill for an opportunity, the button reads
-// 'Apply' and lands on the opportunity detail screen instead of the
-// generic 'View'/'Discover' path.
+
 const getActions = (notif) => {
   const type = notif?.type;
   const meta = notif?.metadata || {};
@@ -78,12 +74,6 @@ const getActions = (notif) => {
     case 'application_update':
     case 'application':       return { primary: { label: 'Open',   nav: 'ApplicationDetails' } };
     case 'learning':
-      // Two distinct learning notifications:
-      //   - kind:'completed' — worker finished a pathway, label 'View'
-      //     so the action reads as 'review what I just finished'.
-      //   - kind:'suggested' (or unset/legacy) — auto-generated path
-      //     the worker hasn't opened yet, label 'Start' so the action
-      //     reads as 'begin this new pathway'.
       return meta.kind === 'completed'
         ? { primary: { label: 'View',  nav: 'Learning' } }
         : { primary: { label: 'Start', nav: 'Learning' } };
@@ -124,6 +114,10 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
   const [page, setPage]             = useState(1);
   const [hasMore, setHasMore]       = useState(true);
   const [activeTab, setActiveTab]   = useState('all');
+  
+  // Image preview modal state
+  const [previewImage, setPreviewImage] = useState(null);
+  const [previewUserName, setPreviewUserName] = useState('');
 
   const getToken = async () => {
     try { return await AsyncStorage.getItem('accessToken'); }
@@ -177,7 +171,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   };
 
-  // Expose refresh method to parent
+ 
   useImperativeHandle(ref, () => ({
     refresh: onRefresh,
   }));
@@ -269,11 +263,19 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     navigation.getParent()?.navigate(screenName, params);
   };
 
-  // Learning lives inside HomeTab's stack, not at the bottom-tab level,
-  // so we have to navigate into HomeTab and then to the Learning screen.
-  // The pathway-completion notification persists learningPathId in its
-  // metadata; forwarding it as focusPathId makes LearningScreen
-  // auto-expand the card the worker just finished.
+  const navigateToChat = (userId, userName, userAvatar) => {
+    const parent = navigation.getParent();
+    if (parent?.navigate) {
+      parent.navigate('MessagesTab', {
+        screen: 'Chat',
+        params: { userId, userName, userAvatar },
+      });
+      return;
+    }
+    navigation.navigate('Chat', { userId, userName, userAvatar });
+  };
+
+
   const navigateToLearning = (meta = {}) => {
     navigation.getParent()?.navigate('HomeTab', {
       screen: 'Learning',
@@ -283,7 +285,6 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     });
   };
 
-  // OpportunityDetail is also nested inside HomeTab. Same pattern.
   const navigateToOpportunityDetail = (opportunityId) => {
     navigation.getParent()?.navigate('HomeTab', {
       screen: 'OpportunityDetail',
@@ -295,7 +296,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     const meta = item.metadata || {};
     switch (navKey) {
       case 'Chat':
-        navigation.navigate('Chat', { userId: meta.senderId, userName: meta.senderName });
+        navigateToChat(meta.senderId, meta.senderName, meta.senderAvatar);
         break;
       case 'ApplicationDetails':
         navigateToRootTab('ApplicationDetails', { applicationId: meta.applicationId });
@@ -325,7 +326,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     switch (item.type) {
       case 'message':
         if (meta.senderId)
-          navigation.navigate('Chat', { userId: meta.senderId, userName: meta.senderName });
+          navigateToChat(meta.senderId, meta.senderName, meta.senderAvatar);
         break;
       case 'application_update':
       case 'application':
@@ -336,10 +337,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
         if (meta.opportunityId) navigateToOpportunityDetail(meta.opportunityId);
         break;
       case 'match':
-        // Ready-to-apply matches (server flags readyToApply + opportunityId)
-        // jump straight to the opportunity detail screen where the Apply
-        // button lives. Generic match notifications fall through to
-        // Discover so the worker can still browse.
+      
         if (meta.readyToApply && meta.opportunityId) {
           navigateToOpportunityDetail(meta.opportunityId);
         } else {
@@ -360,10 +358,41 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   };
 
+  
+  const handleAvatarPress = (imageUrl, userName) => {
+    if (!imageUrl) return;
+    const resolvedUrl = imageUrl.startsWith('http') 
+      ? imageUrl 
+      : `${BASE_URL.replace('/api', '')}/${imageUrl.replace(/^\//, '')}`;
+    setPreviewImage(resolvedUrl);
+    setPreviewUserName(userName);
+  };
+
   // ── Filter by tab ─────────────────────────────────────────────────────────────
   const filtered = activeTab === 'all'
     ? notifications
     : notifications.filter(n => n.type === activeTab);
+
+  // Image Preview Modal
+  const ImagePreviewModal = () => (
+    <Modal visible={!!previewImage} transparent animationType="fade" onRequestClose={() => setPreviewImage(null)}>
+      <TouchableOpacity style={styles.imagePreviewOverlay} activeOpacity={1} onPress={() => setPreviewImage(null)}>
+        <View style={styles.imagePreviewContainer}>
+          <View style={styles.imagePreviewHeader}>
+            <Text style={styles.imagePreviewName}>{previewUserName}</Text>
+            <TouchableOpacity onPress={() => setPreviewImage(null)}>
+              <Ionicons name="close-circle" size={32} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          <Image 
+            source={{ uri: previewImage }} 
+            style={styles.imagePreviewFull} 
+            resizeMode="contain"
+          />
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
 
   // ── Render helpers ────────────────────────────────────────────────────────────
   const renderIcon = (item) => {
@@ -374,10 +403,15 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
 
     if (type === 'connection_request' && item.metadata?.senderPhoto) {
       return (
-        <Image
-          source={{ uri: item.metadata.senderPhoto }}
-          style={styles.avatarImg}
-        />
+        <TouchableOpacity 
+          onPress={() => handleAvatarPress(item.metadata.senderPhoto, item.metadata.senderName || 'User')}
+          activeOpacity={0.8}
+        >
+          <Image
+            source={{ uri: item.metadata.senderPhoto }}
+            style={styles.avatarImg}
+          />
+        </TouchableOpacity>
       );
     }
 
@@ -505,10 +539,9 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
       return <View style={styles.footerLoader}><ActivityIndicator size="small" color="#F97316" /></View>;
     return null;
   };
-
-  // ── Loading state ─────────────────────────────────────────────────────────────
   if (loading && notifications.length === 0) {
     return (
+
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         {!hideHeader && renderHeader()}
         <View style={styles.center}><ActivityIndicator size="large" color="#F97316" /></View>
@@ -547,68 +580,72 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {!hideHeader && renderHeader()}
+    <>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        {!hideHeader && renderHeader()}
 
-      <View style={styles.tabBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-          {TABS.map(tab => {
-            const isActive = activeTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={[styles.tab, isActive && styles.tabActive]}
-              >
-                <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{tab.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {error && (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity onPress={onRefresh}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+        <View style={styles.tabBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
+            {TABS.map(tab => {
+              const isActive = activeTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={[styles.tab, isActive && styles.tabActive]}
+                >
+                  <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{tab.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
-      )}
 
-      <FlatList
-        data={filtered}
-        keyExtractor={item => item._id || item.id || Math.random().toString()}
-        renderItem={renderNotification}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#F97316']}
-            tintColor="#F97316"
-          />
-        }
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.1}
-        ListFooterComponent={renderFooter}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="notifications-off-outline" size={48} color="#D1D5DB" />
-              <Text style={styles.emptyTitle}>No Notifications</Text>
-              <Text style={styles.emptyText}>
-                {activeTab === 'all'
-                  ? "You're all caught up! Notifications will appear here."
-                  : `No ${TABS.find(t => t.key === activeTab)?.label || ''} notifications yet.`}
-              </Text>
-            </View>
-          )
-        }
-      />
-    </SafeAreaView>
+        {error && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={onRefresh}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <FlatList
+          data={filtered}
+          keyExtractor={item => item._id || item.id || Math.random().toString()}
+          renderItem={renderNotification}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#F97316']}
+              tintColor="#F97316"
+            />
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.1}
+          ListFooterComponent={renderFooter}
+          ListEmptyComponent={
+            !loading && (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="notifications-off-outline" size={48} color="#D1D5DB" />
+                <Text style={styles.emptyTitle}>No Notifications</Text>
+                <Text style={styles.emptyText}>
+                  {activeTab === 'all'
+                    ? "You're all caught up! Notifications will appear here."
+                    : `No ${TABS.find(t => t.key === activeTab)?.label || ''} notifications yet.`}
+                </Text>
+              </View>
+            )
+          }
+        />
+      </SafeAreaView>
+      
+      <ImagePreviewModal />
+    </>
   );
 });
 
@@ -616,7 +653,7 @@ const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#F9FAFB' },
   center:      { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  // Header
+ 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -661,7 +698,7 @@ const styles = StyleSheet.create({
   tabText:       { fontSize: 13, fontWeight: '500', color: '#6B7280' },
   tabTextActive: { color: '#FFFFFF' },
 
-  // Error banner
+  
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -678,7 +715,7 @@ const styles = StyleSheet.create({
   // List
   listContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 12 },
 
-  // Notification card
+  
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -704,7 +741,7 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, marginRight: 8 },
   cardRight: { alignItems: 'flex-end', gap: 4 },
 
-  // Icon / avatar
+ 
   iconWrap: {
     width: 42,
     height: 42,
@@ -742,7 +779,6 @@ const styles = StyleSheet.create({
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#F97316' },
   closeBtn:  { padding: 2 },
 
-  // Action buttons
   actionRow: {
     flexDirection: 'row',
     gap: 8,
@@ -772,7 +808,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
 
-  // Outcome pills
+
   outcomePill: {
     borderRadius: 20,
     paddingHorizontal: 14,
@@ -788,6 +824,23 @@ const styles = StyleSheet.create({
   emptyContainer:   { alignItems: 'center', paddingVertical: 56 },
   emptyTitle:       { fontSize: 16, fontWeight: '600', color: '#1F2937', marginTop: 12, marginBottom: 6 },
   emptyText:        { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 24 },
+
+  // Image Preview Modal Styles
+  imagePreviewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' },
+  imagePreviewContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  imagePreviewHeader: { 
+    position: 'absolute', 
+    top: 50, 
+    left: 0, 
+    right: 0, 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 1,
+  },
+  imagePreviewName: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  imagePreviewFull: { width: '100%', height: '80%' },
 });
 
 export default NotificationsScreen;

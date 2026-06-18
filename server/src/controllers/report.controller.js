@@ -17,7 +17,7 @@ const notifyAdmins = async (content, metadata = {}) => {
         notificationService.create({
           userId: admin._id,
           type: 'moderation',
-          title: 'New review case',
+          title: 'New moderation report',
           content,
           metadata,
         })
@@ -26,6 +26,36 @@ const notifyAdmins = async (content, metadata = {}) => {
   } catch (err) {
     console.error('Admin notification failed:', err.message);
   }
+};
+
+const getTargetDetails = async (targetType, targetId) => {
+  try {
+    if (!targetType || !targetId) return null;
+
+    if (targetType === 'user') {
+      return await User.findById(targetId).select('fullName name email role avatar title companyName location');
+    }
+    if (targetType === 'message') {
+      return await Message.findById(targetId)
+        .populate('senderId', 'fullName name email avatar')
+        .populate('receiverId', 'fullName name email avatar')
+        .select('content attachments sentAt senderId receiverId');
+    }
+    if (targetType === 'opportunity') {
+      return await Opportunity.findById(targetId).select('title companyId status');
+    }
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const normalizeReport = async (report) => {
+  const reportObj = report.toObject ? report.toObject() : report;
+  return {
+    ...reportObj,
+    targetDetails: await getTargetDetails(reportObj.targetType, reportObj.targetId),
+  };
 };
 
 const logAudit = async (adminId, action, targetType, targetId, notes = '', metadata = {}) => {
@@ -70,6 +100,18 @@ exports.createReport = async (req, res) => {
       createdAt: { $gte: new Date(Date.now() - AUTO_HIDE_WINDOW_MS) },
     });
 
+    await notifyAdmins(
+      recentCount >= 3
+        ? `A reported ${targetType} has reached ${recentCount} reports and was moved to admin review.`
+        : `A new ${targetType} report has been submitted for review.`,
+      {
+        targetType,
+        targetId: targetId.toString(),
+        reportCount: recentCount,
+        reportId: report._id.toString(),
+      }
+    );
+
     if (recentCount >= 3) {
       const existingCase = await ModerationCase.findOneAndUpdate(
         { targetType, targetId },
@@ -104,11 +146,6 @@ exports.createReport = async (req, res) => {
         await Message.findByIdAndUpdate(targetId, { moderationStatus: 'under_review' });
       }
 
-      await notifyAdmins(
-        `A reported ${targetType} has reached ${recentCount} reports and was moved to admin review.`,
-        { targetType, targetId: targetId.toString(), reportCount: recentCount }
-      );
-
       await AuditLog.create({
         adminId: req.user._id,
         action: 'auto_hidden',
@@ -140,7 +177,7 @@ exports.getReports = async (req, res) => {
     if (targetType) filter.targetType = targetType;
 
     const skip = (Number(page) - 1) * Number(limit);
-    const [reports, total] = await Promise.all([
+    const [rawReports, total] = await Promise.all([
       Report.find(filter)
         .populate('reporterId', 'fullName email')
         .sort({ createdAt: -1 })
@@ -148,6 +185,8 @@ exports.getReports = async (req, res) => {
         .limit(Number(limit)),
       Report.countDocuments(filter),
     ]);
+
+    const reports = await Promise.all(rawReports.map(normalizeReport));
 
     res.json({
       reports,
@@ -167,9 +206,11 @@ exports.getReports = async (req, res) => {
 exports.getReportsByTarget = async (req, res) => {
   try {
     const { targetType, targetId } = req.params;
-    const reports = await Report.find({ targetType, targetId })
+    const rawReports = await Report.find({ targetType, targetId })
       .populate('reporterId', 'fullName email')
       .sort({ createdAt: -1 });
+
+    const reports = await Promise.all(rawReports.map(normalizeReport));
 
     res.json({ reports });
   } catch (error) {
