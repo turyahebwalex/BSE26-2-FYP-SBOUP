@@ -53,7 +53,7 @@ const opportunitySchema = new mongoose.Schema(
     ],
     status: {
       type: String,
-      enum: ['draft', 'published', 'under_review', 'blocked', 'archived'],
+      enum: ['draft', 'published', 'under_review', 'blocked', 'suspended', 'archived'],
       default: 'draft',
     },
     isRemote: { type: Boolean, default: false },
@@ -72,6 +72,30 @@ const opportunitySchema = new mongoose.Schema(
     externalLink: { type: String },
     viewCount: { type: Number, default: 0 },
     applicationCount: { type: Number, default: 0 },
+
+    // ── Appeal mechanism ──────────────────────────────────────────────────
+    // Employer can appeal a blocked/suspended decision for admin re-review
+    appeal: {
+      status: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected'],
+        default: 'none',
+      },
+      reason: { type: String, maxlength: 2000, default: '' },
+      submittedAt: { type: Date, default: null },
+      reviewedAt: { type: Date, default: null },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      adminNote: { type: String, maxlength: 2000, default: '' },
+    },
+
+    // ── Genuine quality metrics (used by XAI panel) ───────────────────────
+    qualityScore: { type: Number, min: 0, max: 100, default: null },
+
+    /** Last fraud-service explainability payload (plain language, completeness, confidence). */
+    fraudXai: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );
@@ -79,6 +103,17 @@ const opportunitySchema = new mongoose.Schema(
 // Virtual back-compat: expose employerId === postedByUserId for legacy code.
 opportunitySchema.virtual('employerId').get(function () {
   return this.postedByUserId;
+});
+
+// Flat appeal fields for API consumers (data lives on nested `appeal`).
+opportunitySchema.virtual('appealStatus').get(function () {
+  return this.appeal?.status ?? 'none';
+});
+opportunitySchema.virtual('appealReason').get(function () {
+  return this.appeal?.reason ?? '';
+});
+opportunitySchema.virtual('appealSubmittedAt').get(function () {
+  return this.appeal?.submittedAt ?? null;
 });
 opportunitySchema.set('toJSON', { virtuals: true });
 opportunitySchema.set('toObject', { virtuals: true });

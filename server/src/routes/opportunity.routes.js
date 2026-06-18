@@ -9,5 +9,6 @@ router.get('/employer/mine', authenticate, authorize('employer'), ctrl.getMyOppo
 router.get('/:id', optionalAuth, ctrl.getOpportunityById);
 router.put('/:id', authenticate, authorize('employer'), ctrl.updateOpportunity);
 router.delete('/:id', authenticate, authorize('employer'), ctrl.archiveOpportunity);
+router.post('/:id/appeal', authenticate, authorize('employer'), ctrl.submitAppeal);
 
 module.exports = router;

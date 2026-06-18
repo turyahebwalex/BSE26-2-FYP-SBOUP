@@ -1,10 +1,15 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Opportunity = require('../models/Opportunity');
 const Application = require('../models/Application');
 const Report = require('../models/Report');
 const Profile = require('../models/Profile');
+const FraudLog = require('../models/FraudLog');
+const attachModerationExplanation = require('../utils/attachModerationExplanation');
 const logger = require('../utils/logger');
-const opportunityController = require('./opportunity.controller');
+
+const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
+const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -12,7 +17,7 @@ exports.getDashboardStats = async (req, res) => {
       User.countDocuments(),
       User.countDocuments({ accountStatus: 'active' }),
       Opportunity.countDocuments({ status: 'published' }),
-      Opportunity.countDocuments({ status: 'under_review' }),
+      Opportunity.countDocuments({ status: { $in: ['under_review', 'suspended'] } }),
       Report.countDocuments({ status: 'pending' }),
     ]);
 
@@ -36,58 +41,255 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+const employerModerationStats = async (opportunityDocs) => {
+  const ids = [
+    ...new Set(
+      opportunityDocs
+        .map((o) => {
+          const p = o.postedByUserId;
+          if (!p) return null;
+          return p._id ? String(p._id) : String(p);
+        })
+        .filter(Boolean)
+    ),
+  ];
+  if (ids.length === 0) return new Map();
+
+  const oids = ids.map((id) => new mongoose.Types.ObjectId(id));
+  const [users, agg] = await Promise.all([
+    User.find({ _id: { $in: oids } }).select('createdAt').lean(),
+    Opportunity.aggregate([
+      { $match: { postedByUserId: { $in: oids } } },
+      {
+        $group: {
+          _id: '$postedByUserId',
+          totalPostings: { $sum: 1 },
+          blockedPostings: {
+            $sum: { $cond: [{ $eq: ['$status', 'blocked'] }, 1, 0] },
+          },
+        },
+      },
+    ]),
+  ]);
+
+  const userMap = new Map(users.map((u) => [String(u._id), u]));
+  const statMap = new Map(
+    agg.map((row) => [
+      String(row._id),
+      { totalPostings: row.totalPostings, blockedPostings: row.blockedPostings },
+    ])
+  );
+
+  const out = new Map();
+  for (const id of ids) {
+    const u = userMap.get(id);
+    const s = statMap.get(id) || { totalPostings: 0, blockedPostings: 0 };
+    const created = u?.createdAt ? new Date(u.createdAt) : null;
+    const accountAgeDays =
+      created != null ? Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000)) : null;
+    out.set(id, {
+      accountAgeDays,
+      previousPostings: Math.max(0, (s.totalPostings || 0) - 1),
+      blockedCount: s.blockedPostings || 0,
+    });
+  }
+  return out;
+};
+
+const attachEmployerModerationMeta = async (opportunityDocs) => {
+  const stats = await employerModerationStats(opportunityDocs);
+  return opportunityDocs.map((o) => {
+    const plain = o.toObject ? o.toObject() : { ...o };
+    const uid = plain.postedByUserId?._id || plain.postedByUserId;
+    if (uid) {
+      plain.employerModerationMeta = stats.get(String(uid)) || null;
+    }
+    return plain;
+  });
+};
+
 exports.getFlaggedContent = async (req, res) => {
   try {
-    const flagged = await Opportunity.find({ status: 'under_review' })
-      .populate('postedByUserId', 'fullName email')
-      .populate('companyId', 'name verificationStatus')
-      .sort({ createdAt: -1 });
+    const populatePaths = [
+      { path: 'postedByUserId', select: 'fullName email createdAt' },
+      { path: 'companyId', select: 'name verificationStatus' },
+    ];
 
-    const reports = await Report.find({ status: 'pending' })
-      .populate('reporterId', 'fullName email')
-      .sort({ createdAt: -1 });
+    const [underReview, suspended, pendingAppeals, reports] = await Promise.all([
+      Opportunity.find({ status: 'under_review' }).populate(populatePaths).sort({ createdAt: -1 }),
+      Opportunity.find({ status: 'suspended' }).populate(populatePaths).sort({ updatedAt: -1 }),
+      Opportunity.find({ 'appeal.status': 'pending' }).populate(populatePaths).sort({ 'appeal.submittedAt': -1 }),
+      Report.find({ status: 'pending' }).populate('reporterId', 'fullName email').sort({ createdAt: -1 }),
+    ]);
 
-    res.json({ flaggedOpportunities: flagged, pendingReports: reports });
+    const [flaggedPlain, suspendedPlain, appealsPlain] = await Promise.all([
+      attachEmployerModerationMeta(underReview),
+      attachEmployerModerationMeta(suspended),
+      attachEmployerModerationMeta(pendingAppeals),
+    ]);
+
+    const [flaggedWithExplanation, suspendedWithExplanation, appealsWithExplanation] = await Promise.all([
+      attachModerationExplanation(flaggedPlain),
+      attachModerationExplanation(suspendedPlain),
+      attachModerationExplanation(appealsPlain),
+    ]);
+
+    res.json({
+      flaggedOpportunities: flaggedWithExplanation,
+      suspendedOpportunities: suspendedWithExplanation,
+      pendingAppeals: appealsWithExplanation,
+      pendingReports: reports,
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch flagged content.' });
   }
 };
 
+exports.getFraudInsights = async (req, res) => {
+  try {
+    const { range = '30d', granularity = 'day' } = req.query;
+    const days = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const fmt = granularity === 'week' ? '%G-W%V' : '%Y-%m-%d';
+
+    const [summary, breakdown, trends, recentLogs] = await Promise.all([
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: null,
+            totalLogs: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+            autoPublished: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] },
+            },
+            underReview: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] },
+            },
+            blocked: {
+              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] },
+            },
+            modelPredictions: {
+              $sum: { $cond: [{ $eq: ['$source', 'model'] }, 1, 0] },
+            },
+            workflowDecisions: {
+              $sum: { $cond: [{ $eq: ['$source', 'workflow'] }, 1, 0] },
+            },
+            adminActions: {
+              $sum: { $cond: [{ $eq: ['$source', 'admin'] }, 1, 0] },
+            },
+          },
+        },
+      ]),
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: '$decisionOutcome',
+            count: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
+      FraudLog.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: {
+              period: { $dateToString: { format: fmt, date: '$createdAt' } },
+              decisionOutcome: '$decisionOutcome',
+            },
+            count: { $sum: 1 },
+            averageScore: { $avg: '$fraudScore' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.period',
+            byDecision: { $push: { decisionOutcome: '$_id.decisionOutcome', count: '$count' } },
+            total: { $sum: '$count' },
+            averageScore: { $avg: '$averageScore' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      FraudLog.find({ createdAt: { $gte: since } })
+        .populate('opportunityId', 'title status')
+        .populate('adminId', 'fullName email')
+        .sort({ createdAt: -1 })
+        .limit(25),
+    ]);
+
+    const totals = summary[0] || {
+      totalLogs: 0,
+      averageScore: 0,
+      autoPublished: 0,
+      underReview: 0,
+      blocked: 0,
+      modelPredictions: 0,
+      workflowDecisions: 0,
+      adminActions: 0,
+    };
+
+    res.json({
+      range,
+      granularity,
+      thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+      summary: totals,
+      breakdown,
+      trends,
+      recentLogs,
+    });
+  } catch (error) {
+    logger.error('Fraud insights error:', error);
+    res.status(500).json({ error: 'Failed to fetch fraud insights.' });
+  }
+};
+
 exports.moderateContent = async (req, res) => {
   try {
-    const { contentId, action, contentType } = req.body; // action: approve, remove, ban
+    const { contentId, action, contentType, feedback } = req.body;
+    // action: approve | suspend (temporary, pending appeal) | remove (permanent block)
 
-    let publishedOpportunity = null;
     if (contentType === 'opportunity') {
-      // Fetch the pre-approval state so we can detect the
-      // not-published → published transition. Re-approving an
-      // already-published opp shouldn't re-fan-out notifications.
-      const existing = await Opportunity.findById(contentId).select('status');
-      const wasPublished = existing && existing.status === 'published';
+      let update;
+      if (action === 'approve') update = { status: 'published' };
+      else if (action === 'suspend') update = { status: 'suspended' };
+      else if (action === 'remove') update = { status: 'blocked' };
+      else {
+        return res.status(400).json({ error: 'Invalid action. Use approve, suspend, or remove.' });
+      }
 
-      const update = action === 'approve' ? { status: 'published' } : { status: 'blocked' };
-      const updated = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
-      if (action === 'approve' && !wasPublished && updated) {
-        publishedOpportunity = updated;
+      const opportunity = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
+      if (opportunity) {
+        const verb =
+          action === 'approve' ? 'approved' : action === 'suspend' ? 'suspended' : 'blocked';
+        await FraudLog.create({
+          opportunityId: opportunity._id,
+          source: 'admin',
+          stage: 'moderation',
+          fraudScore: opportunity.fraudRiskScore || 0,
+          classification:
+            opportunity.fraudRiskScore >= FRAUD_HIGH
+              ? 'High Risk'
+              : opportunity.fraudRiskScore >= FRAUD_LOW
+                ? 'Medium Risk'
+                : 'Low Risk',
+          decisionOutcome: opportunity.status,
+          decisionReason: `Admin ${verb} opportunity during manual review.`,
+          thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+          features: { fraudSignals: opportunity.fraudSignals || [] },
+          signals: opportunity.fraudSignals || [],
+          adminId: req.user._id,
+          adminAction: action === 'approve' ? 'approve' : action === 'suspend' ? 'suspend' : 'reject',
+          adminFeedback: feedback || '',
+          explanation: feedback || '',
+        });
       }
     }
 
-    // Log admin action
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
-
-    // Respond immediately — the worker fan-out runs in the background so
-    // the admin doesn't wait on per-worker scoring. setImmediate keeps it
-    // out of this request's lifecycle without blocking the event loop.
-    if (publishedOpportunity) {
-      const oppForFanout = publishedOpportunity;
-      setImmediate(async () => {
-        try {
-          await opportunityController.onOpportunityPublished(oppForFanout);
-        } catch (err) {
-          logger.warn(`onOpportunityPublished fan-out: ${err.message}`);
-        }
-      });
-    }
 
     res.json({ message: `Content ${action}d successfully.` });
   } catch (error) {
@@ -224,6 +426,225 @@ exports.getUserDensity = async (req, res) => {
   }
 };
 
+exports.getArchivedOpportunities = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status = 'archived', search } = req.query;
+    const filter = { status };
+    
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const [opportunities, total] = await Promise.all([
+      Opportunity.find(filter)
+        .populate('postedByUserId', 'fullName email')
+        .populate('companyId', 'name verificationStatus')
+        .populate('requiredSkills', 'skillName')
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Opportunity.countDocuments(filter),
+    ]);
+
+    res.json({
+      opportunities,
+      pagination: { page: Number(page), limit: Number(limit), total },
+    });
+  } catch (error) {
+    logger.error('Get archived opportunities error:', error);
+    res.status(500).json({ error: 'Failed to fetch archived opportunities.' });
+  }
+};
+
+exports.restoreArchivedOpportunity = async (req, res) => {
+  try {
+    const opportunity = await Opportunity.findOneAndUpdate(
+      { _id: req.params.id, status: 'archived' },
+      { status: 'published' },
+      { new: true }
+    ).populate('postedByUserId', 'fullName email');
+
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Archived opportunity not found.' });
+    }
+
+    // Log the restoration action
+    await FraudLog.create({
+      opportunityId: opportunity._id,
+      source: 'admin',
+      stage: 'restoration',
+      fraudScore: opportunity.fraudRiskScore || 0,
+      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
+        ? 'High Risk' 
+        : opportunity.fraudRiskScore >= FRAUD_LOW 
+          ? 'Medium Risk' 
+          : 'Low Risk',
+      decisionOutcome: 'published',
+      decisionReason: 'Admin restored archived opportunity to published status.',
+      thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+      features: { fraudSignals: opportunity.fraudSignals || [] },
+      signals: opportunity.fraudSignals || [],
+      adminId: req.user._id,
+      adminAction: 'restore',
+      adminFeedback: '',
+      explanation: 'Archived opportunity was restored by administrator.',
+    });
+
+    logger.info(`Admin ${req.user._id} restored archived opportunity ${req.params.id}`);
+    res.json({ 
+      message: 'Opportunity restored successfully.', 
+      opportunity 
+    });
+  } catch (error) {
+    logger.error('Restore archived opportunity error:', error);
+    res.status(500).json({ error: 'Failed to restore opportunity.' });
+  }
+};
+
+exports.permanentlyRemoveOpportunity = async (req, res) => {
+  try {
+    const opportunity = await Opportunity.findOneAndDelete({
+      _id: req.params.id,
+      status: { $in: ['archived', 'blocked'] }
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ 
+        error: 'Opportunity not found or cannot be permanently removed.' 
+      });
+    }
+
+    // Log the permanent removal action
+    await FraudLog.create({
+      opportunityId: opportunity._id,
+      source: 'admin',
+      stage: 'permanent_removal',
+      fraudScore: opportunity.fraudRiskScore || 0,
+      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
+        ? 'High Risk' 
+        : opportunity.fraudRiskScore >= FRAUD_LOW 
+          ? 'Medium Risk' 
+          : 'Low Risk',
+      decisionOutcome: 'permanently_removed',
+      decisionReason: 'Admin permanently removed opportunity.',
+      thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+      features: { fraudSignals: opportunity.fraudSignals || [] },
+      signals: opportunity.fraudSignals || [],
+      adminId: req.user._id,
+      adminAction: 'permanent_remove',
+      adminFeedback: '',
+      explanation: 'Opportunity was permanently removed by administrator.',
+    });
+
+    logger.info(`Admin ${req.user._id} permanently removed opportunity ${req.params.id}`);
+    res.json({ 
+      message: 'Opportunity permanently removed.' 
+    });
+  } catch (error) {
+    logger.error('Permanently remove opportunity error:', error);
+    res.status(500).json({ error: 'Failed to permanently remove opportunity.' });
+  }
+};
+
+exports.getAppealsQueue = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status = 'pending' } = req.query;
+    const filter = { 'appeal.status': status };
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const [opportunities, total] = await Promise.all([
+      Opportunity.find(filter)
+        .populate('postedByUserId', 'fullName email')
+        .populate('companyId', 'name verificationStatus')
+        .populate('requiredSkills', 'skillName')
+        .sort({ 'appeal.submittedAt': -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Opportunity.countDocuments(filter),
+    ]);
+
+    res.json({
+      appeals: opportunities,
+      pagination: { page: Number(page), limit: Number(limit), total },
+    });
+  } catch (error) {
+    logger.error('Get appeals queue error:', error);
+    res.status(500).json({ error: 'Failed to fetch appeals queue.' });
+  }
+};
+
+exports.reviewAppeal = async (req, res) => {
+  try {
+    const { action, adminNote } = req.body; // action: 'approve' or 'reject'
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Must be approve or reject.' });
+    }
+
+    const opportunity = await Opportunity.findOne({
+      _id: req.params.id,
+      'appeal.status': 'pending'
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Pending appeal not found.' });
+    }
+
+    // Update appeal status
+    opportunity.appeal.status = action === 'approve' ? 'approved' : 'rejected';
+    opportunity.appeal.reviewedAt = new Date();
+    opportunity.appeal.reviewedBy = req.user._id;
+    opportunity.appeal.adminNote = adminNote || '';
+
+    // Update opportunity status based on appeal decision
+    if (action === 'approve') {
+      opportunity.status = 'published'; // Restore the posting
+    }
+
+    await opportunity.save();
+
+    // Log the appeal review action
+    await FraudLog.create({
+      opportunityId: opportunity._id,
+      source: 'admin',
+      stage: 'appeal_review',
+      fraudScore: opportunity.fraudRiskScore || 0,
+      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
+        ? 'High Risk' 
+        : opportunity.fraudRiskScore >= FRAUD_LOW 
+          ? 'Medium Risk' 
+          : 'Low Risk',
+      decisionOutcome: opportunity.status,
+      decisionReason: `Admin ${action}d appeal. ${adminNote ? `Note: ${adminNote}` : ''}`,
+      thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+      features: { 
+        fraudSignals: opportunity.fraudSignals || [],
+        appealReason: opportunity.appeal.reason,
+        appealDecision: action,
+        adminNote: adminNote
+      },
+      signals: opportunity.fraudSignals || [],
+      adminId: req.user._id,
+      adminAction: `appeal_${action}`,
+      adminFeedback: adminNote || '',
+      explanation: `Appeal ${action}d by administrator. ${adminNote ? `Admin note: ${adminNote}` : ''}`,
+    });
+
+    logger.info(`Admin ${req.user._id} ${action}d appeal for opportunity ${req.params.id}`);
+    res.json({ 
+      message: `Appeal ${action}d successfully.`, 
+      opportunity 
+    });
+  } catch (error) {
+    logger.error('Review appeal error:', error);
+    res.status(500).json({ error: 'Failed to review appeal.' });
+  }
+};
+
 exports.updateUserStatus = async (req, res) => {
   try {
     const { accountStatus, role } = req.body;
@@ -238,5 +659,148 @@ exports.updateUserStatus = async (req, res) => {
     res.json({ user });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update user.' });
+  }
+};
+
+/**
+ * GET /api/admin/model-health
+ * Proxies the fraud-service drift-detection endpoint and augments the response
+ * with a weekly performance time-series built from FraudLog data.
+ */
+exports.getModelHealth = async (req, res) => {
+  const axios = require('axios');
+  try {
+    // ── 1. Drift status from Python service ─────────────────────────────────
+    let driftReport = null;
+    try {
+      const { data } = await axios.get(
+        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/drift/status`,
+        { timeout: 10_000 }
+      );
+      driftReport = data;
+    } catch (err) {
+      logger.warn(`Drift status fetch failed: ${err.message}`);
+    }
+
+    // ── 2. Model stats (accuracy / precision / recall / F1) ─────────────────
+    let modelStats = null;
+    try {
+      const { data } = await axios.get(
+        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/model/stats`,
+        { timeout: 5_000 }
+      );
+      modelStats = data;
+    } catch (err) {
+      logger.warn(`Model stats fetch failed: ${err.message}`);
+    }
+
+    // ── 3. Weekly performance time-series (from FraudLog) ───────────────────
+    // We use the ratio of auto-published vs total model-screened as a proxy
+    // for how lenient/strict the model has been week over week. This gives
+    // the admin a visual trend even without held-out label data.
+    const weeks = parseInt(req.query.weeks, 10) || 12;
+    const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
+
+    const weeklyTrend = await FraudLog.aggregate([
+      { $match: { source: { $in: ['model', 'workflow'] }, createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%G-W%V', date: '$createdAt' } },
+          total: { $sum: 1 },
+          published: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] } },
+          underReview: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] } },
+          blocked: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] } },
+          avgScore: { $avg: '$fraudScore' },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          week: '$_id',
+          total: 1,
+          published: 1,
+          underReview: 1,
+          blocked: 1,
+          avgScore: { $round: ['$avgScore', 1] },
+          autoApprovalRate: {
+            $cond: [
+              { $gt: ['$total', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$published', '$total'] }, 100] }, 1] },
+              0,
+            ],
+          },
+        },
+      },
+    ]);
+
+    // ── 4. Admin agreement trend (weekly) ────────────────────────────────────
+    const adminWeeklyTrend = await FraudLog.aggregate([
+      { $match: { source: 'admin', stage: 'moderation', createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%G-W%V', date: '$createdAt' } },
+          totalAdminActions: { $sum: 1 },
+          approvals: { $sum: { $cond: [{ $eq: ['$adminAction', 'approve'] }, 1, 0] } },
+          rejections: { $sum: { $cond: [{ $in: ['$adminAction', ['reject', 'suspend']] }, 1, 0] } },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          week: '$_id',
+          totalAdminActions: 1,
+          approvals: 1,
+          rejections: 1,
+        },
+      },
+    ]);
+
+    // ── 5. Admin feedback log (most recent 50 labelled entries) ──────────────
+    const feedbackLog = await FraudLog.find({
+      source: 'admin',
+      stage: { $in: ['moderation', 'appeal_review'] },
+      adminFeedback: { $exists: true, $ne: '' },
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('opportunityId', 'title fraudRiskScore status')
+      .populate('adminId', 'fullName email')
+      .select('opportunityId adminId adminAction adminFeedback decisionOutcome fraudScore createdAt');
+
+    res.json({
+      driftReport,
+      modelStats,
+      weeklyTrend,
+      adminWeeklyTrend,
+      feedbackLog,
+    });
+  } catch (error) {
+    logger.error('Model health error:', error);
+    res.status(500).json({ error: 'Failed to fetch model health data.' });
+  }
+};
+
+/**
+ * GET /api/admin/training-export
+ * Proxies the fraud-service training-export endpoint so the admin can download
+ * a labelled dataset from the browser without direct service access.
+ */
+exports.getTrainingExport = async (req, res) => {
+  const axios = require('axios');
+  try {
+    const { days = 90, min_feedback = 'false' } = req.query;
+    const { data } = await axios.get(
+      `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/training-export`,
+      {
+        timeout: 30_000,
+        params: { days, min_feedback },
+      }
+    );
+    res.json(data);
+  } catch (error) {
+    logger.error('Training export proxy error:', error);
+    res.status(500).json({ error: 'Failed to fetch training export data.' });
   }
 };

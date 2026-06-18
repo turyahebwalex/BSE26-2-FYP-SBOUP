@@ -74,8 +74,17 @@ const detectFraud = (opportunity) =>
     title: opportunity.title,
     description: opportunity.description,
     employerId: String(opportunity.postedByUserId),
+    companyId: opportunity.companyId ? String(opportunity.companyId) : null,
+    category: opportunity.category,
+    requiredSkills: (opportunity.requiredSkills || []).map((id) => String(id)),
     compensationRange: opportunity.compensationRange,
+    deadline: opportunity.deadline,
     location: opportunity.location,
+    experienceLevel: opportunity.experienceLevel,
+    isRemote: Boolean(opportunity.isRemote),
+    schedule: opportunity.schedule,
+    applicationMethod: opportunity.applicationMethod,
+    externalLink: opportunity.externalLink,
   });
 
 // ─── CV Generation ───────────────────────────────────────────────

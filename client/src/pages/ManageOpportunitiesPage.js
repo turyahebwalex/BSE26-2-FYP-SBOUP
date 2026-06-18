@@ -1,12 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { FiSearch, FiEdit2, FiTrash2, FiEye, FiArchive, FiBriefcase, FiMapPin, FiCalendar, FiUsers } from 'react-icons/fi';
+import {
+  FiSearch,
+  FiEdit2,
+  FiTrash2,
+  FiEye,
+  FiArchive,
+  FiBriefcase,
+  FiMapPin,
+  FiCalendar,
+  FiUsers,
+  FiAlertTriangle,
+  FiMessageSquare,
+} from 'react-icons/fi';
+import { toast } from 'react-toastify';
 import { opportunityAPI } from '../services/api';
 
 const statusColors = {
   published: 'bg-green-100 text-green-700',
   draft: 'bg-blue-100 text-blue-700',
   under_review: 'bg-yellow-100 text-yellow-700',
+  suspended: 'bg-amber-100 text-amber-800',
   blocked: 'bg-red-100 text-red-700',
   archived: 'bg-gray-100 text-gray-500',
 };
@@ -17,6 +31,8 @@ const ManageOpportunitiesPage = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [archiveId, setArchiveId] = useState(null);
+  const [appealDrafts, setAppealDrafts] = useState({});
+  const [appealSubmitting, setAppealSubmitting] = useState(null);
 
   useEffect(() => {
     loadOpportunities();
@@ -48,7 +64,31 @@ const ManageOpportunitiesPage = () => {
     total: opportunities.length,
     active: opportunities.filter((o) => o.status === 'published').length,
     archived: opportunities.filter((o) => o.status === 'archived').length,
+    restricted: opportunities.filter((o) => o.status === 'blocked' || o.status === 'suspended').length,
+    review: opportunities.filter((o) => o.status === 'under_review').length,
   }), [opportunities]);
+
+  const submitAppeal = async (oppId) => {
+    const reason = (appealDrafts[oppId] || '').trim();
+    if (!reason) {
+      toast.error('Please explain why you believe this posting should be reviewed.');
+      return;
+    }
+    setAppealSubmitting(oppId);
+    try {
+      await opportunityAPI.submitAppeal(oppId, { reason });
+      toast.success('Appeal submitted. An administrator will review it.');
+      setAppealDrafts((prev) => {
+        const next = { ...prev };
+        delete next[oppId];
+        return next;
+      });
+      await loadOpportunities();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Could not submit appeal.');
+    }
+    setAppealSubmitting(null);
+  };
 
   const handleArchive = async (id) => {
     try {
@@ -79,7 +119,7 @@ const ManageOpportunitiesPage = () => {
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
         <div className="card text-center">
           <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
           <p className="text-xs text-gray-500 mt-1">Total</p>
@@ -89,6 +129,14 @@ const ManageOpportunitiesPage = () => {
           <p className="text-xs text-gray-500 mt-1">Active</p>
         </div>
         <div className="card text-center">
+          <p className="text-2xl font-bold text-yellow-600">{stats.review}</p>
+          <p className="text-xs text-gray-500 mt-1">Under review</p>
+        </div>
+        <div className="card text-center">
+          <p className="text-2xl font-bold text-red-600">{stats.restricted}</p>
+          <p className="text-xs text-gray-500 mt-1">Blocked / suspended</p>
+        </div>
+        <div className="card text-center col-span-2 sm:col-span-1">
           <p className="text-2xl font-bold text-gray-500">{stats.archived}</p>
           <p className="text-xs text-gray-500 mt-1">Archived</p>
         </div>
@@ -107,7 +155,7 @@ const ManageOpportunitiesPage = () => {
 
       {/* Status Filter */}
       <div className="flex gap-2 mb-6 overflow-x-auto">
-        {['', 'published', 'draft', 'under_review', 'archived'].map((s) => (
+        {['', 'published', 'draft', 'under_review', 'suspended', 'blocked', 'archived'].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
@@ -178,7 +226,129 @@ const ManageOpportunitiesPage = () => {
                     >
                       Avg match: {opp.avgMatchScore != null ? `${opp.avgMatchScore}%` : '—'}
                     </span>
+                    {(opp.fraudRiskScore != null && opp.fraudRiskScore > 0) && (
+                      <span
+                        className={`badge text-[11px] border ${
+                          opp.fraudRiskScore >= 70
+                            ? 'bg-red-50 text-red-800 border-red-200'
+                            : opp.fraudRiskScore >= 30
+                              ? 'bg-yellow-50 text-yellow-800 border-yellow-200'
+                              : 'bg-green-50 text-green-800 border-green-200'
+                        }`}
+                      >
+                        Risk score: {opp.fraudRiskScore}
+                      </span>
+                    )}
                   </div>
+
+                  {/* Trust & safety — blocked / suspended / review */}
+                  {(opp.status === 'blocked' ||
+                    opp.status === 'suspended' ||
+                    opp.status === 'under_review') && (
+                    <div
+                      className={`mt-3 p-3 rounded-xl text-sm ${
+                        opp.status === 'blocked'
+                          ? 'bg-red-50 border border-red-100'
+                          : opp.status === 'suspended'
+                            ? 'bg-amber-50 border border-amber-100'
+                            : 'bg-yellow-50 border border-yellow-100'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <FiAlertTriangle
+                          className={
+                            opp.status === 'blocked'
+                              ? 'text-red-600 shrink-0 mt-0.5'
+                              : opp.status === 'suspended'
+                                ? 'text-amber-600 shrink-0 mt-0.5'
+                                : 'text-yellow-600 shrink-0 mt-0.5'
+                          }
+                          size={16}
+                        />
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-900">
+                            {opp.status === 'blocked' && 'This posting is blocked'}
+                            {opp.status === 'suspended' && 'This posting is suspended pending review'}
+                            {opp.status === 'under_review' && 'This posting is awaiting moderator review'}
+                          </p>
+                          {(opp.fraudXai?.plainEnglishRationale || opp.moderationExplanation) && (
+                            <p className="text-gray-700 mt-1 leading-snug">
+                              {opp.fraudXai?.plainEnglishRationale || opp.moderationExplanation}
+                            </p>
+                          )}
+                          {opp.fraudXai?.confidenceLevel && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              Model confidence:{' '}
+                              <span className="font-medium capitalize">{opp.fraudXai.confidenceLevel}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Employer appeal (blocked, suspended, or under review; one per posting) */}
+                  {(opp.status === 'blocked' || opp.status === 'suspended' || opp.status === 'under_review') && (
+                    <div className="mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FiMessageSquare className="text-indigo-600" size={16} />
+                        <span className="text-xs font-semibold text-indigo-900">Appeal decision</span>
+                      </div>
+                      {opp.appeal?.status === 'pending' && (
+                        <p className="text-sm text-indigo-950">
+                          Your appeal was submitted
+                          {opp.appeal?.submittedAt
+                            ? ` on ${new Date(opp.appeal.submittedAt).toLocaleString()}`
+                            : ''}
+                          . An administrator will respond here when it is reviewed.
+                        </p>
+                      )}
+                      {opp.appeal?.status === 'approved' && (
+                        <p className="text-sm text-indigo-950">
+                          Your appeal was approved. If the posting is not live yet, refresh this page or contact
+                          support.
+                        </p>
+                      )}
+                      {opp.appeal?.status === 'rejected' && (
+                        <p className="text-sm text-indigo-950">
+                          Your appeal was not accepted. The posting remains{' '}
+                          {opp.status === 'blocked'
+                            ? 'blocked'
+                            : opp.status === 'suspended'
+                              ? 'suspended'
+                              : 'under review'}.
+                          {opp.appeal?.adminNote ? (
+                            <span className="block mt-2 text-gray-700">Note: {opp.appeal.adminNote}</span>
+                          ) : null}
+                        </p>
+                      )}
+                      {(opp.appeal?.status === 'none' || !opp.appeal?.status) && (
+                        <>
+                          <p className="text-xs text-indigo-900 mb-2">
+                            If you believe this was a mistake, submit a short justification. You can only appeal once per
+                            posting.
+                          </p>
+                          <textarea
+                            rows={3}
+                            placeholder="Explain why this job posting is legitimate…"
+                            className="w-full text-sm border border-indigo-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300/40 resize-none bg-white"
+                            value={appealDrafts[opp._id] || ''}
+                            onChange={(e) =>
+                              setAppealDrafts((prev) => ({ ...prev, [opp._id]: e.target.value }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            disabled={appealSubmitting === opp._id}
+                            onClick={() => submitAppeal(opp._id)}
+                            className="mt-2 btn-primary text-sm !py-1.5 disabled:opacity-50"
+                          >
+                            {appealSubmitting === opp._id ? 'Submitting…' : 'Submit appeal'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

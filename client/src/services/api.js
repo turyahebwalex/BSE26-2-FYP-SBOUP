@@ -72,6 +72,7 @@ export const opportunityAPI = {
   update: (id, data) => api.put(`/opportunities/${id}`, data),
   archive: (id) => api.delete(`/opportunities/${id}`),
   getMine: () => api.get('/opportunities/employer/mine'),
+  submitAppeal: (id, data) => api.post(`/opportunities/${id}/appeal`, data),
 };
 
 // ─── Applications ───
@@ -155,6 +156,14 @@ export const adminAPI = {
   moderate: (data) => api.post('/admin/moderate', data),
   getUsers: (params) => api.get('/admin/users', { params }),
   updateUser: (userId, data) => api.put(`/admin/users/${userId}`, data),
+  getFraudInsights: (params) => api.get('/admin/fraud-insights', { params }),
+  getAppeals: (params) => api.get('/admin/appeals', { params }),
+  reviewAppeal: (id, data) => api.post(`/admin/appeals/${id}/review`, data),
+  getArchivedOpportunities: (params) => api.get('/admin/archived-opportunities', { params }),
+  restoreArchivedOpportunity: (id) => api.post(`/admin/archived-opportunities/${id}/restore`),
+  permanentlyRemoveOpportunity: (id) => api.delete(`/admin/opportunities/${id}/permanent-remove`),
+  getModelHealth: (params) => api.get('/admin/model-health', { params }),
+  getTrainingExport: (params) => api.get('/admin/training-export', { params }),
 };
 
 export default api;
