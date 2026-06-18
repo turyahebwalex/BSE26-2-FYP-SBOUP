@@ -17,7 +17,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../context/AuthContext';
 import { profileAPI, BASE_URL } from '../../services/api';
 
-// Avatar is stored per-user so switching accounts shows the right photo
 const AVATAR_KEY = (userId) => `user_avatar_uri_${userId}`;
 
 const ProfileScreen = ({ navigation }) => {
@@ -27,13 +26,13 @@ const ProfileScreen = ({ navigation }) => {
   const [experiences, setExperiences] = useState([]);
   const [education, setEducation] = useState([]);
   const [preference, setPreference] = useState(null);
-  const [unreadCount, setUnreadCount] = useState(0);   // ← ADDED (was missing)
+  const [unreadCount, setUnreadCount] = useState(0);  
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [avatarUri, setAvatarUri] = useState(null);
 
-  // Load avatar: AsyncStorage cache first, then fall back to DB
+ 
   useEffect(() => {
     const userId = user?._id || user?.id || 'guest';
     const key = AVATAR_KEY(userId);
@@ -41,7 +40,7 @@ const ProfileScreen = ({ navigation }) => {
       if (cached) {
         setAvatarUri(cached);
       } else {
-        // Not in cache — try to load from the profile in DB
+        
         try {
           const { data } = await profileAPI.getMyProfile();
           const b64 = data.profile?.avatarBase64;
@@ -116,7 +115,7 @@ const ProfileScreen = ({ navigation }) => {
         setUnreadCount(data.unreadCount || 0);
       }
     } catch {
-      /* silent — badge is non-critical */
+      
     }
   }, []);
 
@@ -166,7 +165,7 @@ const ProfileScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} />
         }
       >
-        {/* Profile Header */}
+       
         <View style={styles.profileHeader}>
           <TouchableOpacity onPress={handlePickAvatar} style={styles.avatarWrapper} activeOpacity={0.8}>
             {avatarUri ? (

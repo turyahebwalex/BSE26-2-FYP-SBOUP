@@ -10,6 +10,7 @@ import {
   ScrollView,
   Image,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,26 +38,31 @@ const formatTime = (timestamp) => {
   return date.toLocaleDateString('en-UG', { month: 'short', day: 'numeric' });
 };
 
-const AvatarCircle = ({ name = '', size = 46, online = false, imageUrl }) => {
+const AvatarCircle = ({ name = '', size = 46, online = false, imageUrl, onPress }) => {
   const resolvedUrl = imageUrl
-    ? imageUrl.startsWith('http') ? imageUrl : `${STATIC_BASE_URL}/${imageUrl.replace(/^\//, '')}`
-    : null;
+  ? imageUrl.startsWith('http') 
+    ? imageUrl 
+    : `${STATIC_BASE_URL}/${imageUrl.replace(/^\//, '')}`
+  : null;
+  
   return (
-    <View style={{ position: 'relative' }}>
-      {resolvedUrl ? (
-        <Image
-          source={{ uri: resolvedUrl }}
-          style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: '#fff' }}
-        />
-      ) : (
-        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: getAvatarColor(name), justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: '#fff' }}>{name.charAt(0).toUpperCase()}</Text>
-        </View>
-      )}
-      {online && (
-        <View style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 6, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#fff' }} />
-      )}
-    </View>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8} disabled={!resolvedUrl}>
+      <View style={{ position: 'relative' }}>
+        {resolvedUrl ? (
+          <Image
+            source={{ uri: resolvedUrl }}
+            style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 2, borderColor: '#fff' }}
+          />
+        ) : (
+          <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: getAvatarColor(name), justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ fontSize: size * 0.38, fontWeight: '700', color: '#fff' }}>{name.charAt(0).toUpperCase()}</Text>
+          </View>
+        )}
+        {online && (
+          <View style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 6, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#fff' }} />
+        )}
+      </View>
+    </TouchableOpacity>
   );
 };
 
@@ -74,7 +80,7 @@ const AppIcon = ({ app, onPress, onLongPress }) => (
   </TouchableOpacity>
 );
 
-const MessageRow = ({ item, onPress, isOnline }) => {
+const MessageRow = ({ item, onPress, isOnline, onAvatarPress }) => {
   const otherUser = item.otherUser || {};
   const userName = otherUser.fullName || otherUser.name || 'User';
   const userAvatar = otherUser.avatar;
@@ -87,7 +93,13 @@ const MessageRow = ({ item, onPress, isOnline }) => {
 
   return (
     <TouchableOpacity style={styles.msgRow} onPress={onPress} activeOpacity={0.75}>
-      <AvatarCircle name={userName} size={46} online={isOnline} imageUrl={userAvatar} />
+      <AvatarCircle 
+        name={userName} 
+        size={46} 
+        online={isOnline} 
+        imageUrl={userAvatar}
+        onPress={() => onAvatarPress(userAvatar, userName)}
+      />
       <View style={styles.msgBody}>
         <View style={styles.msgTopRow}>
           <Text style={[styles.msgName, unreadCount > 0 && styles.msgNameUnread]} numberOfLines={1}>{userName}</Text>
@@ -121,6 +133,10 @@ const MessagesInbox = ({ navigation }) => {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [pinnedApplications, setPinnedApplications] = useState([]);
   const [loadingPinned, setLoadingPinned] = useState(true);
+  
+  // Image preview modal state
+  const [previewImage, setPreviewImage] = useState(null);
+  const [previewUserName, setPreviewUserName] = useState('');
 
   const getAuthData = async () => {
     try {
@@ -165,11 +181,11 @@ const MessagesInbox = ({ navigation }) => {
     }
   }, [fetchPinnedApplications]);
 
- const handleAppPress = (application) => {
-  const opportunity = application.opportunityId || {};
-  const opportunityId = opportunity._id || opportunity.id || application.opportunityId;
-  navigation.navigate('OpportunityDetail', { opportunityId, opportunity });
-};
+  const handleAppPress = (application) => {
+    const opportunity = application.opportunityId || {};
+    const opportunityId = opportunity._id || opportunity.id || application.opportunityId;
+    navigation.navigate('OpportunityDetail', { opportunityId, opportunity });
+  };
 
   const getAppIconData = (app) => {
     const opportunity = app.opportunityId || {};
@@ -247,6 +263,16 @@ const MessagesInbox = ({ navigation }) => {
     }
   }, [currentUserId]);
 
+  // Handle avatar press to preview image
+  const handleAvatarPress = (avatarUrl, userName) => {
+    if (!avatarUrl) return;
+    const resolvedUrl = avatarUrl.startsWith('http') 
+      ? avatarUrl 
+      : `${STATIC_BASE_URL}/${avatarUrl.replace(/^\//, '')}`;
+    setPreviewImage(resolvedUrl);
+    setPreviewUserName(userName);
+  };
+
   useEffect(() => {
     const initSocket = async () => {
       await socketService.connect();
@@ -285,11 +311,40 @@ const MessagesInbox = ({ navigation }) => {
     fetchPinnedApplications();
   };
 
-  const handleNewMessagePress = () => navigation.navigate('MessagesMain');
+  const handleNewMessagePress = () => {
+    navigation.navigate('MessagesMain', { focusTab: 'search' });
+  };
+  
   const handleChatPress = (conversation) => {
     const otherUser = conversation.otherUser || {};
-    navigation.navigate('Chat', { userId: otherUser._id, userName: otherUser.fullName, userAvatar: otherUser.avatar, userRole: otherUser.role });
+    navigation.navigate('Chat', { 
+      userId: otherUser._id, 
+      userName: otherUser.fullName, 
+      userAvatar: otherUser.avatar, 
+      userRole: otherUser.role 
+    });
   };
+
+  // Image Preview Modal
+  const ImagePreviewModal = () => (
+    <Modal visible={!!previewImage} transparent animationType="fade" onRequestClose={() => setPreviewImage(null)}>
+      <TouchableOpacity style={styles.imagePreviewOverlay} activeOpacity={1} onPress={() => setPreviewImage(null)}>
+        <View style={styles.imagePreviewContainer}>
+          <View style={styles.imagePreviewHeader}>
+            <Text style={styles.imagePreviewName}>{previewUserName}</Text>
+            <TouchableOpacity onPress={() => setPreviewImage(null)}>
+              <Ionicons name="close-circle" size={32} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          <Image 
+            source={{ uri: previewImage }} 
+            style={styles.imagePreviewFull} 
+            resizeMode="contain"
+          />
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
 
   const renderPinnedApps = () => {
     if (loadingPinned) return (
@@ -328,53 +383,58 @@ const MessagesInbox = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
-      {error && (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle-outline" size={15} color="#EF4444" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity onPress={onRefresh}><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
-        </View>
-      )}
-
-      <FlatList
-        data={conversations}
-        keyExtractor={(item) => item._id || item.otherUser?._id || Math.random().toString()}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} tintColor="#F97316" />}
-        ListHeaderComponent={
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>PINNED APPLICATIONS</Text>
-              <Text style={styles.activeCount}>{pinnedApplications.length} Pinned</Text>
-            </View>
-            {renderPinnedApps()}
-            <View style={[styles.sectionHeader, { marginTop: 24, marginBottom: 0 }]}>
-              <Text style={styles.sectionTitle}>RECENT MESSAGES</Text>
-              <Text style={styles.messageCount}>{conversations.length} {conversations.length === 1 ? 'conversation' : 'conversations'}</Text>
-            </View>
-          </>
-        }
-        renderItem={({ item }) => (
-          <MessageRow
-            item={item}
-            isOnline={onlineStatuses[item.otherUser?._id]?.isOnline || false}
-            onPress={() => handleChatPress(item)}
-          />
-        )}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-        ListEmptyComponent={!loading && (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="chatbubbles-outline" size={48} color="#D1D5DB" />
-            <Text style={styles.emptyTitle}>No Messages</Text>
-            <Text style={styles.emptyText}>Start a conversation by connecting with employers or workers.</Text>
-            <TouchableOpacity style={styles.startBtn} onPress={handleNewMessagePress}>
-              <Text style={styles.startBtnText}>Start a Conversation</Text>
-            </TouchableOpacity>
+    <>
+      <View style={styles.container}>
+        {error && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={15} color="#EF4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={onRefresh}><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
           </View>
         )}
-      />
-    </View>
+
+        <FlatList
+          data={conversations}
+          keyExtractor={(item) => item._id || item.otherUser?._id || Math.random().toString()}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#F97316']} tintColor="#F97316" />}
+          ListHeaderComponent={
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>PINNED APPLICATIONS</Text>
+                <Text style={styles.activeCount}>{pinnedApplications.length} Pinned</Text>
+              </View>
+              {renderPinnedApps()}
+              <View style={[styles.sectionHeader, { marginTop: 24, marginBottom: 0 }]}>
+                <Text style={styles.sectionTitle}>RECENT MESSAGES</Text>
+                <Text style={styles.messageCount}>{conversations.length} {conversations.length === 1 ? 'conversation' : 'conversations'}</Text>
+              </View>
+            </>
+          }
+          renderItem={({ item }) => (
+            <MessageRow
+              item={item}
+              isOnline={onlineStatuses[item.otherUser?._id]?.isOnline || false}
+              onPress={() => handleChatPress(item)}
+              onAvatarPress={handleAvatarPress}
+            />
+          )}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListEmptyComponent={!loading && (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="chatbubbles-outline" size={48} color="#D1D5DB" />
+              <Text style={styles.emptyTitle}>No Messages</Text>
+              <Text style={styles.emptyText}>Start a conversation by connecting with employers or workers.</Text>
+              <TouchableOpacity style={styles.startBtn} onPress={handleNewMessagePress}>
+                <Text style={styles.startBtnText}>Start a Conversation</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        />
+      </View>
+      
+      <ImagePreviewModal />
+    </>
   );
 };
 
@@ -410,6 +470,23 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 20 },
   startBtn: { backgroundColor: '#F97316', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25 },
   startBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  
+  // Image Preview Modal Styles
+  imagePreviewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' },
+  imagePreviewContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  imagePreviewHeader: { 
+    position: 'absolute', 
+    top: 50, 
+    left: 0, 
+    right: 0, 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 1,
+  },
+  imagePreviewName: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  imagePreviewFull: { width: '100%', height: '80%' },
 });
 
 export default MessagesInbox;

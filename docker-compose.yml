@@ -50,6 +50,9 @@ services:
       - CV_GENERATION_SERVICE_URL=http://localhost:5003
       - LEARNING_SERVICE_URL=http://localhost:5004
       - CHATBOT_SERVICE_URL=http://localhost:5005
+      - GMAIL_USER=skillbridge850@gmail.com
+      - GMAIL_APP_PASSWORD=tlyazzcvqvnfvxxj
+      
     depends_on:
       - mongodb
       - redis

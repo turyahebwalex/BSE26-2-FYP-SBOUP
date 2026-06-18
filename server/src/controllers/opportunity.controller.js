@@ -229,6 +229,16 @@ exports.getOpportunities = async (req, res) => {
       minPay,
       maxPay,
       sortBy = 'createdAt',
+      companyId,
+    } = req.query;
+
+    const filter = { status: 'published', deadline: { $gte: new Date() } };
+
+    if (companyId) {
+      filter.companyId = companyId;
+    }
+
+
     } = req.query;
 
     const filter = { status: 'published', deadline: { $gte: new Date() } };
@@ -494,5 +504,324 @@ exports.getMyOpportunities = async (req, res) => {
   } catch (error) {
     logger.error('Get my opportunities error:', error);
     res.status(500).json({ error: 'Failed to fetch opportunities.' });
+  }
+};
+
+// ============================================================================
+// NEW APPLICATION METHODS
+// ============================================================================
+
+/**
+ * GET /api/opportunities/:opportunityId/apply-options
+ * Returns available application methods for an opportunity
+ * Also checks if the user has already applied
+ */
+exports.getApplicationOptions = async (req, res) => {
+  try {
+    const { opportunityId } = req.params;
+    
+    const opportunity = await Opportunity.findById(opportunityId)
+      .select('applicationMethods externalApplyUrl messageInstructions title companyId postedByUserId');
+    
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Opportunity not found' });
+    }
+    
+    // Check if user has already applied
+    const profile = await Profile.findOne({ userId: req.user._id }).select('_id');
+    let hasApplied = false;
+    let applicationId = null;
+    
+    if (profile) {
+      const existingApplication = await Application.findOne({
+        profileId: profile._id,
+        opportunityId: opportunityId
+      }).select('_id applicationSource');
+      
+      if (existingApplication) {
+        hasApplied = true;
+        applicationId = existingApplication._id;
+      }
+    }
+    
+    // Get available methods with metadata
+    const availableMethods = [];
+    
+    if (opportunity.applicationMethods && opportunity.applicationMethods.includes('in_app')) {
+      availableMethods.push({
+        type: 'in_app',
+        label: 'In-App Application',
+        description: 'Submit your CV, cover letter, and supporting documents directly',
+        icon: 'document-text-outline',
+        color: '#F59E0B',
+      });
+    }
+    
+    if (opportunity.applicationMethods && opportunity.applicationMethods.includes('message')) {
+      availableMethods.push({
+        type: 'message',
+        label: 'Apply via Message',
+        description: opportunity.messageInstructions || 'Send a direct message to the employer expressing your interest',
+        icon: 'chatbubble-outline',
+        color: '#3B82F6',
+        instructions: opportunity.messageInstructions,
+      });
+    }
+    
+    if (opportunity.applicationMethods && opportunity.applicationMethods.includes('external_link') && opportunity.externalApplyUrl) {
+      availableMethods.push({
+        type: 'external_link',
+        label: 'External Application',
+        description: 'Apply through an external form',
+        icon: 'link-outline',
+        color: '#10B981',
+        url: opportunity.externalApplyUrl,
+      });
+    }
+    
+    res.json({
+      success: true,
+      opportunity: {
+        id: opportunity._id,
+        title: opportunity.title,
+        companyId: opportunity.companyId,
+        employerId: opportunity.postedByUserId,
+      },
+      availableMethods,
+      hasApplied,
+      applicationId,
+    });
+  } catch (error) {
+    logger.error('Get application options error:', error);
+    res.status(500).json({ error: 'Failed to get application options.' });
+  }
+};
+
+/**
+ * POST /api/opportunities/apply-by-message
+ * Handle message-based application
+ */
+exports.applyViaMessage = async (req, res) => {
+  try {
+    const { opportunityId, message, conversationId } = req.body;
+    
+    if (!opportunityId) {
+      return res.status(400).json({ error: 'Opportunity ID is required' });
+    }
+    
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    // Get opportunity to verify it exists and message method is allowed
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Opportunity not found' });
+    }
+    
+    if (!opportunity.applicationMethods || !opportunity.applicationMethods.includes('message')) {
+      return res.status(400).json({ error: 'Message applications are not accepted for this opportunity' });
+    }
+    
+    // Get user's profile
+    const profile = await Profile.findOne({ userId: req.user._id });
+    if (!profile) {
+      return res.status(400).json({ error: 'Please complete your profile before applying' });
+    }
+    
+    // Check if already applied
+    const existingApplication = await Application.findOne({
+      profileId: profile._id,
+      opportunityId: opportunityId,
+    });
+    
+    if (existingApplication) {
+      return res.status(400).json({ error: 'You have already applied to this opportunity' });
+    }
+    
+    // Create application
+    const application = new Application({
+      profileId: profile._id,
+      opportunityId: opportunityId,
+      applicationSource: 'message',
+      sourceConversationId: conversationId || null,
+      notes: message.trim(),
+      status: 'submitted',
+      submittedAt: new Date(),
+    });
+    
+    await application.save();
+    
+    // Increment application count on opportunity
+    await Opportunity.findByIdAndUpdate(opportunityId, {
+      $inc: { applicationCount: 1 }
+    });
+    
+    // Send notification to employer via socket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${opportunity.postedByUserId}`).emit('new_application', {
+        applicationId: application._id,
+        opportunityId: opportunityId,
+        opportunityTitle: opportunity.title,
+        applicantName: req.user.fullName,
+        applicantId: req.user._id,
+        type: 'message_application',
+        message: message.trim(),
+      });
+    }
+    
+    // Also create a notification in the database
+    await notify.create({
+      userId: opportunity.postedByUserId,
+      type: 'application_update',
+      title: `New message application for ${opportunity.title}`,
+      content: `${req.user.fullName} has applied via message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+      metadata: {
+        applicationId: application._id,
+        opportunityId: opportunityId,
+        applicantId: req.user._id,
+        applicantName: req.user.fullName,
+      },
+    });
+    
+    res.json({
+      success: true,
+      message: 'Your application has been sent to the employer',
+      application: {
+        id: application._id,
+        status: application.status,
+        submittedAt: application.submittedAt,
+      },
+    });
+  } catch (error) {
+    logger.error('Apply via message error:', error);
+    res.status(500).json({ error: 'Failed to submit application.' });
+  }
+};
+
+/**
+ * GET /api/opportunities/:opportunityId/external-url
+ * Get external application URL for redirect
+ */
+exports.getExternalApplyUrl = async (req, res) => {
+  try {
+    const { opportunityId } = req.params;
+    
+    const opportunity = await Opportunity.findById(opportunityId)
+      .select('externalApplyUrl applicationMethods title');
+    
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Opportunity not found' });
+    }
+    
+    if (!opportunity.applicationMethods || !opportunity.applicationMethods.includes('external_link')) {
+      return res.status(400).json({ error: 'External applications are not accepted for this opportunity' });
+    }
+    
+    if (!opportunity.externalApplyUrl) {
+      return res.status(404).json({ error: 'External application URL not configured' });
+    }
+    
+    // Track click for analytics
+    await Opportunity.findByIdAndUpdate(opportunityId, {
+      $inc: { externalClickCount: 1 }
+    });
+    
+    // Optional: Create a tracking record for this user's external click
+    // This can help with analytics even though application is external
+    try {
+      const profile = await Profile.findOne({ userId: req.user._id }).select('_id');
+      if (profile) {
+        // You could create a tracking document here if needed
+        logger.info(`User ${req.user._id} clicked external link for opportunity ${opportunityId}`);
+      }
+    } catch (trackErr) {
+      // Don't fail if tracking fails
+      logger.warn('Failed to track external click:', trackErr.message);
+    }
+    
+    res.json({
+      success: true,
+      url: opportunity.externalApplyUrl,
+      opportunityTitle: opportunity.title,
+    });
+  } catch (error) {
+    logger.error('Get external URL error:', error);
+    res.status(500).json({ error: 'Failed to get external application URL.' });
+  }
+};
+
+/**
+ * GET /api/opportunities/:opportunityId/application-form
+ * Get custom questions for in-app application
+ */
+exports.getApplicationForm = async (req, res) => {
+  try {
+    const { opportunityId } = req.params;
+    
+    const opportunity = await Opportunity.findById(opportunityId)
+      .select('title requiredDocuments customQuestions applicationMethods companyId');
+    
+    if (!opportunity) {
+      return res.status(404).json({ error: 'Opportunity not found' });
+    }
+    
+    if (!opportunity.applicationMethods || !opportunity.applicationMethods.includes('in_app')) {
+      return res.status(400).json({ error: 'In-app applications are not accepted for this opportunity' });
+    }
+    
+    // Get user's profile to check if they have existing data to pre-fill
+    const profile = await Profile.findOne({ userId: req.user._id })
+      .populate('skills')
+      .select('title bio location');
+    
+    res.json({
+      success: true,
+      opportunity: {
+        id: opportunity._id,
+        title: opportunity.title,
+        companyId: opportunity.companyId,
+      },
+      requiredDocuments: opportunity.requiredDocuments || ['cv', 'cover_letter'],
+      customQuestions: opportunity.customQuestions || [],
+      prefillData: profile ? {
+        title: profile.title,
+        location: profile.location,
+        bio: profile.bio,
+      } : null,
+    });
+  } catch (error) {
+    logger.error('Get application form error:', error);
+    res.status(500).json({ error: 'Failed to get application form.' });
+  }
+};
+
+/**
+ * GET /api/opportunities/:opportunityId/check-application
+ * Check if user has already applied to an opportunity
+ */
+exports.checkApplicationStatus = async (req, res) => {
+  try {
+    const { opportunityId } = req.params;
+    
+    const profile = await Profile.findOne({ userId: req.user._id }).select('_id');
+    
+    if (!profile) {
+      return res.json({ hasApplied: false, application: null });
+    }
+    
+    const application = await Application.findOne({
+      profileId: profile._id,
+      opportunityId: opportunityId,
+    }).select('_id status applicationSource submittedAt');
+    
+    res.json({
+      hasApplied: !!application,
+      application: application || null,
+    });
+  } catch (error) {
+    logger.error('Check application status error:', error);
+    res.status(500).json({ error: 'Failed to check application status.' });
   }
 };

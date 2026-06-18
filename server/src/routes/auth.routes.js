@@ -13,8 +13,15 @@ router.post('/reset-password/:token', validate('resetPassword'), ctrl.resetPassw
 router.get('/verify-email/:token', ctrl.verifyEmail);
 router.get('/me', authenticate, ctrl.getMe);
 
-// Google OAuth
+// Google OAuth - Passport (Web redirect flow)
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', passport.authenticate('google', { session: false }), ctrl.googleCallback);
+
+// Google Login - Token-based (For mobile apps)
+router.post('/google', ctrl.googleLogin); 
+
+// OTP routes – email
+router.post('/send-otp', ctrl.sendOtp);
+router.post('/verify-otp', ctrl.verifyOtp);
 
 module.exports = router;

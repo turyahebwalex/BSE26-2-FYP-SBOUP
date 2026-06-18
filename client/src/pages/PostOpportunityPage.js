@@ -34,6 +34,7 @@ const PostOpportunityPage = () => {
     title: '', description: '', category: 'formal', location: '', isRemote: false,
     requiredSkills: [], compensationRange: { min: '', max: '', currency: 'UGX', period: 'monthly' },
     deadline: '', experienceLevel: 'any', schedule: '', applicationMethod: 'internal',
+    externalApplyUrl: '',
   });
 
   useEffect(() => {
@@ -194,6 +195,12 @@ const PostOpportunityPage = () => {
     } else if (new Date(form.deadline).getTime() <= Date.now()) {
       errs.push({ field: 'deadline', message: 'Deadline must be in the future.' });
     }
+    // If external application selected, require a valid URL
+    if (form.applicationMethod === 'external') {
+      const url = (form.externalApplyUrl || '').trim();
+      if (!url) errs.push({ field: 'externalApplyUrl', message: 'External application URL is required for external applications.' });
+      else if (!/^https?:\/\//.test(url)) errs.push({ field: 'externalApplyUrl', message: 'External URL must start with http:// or https://'});
+    }
     return errs;
   };
 
@@ -214,6 +221,9 @@ const PostOpportunityPage = () => {
           min: Number(form.compensationRange.min) || undefined,
           max: Number(form.compensationRange.max) || undefined,
         },
+        // Map the simple UI choice into the API's applicationMethods + externalApplyUrl
+        applicationMethods: form.applicationMethod === 'external' ? ['external_link'] : ['in_app'],
+        externalApplyUrl: form.applicationMethod === 'external' ? form.externalApplyUrl : undefined,
       };
       await opportunityAPI.create(payload);
       toast.success('Opportunity posted! It will be reviewed shortly.');
@@ -412,6 +422,14 @@ const PostOpportunityPage = () => {
             </button>
           ))}
         </div>
+        {form.applicationMethod === 'external' && (
+          <div className="mt-3">
+            <label className="block text-sm font-medium mb-1">External application URL</label>
+            <input className="input-field" placeholder="https://example.com/form" value={form.externalApplyUrl}
+              onChange={(e) => setForm({ ...form, externalApplyUrl: e.target.value })} />
+            <p className="text-xs text-gray-500 mt-1">Provide a full URL (Google Form, company careers page, WhatsApp link, or mailto:).</p>
+          </div>
+        )}
       </div>
     </div>,
   ];

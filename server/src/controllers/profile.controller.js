@@ -1,8 +1,39 @@
+const fs = require('fs');
+const path = require('path');
 const Profile = require('../models/Profile');
 const ProfileSkill = require('../models/ProfileSkill');
 const Experience = require('../models/Experience');
 const Education = require('../models/Education');
 const Preference = require('../models/Preference');
+const User = require('../models/User');
+
+const saveBase64Image = async (userId, base64Data) => {
+  let buffer;
+  let fileExtension = 'jpg';
+
+  const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  if (matches && matches.length === 3) {
+    buffer = Buffer.from(matches[2], 'base64');
+    const mimeType = matches[1];
+    if (mimeType === 'image/png') fileExtension = 'png';
+    else if (mimeType === 'image/jpeg') fileExtension = 'jpg';
+    else if (mimeType === 'image/gif') fileExtension = 'gif';
+    else if (mimeType === 'image/webp') fileExtension = 'webp';
+  } else {
+    buffer = Buffer.from(base64Data, 'base64');
+  }
+
+  const filename = `avatar-${userId}-${Date.now()}.${fileExtension}`;
+  const uploadDir = './uploads/avatars';
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const filepath = path.join(uploadDir, filename);
+  fs.writeFileSync(filepath, buffer);
+
+  return `/uploads/avatars/${filename}`;
+};
 
 exports.createProfile = async (req, res) => {
   try {
@@ -29,6 +60,32 @@ exports.getMyProfile = async (req, res) => {
     ]);
 
     res.json({ profile, skills, experiences, education, preference });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch profile.' });
+  }
+};
+
+exports.getProfileByUserId = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const profile = await Profile.findOne({ userId }).populate('userId', 'fullName email avatar role');
+    if (!profile || profile.visibility === 'private') {
+      return res.status(404).json({ error: 'Profile not found.' });
+    }
+
+    const [skills, experiences, education] = await Promise.all([
+      ProfileSkill.find({ profileId: profile._id }).populate('skillId'),
+      Experience.find({ profileId: profile._id }).sort({ startDate: -1 }),
+      Education.find({ profileId: profile._id }).sort({ startYear: -1 }),
+    ]);
+
+    res.json({
+      user: profile.userId,
+      profile,
+      skills,
+      experiences,
+      education,
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch profile.' });
   }
@@ -149,22 +206,39 @@ exports.deleteEducation = async (req, res) => {
 exports.updateAvatar = async (req, res) => {
   try {
     const { avatarBase64 } = req.body;
-    if (!avatarBase64) {
+    if (!avatarBase64 || typeof avatarBase64 !== 'string' || avatarBase64.length === 0) {
       return res.status(400).json({ error: 'avatarBase64 is required.' });
     }
-    // Validate it looks like a base64 image (data URI or raw base64)
-    const isValid = typeof avatarBase64 === 'string' && avatarBase64.length > 0;
-    if (!isValid) {
-      return res.status(400).json({ error: 'Invalid image data.' });
-    }
+
     const profile = await Profile.findOneAndUpdate(
       { userId: req.user._id },
       { avatarBase64 },
-      { new: true }
+      { new: true, upsert: true }
     );
     if (!profile) return res.status(404).json({ error: 'Profile not found.' });
-    res.json({ avatarBase64: profile.avatarBase64 });
+
+    const avatarUrl = await saveBase64Image(req.user._id, avatarBase64);
+
+    const currentUser = await User.findById(req.user._id);
+    if (
+      currentUser?.avatar &&
+      currentUser.avatar !== '/uploads/avatars/default-avatar.png' &&
+      currentUser.avatar.startsWith('/uploads/')
+    ) {
+      const oldAvatarPath = path.join(__dirname, '..', currentUser.avatar);
+      if (fs.existsSync(oldAvatarPath)) {
+        fs.unlinkSync(oldAvatarPath);
+      }
+    }
+
+    await User.findByIdAndUpdate(req.user._id, { avatar: avatarUrl });
+
+    res.json({
+      avatarBase64: profile.avatarBase64,
+      avatar: avatarUrl,
+    });
   } catch (error) {
+    console.error('Update avatar error:', error);
     res.status(500).json({ error: 'Failed to update avatar.' });
   }
 };

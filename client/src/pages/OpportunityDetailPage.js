@@ -22,6 +22,48 @@ const OpportunityDetailPage = () => {
 
   const handleApply = async () => {
     try {
+      // Ask server for available application methods (and whether user already applied)
+      const { data } = await opportunityAPI.getApplicationOptions(id);
+      const methods = (data.availableMethods || []).map((m) => m.type);
+
+      if (data.hasApplied) {
+        toast.info('You have already applied to this opportunity');
+        return;
+      }
+
+      // If only in-app is available, proceed with existing flow
+      if (methods.includes('in_app') && !methods.includes('external_link')) {
+        await applicationAPI.apply({ opportunityId: id, profileId: 'auto' });
+        toast.success('Application submitted!');
+        return;
+      }
+
+      // If only external link is available, fetch and open it
+      if (methods.includes('external_link') && !methods.includes('in_app')) {
+        const { data: urlData } = await opportunityAPI.getExternalApplyUrl(id);
+        if (urlData && urlData.url) {
+          window.open(urlData.url, '_blank', 'noopener');
+        } else {
+          toast.error('External application URL not available');
+        }
+        return;
+      }
+
+      // If both are available, ask the user which they prefer
+      if (methods.includes('in_app') && methods.includes('external_link')) {
+        const useInApp = window.confirm('This role supports both in-app and external applications. OK = apply in-app, Cancel = open external link.');
+        if (useInApp) {
+          await applicationAPI.apply({ opportunityId: id, profileId: 'auto' });
+          toast.success('Application submitted!');
+        } else {
+          const { data: urlData } = await opportunityAPI.getExternalApplyUrl(id);
+          if (urlData && urlData.url) window.open(urlData.url, '_blank', 'noopener');
+          else toast.error('External application URL not available');
+        }
+        return;
+      }
+
+      // Fallback: try in-app apply
       await applicationAPI.apply({ opportunityId: id, profileId: 'auto' });
       toast.success('Application submitted!');
     } catch (err) {
