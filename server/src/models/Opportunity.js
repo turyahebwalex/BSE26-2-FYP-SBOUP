@@ -139,26 +139,23 @@ opportunitySchema.virtual('employerId').get(function () {
   return this.postedByUserId;
 });
 
-// Virtual to check if external link is available
+// ─── FIXED: all virtuals now safely handle missing applicationMethods ───
 opportunitySchema.virtual('hasExternalLink').get(function () {
-  return this.applicationMethods.includes('external_link') && this.externalApplyUrl;
+  return this.applicationMethods?.includes('external_link') && this.externalApplyUrl;
 });
 
-// Virtual to check if message application is available
 opportunitySchema.virtual('hasMessageApplication').get(function () {
-  return this.applicationMethods.includes('message');
+  return this.applicationMethods?.includes('message') ?? false;
 });
 
-// Virtual to check if in-app application is available
 opportunitySchema.virtual('hasInAppApplication').get(function () {
-  return this.applicationMethods.includes('in_app');
+  return this.applicationMethods?.includes('in_app') ?? false;
 });
 
-// Virtual to get available application methods with details
 opportunitySchema.virtual('availableApplicationMethods').get(function () {
   const methods = [];
   
-  if (this.applicationMethods.includes('in_app')) {
+  if (this.applicationMethods?.includes('in_app')) {
     methods.push({
       type: 'in_app',
       label: 'In-App Application',
@@ -168,7 +165,7 @@ opportunitySchema.virtual('availableApplicationMethods').get(function () {
     });
   }
   
-  if (this.applicationMethods.includes('message')) {
+  if (this.applicationMethods?.includes('message')) {
     methods.push({
       type: 'message',
       label: 'Apply via Message',
@@ -178,7 +175,7 @@ opportunitySchema.virtual('availableApplicationMethods').get(function () {
     });
   }
   
-  if (this.applicationMethods.includes('external_link') && this.externalApplyUrl) {
+  if (this.applicationMethods?.includes('external_link') && this.externalApplyUrl) {
     methods.push({
       type: 'external_link',
       label: 'External Application',
@@ -192,6 +189,7 @@ opportunitySchema.virtual('availableApplicationMethods').get(function () {
   return methods;
 });
 
+// Enable virtuals when converting to JSON / Object
 opportunitySchema.set('toJSON', { virtuals: true });
 opportunitySchema.set('toObject', { virtuals: true });
 
@@ -203,6 +201,6 @@ opportunitySchema.index({ location: 1 });
 opportunitySchema.index({ deadline: 1 });
 opportunitySchema.index({ fraudRiskScore: 1 });
 opportunitySchema.index({ title: 'text', description: 'text' });
-opportunitySchema.index({ applicationMethods: 1 }); // For filtering by application type
+opportunitySchema.index({ applicationMethods: 1 });
 
 module.exports = mongoose.model('Opportunity', opportunitySchema);

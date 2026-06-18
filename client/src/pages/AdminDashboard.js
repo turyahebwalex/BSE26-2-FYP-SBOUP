@@ -66,13 +66,36 @@ const AdminDashboard = () => {
       setLoading(false);
     };
     load();
+    loadReports();
+    loadCases();
   }, []);
 
   const loadReports = async () => {
     try {
-      const { data } = await reportAPI.getAll();
-      setReports(data.reports || []);
-    } catch {}
+      const { data } = await reportAPI.getAll({ page: 1, limit: 100 });
+      const reportList = Array.isArray(data?.reports)
+        ? data.reports
+        : Array.isArray(data?.data?.reports)
+        ? data.data.reports
+        : [];
+      setReports(reportList);
+    } catch (error) {
+      console.error('Failed to load reports:', error);
+      toast.error('Could not load report queue.');
+    }
+  };
+
+  const getTargetLabel = (report) => {
+    const details = report.targetDetails;
+    if (!details) {
+      return report.targetId || 'Unknown target';
+    }
+
+    if (details.fullName) return details.fullName;
+    if (details.name) return details.name;
+    if (details.title) return details.title;
+    if (details.content) return details.content.slice(0, 60);
+    return report.targetType;
   };
 
   const loadCases = async () => {
@@ -100,6 +123,33 @@ const AdminDashboard = () => {
       setCases((prev) => prev.filter((c) => c.targetId !== contentId || c.targetType !== contentType));
     } catch {
       toast.error('Action failed');
+    }
+  };
+
+  // NEW: Handles removal of reported user or message and updates report status
+  const handleRemoveContent = async (report) => {
+    const { targetId, targetType, _id: reportId } = report;
+    const targetLabel = getTargetLabel(report);
+
+    // Confirm deletion
+    if (!window.confirm(`Are you sure you want to permanently remove this ${targetType}?`)) {
+      return;
+    }
+
+    try {
+      // 1. Remove the content
+      await adminAPI.moderate({ contentId: targetId, contentType: targetType, action: 'remove' });
+
+      // 2. Update the report status to 'action_taken'
+      await reportAPI.updateStatus(reportId, 'action_taken');
+
+      // 3. Update local state: remove the report from the list
+      setReports((prev) => prev.filter((r) => r._id !== reportId));
+
+      toast.success(`${targetType} removed and report closed. The user has been notified.`);
+    } catch (error) {
+      console.error('Failed to remove content:', error);
+      toast.error('Could not remove content. Please try again.');
     }
   };
 
@@ -585,8 +635,14 @@ const AdminDashboard = () => {
                     {c.targetType === 'user' && (
                       <>
                         <button
-                          onClick={() => moderateContent(c.targetId, 'user', 'suspend')}
+                          onClick={() => moderateContent(c.targetId, 'user', 'remove')}
                           className="badge bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Remove
+                        </button>
+                        <button
+                          onClick={() => moderateContent(c.targetId, 'user', 'suspend')}
+                          className="badge bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
                         >
                           Suspend
                         </button>
@@ -757,7 +813,7 @@ const AdminDashboard = () => {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="font-semibold text-sm">
-                      {r.targetType}: <span className="text-gray-600">{r.targetId}</span>
+                      {r.targetType}: <span className="text-gray-600">{getTargetLabel(r)}</span>
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
                       Reported by: {r.reporterId?.fullName || r.reporterId?.email || 'Unknown'} •{' '}
@@ -780,7 +836,7 @@ const AdminDashboard = () => {
                   </span>
                 </div>
                 {r.status === 'pending' && (
-                  <div className="flex gap-2 mt-3">
+                  <div className="flex flex-wrap gap-2 mt-3">
                     <button
                       onClick={() => updateReportStatus(r._id, 'reviewed')}
                       className="badge bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
@@ -799,6 +855,16 @@ const AdminDashboard = () => {
                     >
                       Dismiss
                     </button>
+
+                    {/* ✨ NEW: Remove button – only for users and messages */}
+                    {(r.targetType === 'user' || r.targetType === 'message') && (
+                      <button
+                        onClick={() => handleRemoveContent(r)}
+                        className="badge bg-red-100 text-red-700 cursor-pointer hover:bg-red-200"
+                      >
+                        Remove Content
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

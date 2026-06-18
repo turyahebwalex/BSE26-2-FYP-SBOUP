@@ -37,8 +37,8 @@ const normalizeMessage = (msg) => ({
   ...msg,
   senderId:   msg.senderId?._id   || msg.senderId,
   receiverId: msg.receiverId?._id || msg.receiverId,
-  avatar:     msg.senderId?.avatar || msg.avatar,
-  senderName: msg.senderId?.fullName || msg.senderName,
+  avatar:     msg.senderId?.avatar || msg.senderId?.profilePicture || msg.avatar || msg.profilePicture,
+  senderName: msg.senderId?.fullName || msg.senderName || msg.sender?.fullName,
 });
 
 const resolveUrl = (url) => {

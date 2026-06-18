@@ -7,6 +7,7 @@ router.post('/', authenticate, validate('createProfile'), ctrl.createProfile);
 router.get('/me', authenticate, ctrl.getMyProfile);
 router.put('/me', authenticate, ctrl.updateProfile);
 router.put('/avatar', authenticate, ctrl.updateAvatar);
+router.get('/user/:userId', authenticate, ctrl.getProfileByUserId);
 router.get('/:id', ctrl.getProfileById);
 
 // Skills

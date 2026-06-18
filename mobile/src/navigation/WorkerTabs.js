@@ -15,6 +15,7 @@ import ApplyExternalScreen from '../screens/worker/ApplyExternalScreen';
 import ApplyFormScreen from '../screens/worker/ApplyFormScreen';
 import MessagesScreen from '../screens/shared/MessagesScreen';
 import ChatScreen from '../screens/shared/ChatScreen';
+import UserProfileScreen from '../screens/shared/UserProfileScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
 import EditProfileScreen from '../screens/shared/EditProfileScreen';
 import NotificationsScreen from '../screens/shared/NotificationsScreen';
@@ -62,6 +63,7 @@ const MessagesStackScreen = () => (
   <MessagesStack.Navigator screenOptions={screenOptions}>
     <MessagesStack.Screen name="MessagesMain" component={MessagesScreen} />
     <MessagesStack.Screen name="Chat" component={ChatScreen} />
+    <MessagesStack.Screen name="UserProfile" component={UserProfileScreen} />
     <MessagesStack.Screen name="CompanyProfile" component={CompanyProfileScreen} />
     <MessagesStack.Screen name="PeopleByLocation" component={PeopleByLocationScreen} />
     <MessagesStack.Screen name="OpportunityDetail" component={OpportunityDetailScreen} />

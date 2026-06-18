@@ -35,7 +35,9 @@ const getImageUrl = (imagePath) => {
 // ─── People Card ──────────────────────────────────────────────────────────────
 const PeopleCard = ({ item, onMessage, navigation }) => {
   const [avatarError, setAvatarError] = useState(false);
-  const imageUrl = getImageUrl(item.avatar);
+  const avatarValue =
+    item.avatar || item.profileImage || item.image || item.userAvatar || item.profile?.avatar;
+  const imageUrl = getImageUrl(avatarValue);
 
   return (
     <View style={styles.personCard}>
@@ -114,7 +116,7 @@ const PeopleCard = ({ item, onMessage, navigation }) => {
         )}
 
         <View style={styles.cardActions}>
-          {item.role === 'employer' && item.companyId && (
+          {item.role === 'employer' && item.companyId ? (
             <TouchableOpacity
               style={styles.profileBtn}
               onPress={() => navigation.navigate('CompanyProfile', { companyId: item.companyId })}
@@ -122,6 +124,22 @@ const PeopleCard = ({ item, onMessage, navigation }) => {
             >
               <Ionicons name="eye-outline" size={15} color="#F97316" />
               <Text style={styles.profileBtnText}>View Jobs</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.profileBtn}
+              onPress={() =>
+                navigation.navigate('UserProfile', {
+                  userId: item.id || item._id,
+                  userName: item.name,
+                  userAvatar: item.avatar,
+                  userRole: item.role,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Ionicons name="eye-outline" size={15} color="#F97316" />
+              <Text style={styles.profileBtnText}>View Profile</Text>
             </TouchableOpacity>
           )}
 
@@ -400,11 +418,17 @@ const NotificationsTab = ({ navigation, notificationsRef }) => (
 );
 
 // ─── Main MessagesScreen ──────────────────────────────────────────────────────
-const MessagesScreen = ({ navigation }) => {
+const MessagesScreen = ({ navigation, route }) => {
   const [activeTab, setActiveTab] = useState('search');
   const { unreadMessageCount, unreadNotificationCount, setUnreadNotificationCount } =
     useAuth();
   const notificationsRef = useRef(null);
+
+  useEffect(() => {
+    if (route?.params?.focusTab === 'search') {
+      setActiveTab('search');
+    }
+  }, [route?.params?.focusTab]);
 
   const markAllNotificationsRead = async () => {
     if (!unreadNotificationCount || unreadNotificationCount === 0) return;
@@ -471,55 +495,58 @@ const MessagesScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="chevron-back" size={24} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{title}</Text>
-        <View style={styles.headerRight}>{rightAction}</View>
-      </View>
-
-      <View style={styles.tabBar}>
-        {[
-          { key: 'search', label: 'Search' },
-          { key: 'inbox', label: 'Messages', count: unreadMessageCount },
-          { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
-        ].map(({ key, label, count }) => (
+    <>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
           <TouchableOpacity
-            key={key}
-            style={styles.tabItem}
-            onPress={() => setActiveTab(key)}
-            activeOpacity={0.7}
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === key && styles.tabLabelActive,
-                ]}
-              >
-                {label}
-              </Text>
-              {count > 0 && (
-                <View style={styles.tabBadge}>
-                  <Text style={styles.tabBadgeText}>
-                    {count > 99 ? '99+' : count}
-                  </Text>
-                </View>
-              )}
-            </View>
-            {activeTab === key && <View style={styles.tabIndicator} />}
+            <Ionicons name="chevron-back" size={24} color="#1F2937" />
           </TouchableOpacity>
-        ))}
-      </View>
+          <Text style={styles.headerTitle}>{title}</Text>
+          <View style={styles.headerRight}>{rightAction}</View>
+        </View>
 
-      {renderTabContent()}
-    </SafeAreaView>
+        <View style={styles.tabBar}>
+          {[
+            { key: 'search', label: 'Search' },
+            { key: 'inbox', label: 'Messages', count: unreadMessageCount },
+            { key: 'notifications', label: 'Notifications', count: unreadNotificationCount },
+          ].map(({ key, label, count }) => (
+            <TouchableOpacity
+              key={key}
+              style={styles.tabItem}
+              onPress={() => setActiveTab(key)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    activeTab === key && styles.tabLabelActive,
+                  ]}
+                >
+                  {label}
+                </Text>
+                {count > 0 && (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>
+                      {count > 99 ? '99+' : count}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {activeTab === key && <View style={styles.tabIndicator} />}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {renderTabContent()}
+      </SafeAreaView>
+
+    </>
   );
 };
 
@@ -666,6 +693,16 @@ const styles = StyleSheet.create({
   locationText: { fontSize: 12, color: '#9CA3AF', flex: 1 },
 
   cardActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  reportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
+  },
   profileBtn: {
     flex: 1,
     flexDirection: 'row',

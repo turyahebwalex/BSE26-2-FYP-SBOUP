@@ -311,7 +311,9 @@ const MessagesInbox = ({ navigation }) => {
     fetchPinnedApplications();
   };
 
-  const handleNewMessagePress = () => navigation.navigate('MessagesMain');
+  const handleNewMessagePress = () => {
+    navigation.navigate('MessagesMain', { focusTab: 'search' });
+  };
   
   const handleChatPress = (conversation) => {
     const otherUser = conversation.otherUser || {};

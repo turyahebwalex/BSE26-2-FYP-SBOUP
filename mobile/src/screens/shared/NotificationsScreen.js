@@ -263,6 +263,18 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     navigation.getParent()?.navigate(screenName, params);
   };
 
+  const navigateToChat = (userId, userName, userAvatar) => {
+    const parent = navigation.getParent();
+    if (parent?.navigate) {
+      parent.navigate('MessagesTab', {
+        screen: 'Chat',
+        params: { userId, userName, userAvatar },
+      });
+      return;
+    }
+    navigation.navigate('Chat', { userId, userName, userAvatar });
+  };
+
 
   const navigateToLearning = (meta = {}) => {
     navigation.getParent()?.navigate('HomeTab', {
@@ -284,7 +296,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     const meta = item.metadata || {};
     switch (navKey) {
       case 'Chat':
-        navigation.navigate('Chat', { userId: meta.senderId, userName: meta.senderName });
+        navigateToChat(meta.senderId, meta.senderName, meta.senderAvatar);
         break;
       case 'ApplicationDetails':
         navigateToRootTab('ApplicationDetails', { applicationId: meta.applicationId });
@@ -314,7 +326,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     switch (item.type) {
       case 'message':
         if (meta.senderId)
-          navigation.navigate('Chat', { userId: meta.senderId, userName: meta.senderName });
+          navigateToChat(meta.senderId, meta.senderName, meta.senderAvatar);
         break;
       case 'application_update':
       case 'application':
