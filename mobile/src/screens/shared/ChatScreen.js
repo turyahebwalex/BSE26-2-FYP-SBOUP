@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';   // ✅ works on SDK 54
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import socketService from '../../services/socket';
 import api, { messageAPI, BASE_URL } from '../../services/api';
@@ -70,14 +70,9 @@ const ChatScreen = ({ route, navigation }) => {
   const [downloadingId,      setDownloadingId]      = useState(null);
   const [otherUserAvatar,    setOtherUserAvatar]    = useState(userAvatar);
 
-  // Image preview modal state
   const [previewImage, setPreviewImage] = useState(null);
-
-  // Context menu state
-  const [showContextMenu,    setShowContextMenu]    = useState(false);
-
-  // Report sheet state
-  const [reportTarget,       setReportTarget]       = useState(null);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null);
 
   const flatListRef       = useRef(null);
   const typingTimeoutRef  = useRef(null);
@@ -259,19 +254,11 @@ const ChatScreen = ({ route, navigation }) => {
 
   // ─── Download helpers ─────────────────────────────────────────────────────────
 
-  /**
-   * Gets the auth token from the api instance, supporting both static headers
-   * and interceptor-injected headers.
-   */
   const getAuthHeader = () =>
     api.defaults.headers.common?.['Authorization'] ||
     api.defaults.headers?.['Authorization'] ||
     '';
 
-  /**
-   * Core download using expo-file-system/legacy downloadAsync.
-   * The deprecation warning is harmless — the function works fine on SDK 54.
-   */
   const downloadFile = async (fileUrl, fileName, messageId) => {
     try {
       setDownloadingId(messageId);
@@ -313,9 +300,6 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  /**
-   * Entry point for attachment tap — routes images vs documents.
-   */
   const handleDownload = async (attachment, messageId) => {
     const fileUrl = resolveUrl(attachment.fileUrl);
 
@@ -339,7 +323,6 @@ const ChatScreen = ({ route, navigation }) => {
           onPress: () =>
             downloadFile(
               fileUrl,
-              // ✅ FIXED: ensure image filename has an extension
               attachment.fileName || `image_${Date.now()}.jpg`,
               messageId
             ),
@@ -348,7 +331,6 @@ const ChatScreen = ({ route, navigation }) => {
       return;
     }
 
-    // Documents go straight to download
     downloadFile(fileUrl, attachment.fileName || `file_${Date.now()}`, messageId);
   };
 
@@ -540,9 +522,10 @@ const ChatScreen = ({ route, navigation }) => {
 
   // ─── Render message bubble ────────────────────────────────────────────────────
   const renderMessage = ({ item, index }) => {
-    const isSent       = item.senderId === currentUserId;
-    const nextMsg      = messages[index + 1];
+    const isSent = item.senderId === currentUserId;
+    const nextMsg = messages[index + 1];
     const isLastInGroup = !nextMsg || nextMsg.senderId !== item.senderId;
+    const isDeleted = item.moderationStatus === 'blocked';
 
     const getSenderAvatar = () => {
       if (isSent) {
@@ -554,7 +537,44 @@ const ChatScreen = ({ route, navigation }) => {
     };
 
     const avatarSource = getSenderAvatar();
-    const canReport    = !isSent && item._id && !item._id.startsWith('temp_');
+
+    // --- Render deleted message placeholder ---
+    if (isDeleted) {
+      return (
+        <View style={[styles.msgRow, isSent ? styles.msgRowSent : styles.msgRowReceived]}>
+          {!isSent && (
+            <View style={styles.avatarSlot}>
+              {isLastInGroup ? (
+                <Image source={avatarSource} style={[styles.msgAvatar, { opacity: 0.4 }]} />
+              ) : (
+                <View style={styles.avatarGap} />
+              )}
+            </View>
+          )}
+          <View style={[styles.bubble, styles.deletedBubble]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="trash-outline" size={14} color="#6B7280" />
+              <Text style={styles.deletedText}>This message has been deleted by admin.</Text>
+            </View>
+            <Text style={[styles.msgTime, styles.receivedTime]}>
+              {formatTime(item.sentAt)}
+            </Text>
+          </View>
+          {isSent && (
+            <View style={styles.avatarSlot}>
+              {isLastInGroup ? (
+                <Image source={avatarSource} style={[styles.msgAvatar, { opacity: 0.4 }]} />
+              ) : (
+                <View style={styles.avatarGap} />
+              )}
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    // --- Normal rendering ---
+    const canReport = !isSent && item._id && !item._id.startsWith('temp_');
 
     return (
       <View style={[styles.msgRow, isSent ? styles.msgRowSent : styles.msgRowReceived]}>
@@ -631,7 +651,6 @@ const ChatScreen = ({ route, navigation }) => {
             style={styles.imagePreviewFull}
             resizeMode="contain"
           />
-          {/* ✅ Download button inside the preview modal */}
           <TouchableOpacity
             style={styles.imagePreviewDownloadBtn}
             onPress={() => {
@@ -1027,6 +1046,19 @@ const styles = StyleSheet.create({
   attachOption:       { alignItems: 'center', gap: 8 },
   attachIcon:         { width: 62, height: 62, borderRadius: 31, justifyContent: 'center', alignItems: 'center' },
   attachOptionText:   { fontSize: 12, color: '#4B5563', fontWeight: '500' },
+
+  // ─── NEW styles for deleted messages ─────────────────────────────────────────
+  deletedBubble: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  deletedText: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
 });
 
 export default ChatScreen;

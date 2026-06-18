@@ -5,6 +5,7 @@ const ctrl = require('../controllers/application.controller');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { uploadAny } = require('../middleware/upload'); 
 
 // Configure multer for file uploads
 const uploadDir = path.join(__dirname, '../uploads/applications');
@@ -45,7 +46,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } 
 });
 
-// Configure multiple file uploads
+
 const uploadFields = upload.fields([
   { name: 'cv', maxCount: 1 },
   { name: 'coverLetterFile', maxCount: 1 },
@@ -69,7 +70,6 @@ router.post(
         next();
       });
     } else {
-      
       next();
     }
   },
@@ -98,9 +98,6 @@ router.put('/:id/pin', authenticate, authorize('skilled_worker'), ctrl.togglePin
 // ── Attachment upload ─────────────────────────────────────────────────────────
 // Workers upload files before submitting an application. Returns a permanent
 // server URL that is stored in the application's attachments array.
-const { uploadAny } = require('../middleware/upload');
-const path = require('path');
-const fs   = require('fs');
 
 router.post(
   '/upload-attachment',

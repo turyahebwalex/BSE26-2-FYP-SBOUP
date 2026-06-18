@@ -83,6 +83,7 @@ const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000')
 
 app.use(
   cors({
+    
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, etc.)
       if (!origin || allowedOrigins.includes(origin)) {
@@ -91,6 +92,7 @@ app.use(
         callback(new Error('Not allowed by CORS'));
       }
     },
+    origin: true,
     credentials: true,
     exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length'],
   })
