@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { opportunityAPI } from '../services/api';
-import { FiPlusCircle, FiBriefcase, FiUsers, FiTrendingUp, FiEye, FiUser } from 'react-icons/fi';
+import { FiPlusCircle, FiBriefcase, FiUsers, FiTrendingUp, FiEye, FiUser, FiAlertTriangle } from 'react-icons/fi';
 
 const EmployerDashboard = () => {
   const { user } = useAuth();
@@ -23,12 +23,14 @@ const EmployerDashboard = () => {
   const published = opportunities.filter((o) => o.status === 'published').length;
   const archived = opportunities.filter((o) => o.status === 'archived').length;
   const underReview = opportunities.filter((o) => o.status === 'under_review').length;
+  const restricted = opportunities.filter((o) => o.status === 'blocked' || o.status === 'suspended').length;
   const totalApps = opportunities.reduce((sum, o) => sum + (o.applicationCount || 0), 0);
 
   const statCards = [
     { label: 'Active Jobs', val: published, icon: FiBriefcase, color: 'text-green-600 bg-green-50' },
     { label: 'Total Applications', val: totalApps, icon: FiUsers, color: 'text-orange-600 bg-orange-50' },
     { label: 'Under Review', val: underReview, icon: FiTrendingUp, color: 'text-yellow-600 bg-yellow-50' },
+    { label: 'Blocked / Suspended', val: restricted, icon: FiAlertTriangle, color: 'text-red-600 bg-red-50' },
     { label: 'Archived', val: archived, icon: FiEye, color: 'text-gray-600 bg-gray-50' },
   ];
 
@@ -51,7 +53,7 @@ const EmployerDashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {statCards.map((s) => (
           <div key={s.label} className="card">
             <div className="flex items-center gap-3">
@@ -123,6 +125,8 @@ const EmployerDashboard = () => {
                       ? 'bg-green-100 text-green-700'
                       : opp.status === 'blocked'
                       ? 'bg-red-100 text-red-700'
+                      : opp.status === 'suspended'
+                      ? 'bg-amber-100 text-amber-800'
                       : opp.status === 'archived'
                       ? 'bg-gray-100 text-gray-600'
                       : opp.status === 'draft'
