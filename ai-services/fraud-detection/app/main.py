@@ -18,6 +18,14 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from bson import ObjectId
 from pymongo import MongoClient
+
+# Load .env (MONGODB_URI, PORT, thresholds) so `python run.py` picks up the
+# hosted Atlas connection without the caller having to export vars manually.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+except ImportError:  # python-dotenv is optional in Docker where env is injected
+    pass
 import numpy as np
 from scipy.sparse import csr_matrix, hstack
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -30,10 +38,12 @@ logging.basicConfig(level=logging.DEBUG)  # Changed to DEBUG
 logger = logging.getLogger(__name__)
 
 MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/sboup_dev')
+# Atlas needs a longer handshake budget than localhost (cloud RTT + TLS).
+# Defaults below work for both; override via env for a tighter local setup.
 client = MongoClient(
     MONGODB_URI,
-    serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '1000')),
-    connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '1000')),
+    serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '8000')),
+    connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '10000')),
 )
 db = client.get_default_database() if 'sboup' in MONGODB_URI else client['sboup_dev']
 

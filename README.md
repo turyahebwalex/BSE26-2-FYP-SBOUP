@@ -78,7 +78,7 @@ Install these once on each collaborator's machine — the dev launcher refuses t
 
 | Tool | Minimum | Why |
 |------|---------|-----|
-| **Docker Desktop** or **Docker Engine + Compose v2** | 24+ | Runs MongoDB, Redis, the API gateway, the web client, and all five AI microservices. |
+| **Docker Desktop** or **Docker Engine + Compose v2** | 24+ | Runs Redis, the API gateway, the web client, and all five AI microservices. (MongoDB is the shared hosted Atlas cluster — there is no local DB container.) |
 | **Node.js** | 18 LTS or newer | `setup.sh` runs `npm install` for `server/`, `client/`, and `mobile/`, plus seeds the DB. |
 | **Git** | any modern version | Cloning + branch hygiene. |
 | **Expo Go** on the test phone | latest from Play Store / App Store | Loads the React Native bundle over LAN or USB. Same app for Android and iOS. |
@@ -97,6 +97,8 @@ Do this **exactly once** per machine. The order matters — `setup.sh` must fini
 ```bash
 git clone https://github.com/turyahebwalex/BSE26-2-FYP-SBOUP.git
 cd BSE26-2-FYP-SBOUP
+bash scripts/setup.sh   # creates .env files — see the Atlas step below before re-running to seed
+# (paste the Atlas URI into .env, then:)
 bash scripts/setup.sh && bash scripts/dev.sh
 ```
 
@@ -104,12 +106,11 @@ bash scripts/setup.sh && bash scripts/dev.sh
 
 1. Copies every `.env.example → .env` (root + `server/`, `client/`, `mobile/`, all `ai-services/*/`).
 2. Installs Node dependencies under `server/`, `client/`, and `mobile/`.
-3. Starts MongoDB + Redis via Docker if they aren't already running.
-4. Seeds the database with the [shared demo users](#shared-demo-credentials-seeded-on-every-dev-database).
+3. Seeds the **shared hosted MongoDB Atlas** database with the [shared demo users](#shared-demo-credentials-seeded-on-every-dev-database). There is no local Mongo — the seeder connects to whatever `MONGODB_URI` in your root `.env` points at, so **paste the Atlas URI (next section) before this step runs**, or the seed aborts with a clear message.
 
 Then `dev.sh` brings the rest of the stack up (Docker compose, mobile Expo). When it prompts for mobile mode, **choose option 1 (Wi-Fi)** unless you have a USB cable + adb (option 2).
 
-> **Important — don't skip `setup.sh` on first run.** It's the only thing that creates `.env` files. If you go straight to `dev.sh`, Docker compose will fall back to placeholders and the API will boot without a working JWT secret.
+> **Important — don't skip `setup.sh` on first run.** It's the only thing that creates `.env` files. If you go straight to `dev.sh`, Docker compose will fall back to placeholders and the API will boot without a working JWT secret. And because seeding now targets Atlas, set `MONGODB_URI` (below) before the seed step.
 
 ### Connecting to the shared MongoDB Atlas database
 
@@ -125,9 +126,11 @@ Set it up **once** per machine:
    (paste the exact value you were given — don't retype it).
 3. Save. That's it — you never edit this again. Every future `git pull` + `dev.sh` connects to the shared cluster automatically.
 
-> Prefer a throwaway local database instead of the shared one? Leave the default `MONGODB_URI=mongodb://localhost:27017/sboup_dev` and the Dockerized Mongo will be used. Just know your data won't be shared with the team.
+> The whole system uses the shared Atlas cluster — there is **no local Mongo container** anymore. The `mongodb://localhost:27017/...` you'll see in `.env.example` files is only a code-level fallback for someone who deliberately runs their own `mongod`; the normal path is the Atlas URI above.
 >
-> ⚠️ **Never paste the Atlas URI into `.env.example`, a commit, or a PR.** If it ever leaks, rotate the password in Atlas → Database Access immediately.
+> **Network access:** the Atlas project allows connections from anywhere (`0.0.0.0/0`) for dev, so once your `.env` has the URI you can connect from any network with no per-machine IP setup. (This open allowlist is dev-only — it must never be carried into a production cluster.)
+>
+> ⚠️ **Never paste the Atlas URI into `.env.example`, a commit, or a PR.** With `0.0.0.0/0` open, the username/password is the *only* gate — if it ever leaks, rotate the password in Atlas → Database Access immediately.
 
 ### Subsequent runs (everyday dev loop)
 
@@ -212,7 +215,6 @@ If any of these are taken, the run will fail. Check with `ss -lntp` (Linux) or `
 | 5005 | chatbot-service (Python) |
 | 6379 | Redis |
 | 8081 | Expo Metro bundler |
-| 27017 | MongoDB |
 
 ### Remote collaborators (phone on a different network than the laptop)
 
@@ -268,7 +270,7 @@ docker compose build --no-cache client && docker compose up client
 Find and kill the offending process:
 
 ```bash
-lsof -i :5000      # replace with the conflicting port (3000, 8081, 27017, etc.)
+lsof -i :5000      # replace with the conflicting port (3000, 8081, 6379, etc.)
 kill -9 <PID>
 ```
 

@@ -4,6 +4,9 @@ pymongo==4.6.1
 numpy==1.26.3
 # Must match (or be compatible with) the sklearn version used to train ensemble.pkl (1.6.x).
 scikit-learn==1.6.1
+scipy==1.11.4
+# ensemble.pkl contains xgboost.sklearn.XGBClassifier — required to unpickle the model.
+xgboost==2.0.3
 nltk==3.8.1
 gunicorn==21.2.0
 python-dotenv==1.0.0

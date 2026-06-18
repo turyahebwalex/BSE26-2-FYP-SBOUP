@@ -11,7 +11,9 @@ Run with:
 
 import sys
 import os
-os.environ['MONGODB_URI'] = 'mongodb://localhost:27017/sboup_dev'
+# Respect an existing MONGODB_URI (env or the service .env); only fall back to a
+# local Mongo for offline testing when nothing is configured.
+os.environ.setdefault('MONGODB_URI', 'mongodb://localhost:27017/sboup_dev')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.main import app, _score_payload
