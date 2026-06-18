@@ -61,3 +61,7 @@ ai-services/fraud-detection/test_new_models.py
 ai-services/fraud-detection/debug_prediction.py
 .local-deps/
 .mongo-data/
+
+# Local-only pip wheel cache for offline/slow-network Docker builds (do not commit)
+ai-services/fraud-detection/wheelhouse/
+ai-services/fraud-detection/Dockerfile.offline

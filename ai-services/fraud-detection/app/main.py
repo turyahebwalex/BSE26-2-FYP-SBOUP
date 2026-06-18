@@ -48,7 +48,17 @@ client = MongoClient(
 db = client.get_default_database() if 'sboup' in MONGODB_URI else client['sboup_dev']
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / 'models'
-TRAINING_DATA_DIR = Path(__file__).resolve().parents[3] / 'fraud-training-source'
+# Optional training/export data (only used by the /api/training-export path).
+# Defaults to a repo-root sibling of the service when that ancestor exists, but
+# falls back to a local path so import never crashes in shallow layouts such as
+# the Docker image (/app/app/main.py has no parents[3]). Override via env.
+_resolved = Path(__file__).resolve()
+_default_training_dir = (
+    _resolved.parents[3] / 'fraud-training-source'
+    if len(_resolved.parents) > 3
+    else MODEL_DIR.parent / 'fraud-training-source'
+)
+TRAINING_DATA_DIR = Path(os.getenv('FRAUD_TRAINING_DATA_DIR', str(_default_training_dir)))
 ENSEMBLE_PATH = MODEL_DIR / 'ensemble.pkl'
 TFIDF_PATH = MODEL_DIR / 'tfidf.pkl'
 SCALER_PATH = MODEL_DIR / 'scaler.pkl'
@@ -397,10 +407,12 @@ def _load_model_artifacts():
         estimators = getattr(base_model, 'named_estimators_', {}) if hasattr(base_model, 'named_estimators_') else {}
         rf_model = estimators.get('rf')
         xgb_model = estimators.get('xgb')
-        if getattr(rf_model, 'feature_importances_', None) is not None:
-            importances.append(np.asarray(rf_model.feature_importances_, dtype=float))
-        if getattr(xgb_model, 'feature_importances_', None) is not None:
-            importances.append(np.asarray(xgb_model.feature_importances_, dtype=float))
+        rf_importances = getattr(rf_model, 'feature_importances_', None)
+        if rf_importances is not None:
+            importances.append(np.asarray(rf_importances, dtype=float))
+        xgb_importances = getattr(xgb_model, 'feature_importances_', None)
+        if xgb_importances is not None:
+            importances.append(np.asarray(xgb_importances, dtype=float))
         if importances:
             MODEL_FEATURE_IMPORTANCES = np.mean(importances, axis=0)
         else:
@@ -968,9 +980,15 @@ def _score_payload(payload, persist_log=True):
     low_threshold = int(os.getenv('FRAUD_LOW_THRESHOLD', 30))
     high_threshold = int(os.getenv('FRAUD_HIGH_THRESHOLD', 70))
 
+    result = None
     if model_ready:
+        # Local aliases assert non-None for the type checker; model_ready already
+        # guarantees both are loaded.
+        vectorizer = FRAUD_VECTORIZER
+        model = FRAUD_MODEL
+        assert vectorizer is not None and model is not None
         try:
-            text_matrix = FRAUD_VECTORIZER.transform([text_blob])
+            text_matrix = vectorizer.transform([text_blob])
             numeric_row = np.array([[numeric_features[name] for name in NUMERIC_FEATURE_NAMES]], dtype=np.float32)
 
             # Apply scaler to numeric features if available (critical for models trained with scaling).
@@ -983,7 +1001,7 @@ def _score_payload(payload, persist_log=True):
 
             numeric_matrix = csr_matrix(numeric_row)
             feature_matrix = hstack([text_matrix, numeric_matrix]).toarray()
-            fraud_prob = float(FRAUD_MODEL.predict_proba(feature_matrix)[0][1])
+            fraud_prob = float(model.predict_proba(feature_matrix)[0][1])
             fraud_score = int(round(np.clip(fraud_prob * 100, 0, 100)))
 
             # SYSTEM OPTIMIZATION: Trust internal postings from professional companies.
@@ -1072,6 +1090,10 @@ def _score_payload(payload, persist_log=True):
         rich_explanation = build_rich_explanation(result, payload, numeric_features, company_doc)
         result['xaiExplanation'] = rich_explanation
 
+    # One of the branches above always assigns result (model path, or the
+    # not-model_ready fallback that also catches model-inference failures).
+    assert result is not None
+
     if persist_log:
         try:
             db.fraudlogs.insert_one({
@@ -1123,9 +1145,10 @@ def _evaluate_model_metrics():
         MODEL_STATS.update({
             'available': True,
             'accuracy': round(float(accuracy_score(y_true, y_pred)), 4),
-            'precision': round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
-            'recall': round(float(recall_score(y_true, y_pred, zero_division=0)), 4),
-            'f1': round(float(f1_score(y_true, y_pred, zero_division=0)), 4),
+            # zero_division=0 is valid per sklearn; its type stub wrongly types it as str.
+            'precision': round(float(precision_score(y_true, y_pred, zero_division=0)), 4),  # type: ignore[arg-type]
+            'recall': round(float(recall_score(y_true, y_pred, zero_division=0)), 4),  # type: ignore[arg-type]
+            'f1': round(float(f1_score(y_true, y_pred, zero_division=0)), 4),  # type: ignore[arg-type]
             'sampleCount': len(rows),
         })
     except Exception as exc:
