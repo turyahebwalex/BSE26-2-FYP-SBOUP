@@ -127,7 +127,8 @@ const AdminDashboard = () => {
     }
   };
 
-  // ── Handle user-specific actions (Warn, Suspend, Deactivate) ──
+  // ── Handle user-specific actions (Warn, Suspend, Deactivate)
+  
   const handleUserAction = async (report, action) => {
     const targetLabel = getTargetLabel(report);
     const confirmMsg = `Are you sure you want to ${action} ${targetLabel}?`;
