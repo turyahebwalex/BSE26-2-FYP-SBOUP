@@ -65,34 +65,22 @@ log "2/3  Installing Node dependencies (server, client, mobile)..."
 
 log "3/3  Seeding the database with demo users..."
 
-# Make sure MongoDB is reachable on localhost:27017 before seeding.
-# Try Docker first (zero-config for collaborators); fall back to a system
-# mongod the user may already be running.
-ensure_mongo() {
-  if ( exec 3<>/dev/tcp/127.0.0.1/27017 ) 2>/dev/null; then
-    exec 3>&-; exec 3<&-
-    return 0
-  fi
-  if command -v docker >/dev/null 2>&1; then
-    log "  MongoDB not reachable on 27017 — starting via Docker..."
-    docker compose up -d mongodb redis >/dev/null
-    for _ in $(seq 1 30); do
-      if ( exec 3<>/dev/tcp/127.0.0.1/27017 ) 2>/dev/null; then
-        exec 3>&-; exec 3<&-
-        log "  MongoDB is up."
-        return 0
-      fi
-      sleep 1
-    done
-    fail "MongoDB container started but never accepted connections on 27017."
-  fi
-  fail "MongoDB not running and Docker not installed. Start mongod (sudo systemctl start mongod) or install Docker, then re-run."
-}
-
-ensure_mongo
+# The whole system points at the shared hosted MongoDB Atlas cluster — the seeder
+# (and every service) connects via MONGODB_URI in the root .env, so there is no
+# local mongo to start. Just sanity-check the URI is the Atlas string before we
+# seed, so a collaborator who forgot to paste it gets a clear message.
+MONGODB_URI=$(grep -E '^MONGODB_URI=' "$ROOT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-)
+if [[ -z "$MONGODB_URI" ]]; then
+  fail "MONGODB_URI is not set in .env. Paste the shared Atlas connection string the team lead gave you, then re-run."
+fi
+if [[ "$MONGODB_URI" != mongodb+srv://* && "$MONGODB_URI" != *mongodb.net* ]]; then
+  warn "MONGODB_URI in .env does not look like the shared Atlas string."
+  warn "  Current: $(printf '%s' "$MONGODB_URI" | sed -E 's#:[^:@/]+@#:***@#')"
+  warn "  Expected the mongodb+srv://...mongodb.net/sboup URI the team lead shared."
+fi
 
 if ! ( cd server && npm run seed ); then
-  fail "Seed failed even though MongoDB is reachable. Check the trace above."
+  fail "Seed failed. Check that MONGODB_URI in .env is the correct Atlas string and that your IP is allowlisted in Atlas Network Access. Trace above."
 fi
 
 log "Done. Shared demo credentials:"

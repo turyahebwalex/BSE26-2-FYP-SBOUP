@@ -42,7 +42,7 @@ GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL    = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 # ─────────────────────────────────────────────────────────────────────────────
-MONGODB_URI   = os.getenv("MONGODB_URI", "mongodb://mongodb:27017/sboup_dev")
+MONGODB_URI   = os.getenv("MONGODB_URI", "mongodb://localhost:27017/sboup_dev")
 DB_NAME       = MONGODB_URI.split("/")[-1].split("?")[0]
 
 # Proficiency weights (mirrors matching engine)

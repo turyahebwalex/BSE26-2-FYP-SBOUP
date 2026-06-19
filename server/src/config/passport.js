@@ -24,8 +24,17 @@ const configurePassport = () => {
     })
   );
 
-  // Google OAuth Strategy
-  if (process.env.GOOGLE_CLIENT_ID) {
+  // Google OAuth Strategy — only register if a REAL client ID is configured.
+  // The .env.example placeholder ("your-google-client-id") is truthy, so guard
+  // against it explicitly; otherwise passport registers a strategy that fails
+  // every web redirect login.
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleConfigured =
+    googleClientId &&
+    !googleClientId.startsWith('your-') &&
+    process.env.GOOGLE_CLIENT_SECRET &&
+    !process.env.GOOGLE_CLIENT_SECRET.startsWith('your-');
+  if (googleConfigured) {
     passport.use(
       new GoogleStrategy(
         {

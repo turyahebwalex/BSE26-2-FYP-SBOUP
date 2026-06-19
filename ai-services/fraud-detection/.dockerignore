@@ -1,0 +1,10 @@
+# Keep secrets and local-only artifacts out of the image.
+# In Docker the MONGODB_URI is injected via docker-compose `environment:`,
+# so the .env file must NOT be baked into the image layer.
+.env
+.venv
+.venv-fraud-local
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/

@@ -1,17 +1,7 @@
 services:
   # ─── Data Layer ───
-  mongodb:
-    image: mongo:7
-    container_name: sboup-mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    environment:
-      MONGO_INITDB_DATABASE: sboup_dev
-    networks:
-      - sboup-network
-
+  # MongoDB is the shared hosted Atlas cluster (MONGODB_URI in the root .env),
+  # so there is no local mongo container — every service connects to Atlas.
   redis:
     image: redis:7-alpine
     container_name: sboup-redis
@@ -38,7 +28,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=5000
-      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      - MONGODB_URI=${MONGODB_URI}
       - REDIS_HOST=localhost
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
@@ -52,9 +42,14 @@ services:
       - CHATBOT_SERVICE_URL=http://localhost:5005
       - GMAIL_USER=${GMAIL_USER}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
-      
+      # Google sign-in: GOOGLE_CLIENT_ID is the Web client ID the mobile app
+      # requests its ID token for (see mobile LoginScreen.js) — the server must
+      # verify the token's audience against the SAME id. Secret + callback are
+      # only needed for the web redirect flow. All come from the root .env.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-http://localhost:5000/api/auth/google/callback}
     depends_on:
-      - mongodb
       - redis
     volumes:
       - ./server:/app
@@ -90,9 +85,7 @@ services:
       - "5001:5001"
     environment:
       - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
-    depends_on:
-      - mongodb
+      - MONGODB_URI=${MONGODB_URI}
     networks:
       - sboup-network
 
@@ -102,15 +95,16 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-fraud
-    ports:
-      - "5002:5002"
+    # Host networking so the container's outbound TLS to MongoDB Atlas uses the
+    # host resolver/route table — the Docker bridge subnet is blocked on some
+    # campus/corporate Wi-Fi, which otherwise breaks the Atlas (mongodb+srv) DNS
+    # SRV lookup on startup. Matches server/cv-generation/learning-engine.
+    network_mode: host
     environment:
       - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
-    depends_on:
-      - mongodb
-    networks:
-      - sboup-network
+      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
+      # truth, same as server/matching-engine/chatbot-service).
+      - MONGODB_URI=${MONGODB_URI}
 
   cv-generation:
     image: ghcr.io/turyahebwalex/sboup-cv:latest
@@ -124,7 +118,9 @@ services:
     # first start. Host networking uses the host's resolver and route table.
     network_mode: host
     environment:
-      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
+      # truth, same as server/matching-engine/fraud-detection/chatbot-service).
+      - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DB_NAME=sboup_dev
       - STORAGE_BACKEND=${CV_STORAGE_BACKEND:-local}
       - LOCAL_STORAGE_DIR=/app/storage
@@ -140,8 +136,6 @@ services:
       # ~820MB of HF model weights on every rebuild.
       - cv_storage:/app/storage
       - cv_model_cache:/app/model_cache
-    depends_on:
-      - mongodb
 
   learning-engine:
     image: ghcr.io/turyahebwalex/sboup-learning:latest
@@ -155,7 +149,9 @@ services:
     # first start. Host networking uses the host's resolver and route table.
     network_mode: host
     environment:
-      - MONGODB_URI=mongodb://localhost:27017/sboup_dev
+      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
+      # truth, same as server/matching-engine/fraud-detection/chatbot-service).
+      - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DB_NAME=sboup_dev
       - INTERNAL_API_KEY=${LEARNING_INTERNAL_API_KEY:-}
       - HF_MODEL_CACHE_DIR=/app/model_cache
@@ -178,7 +174,6 @@ services:
       # re-pull MiniLM + Flan-T5-small + Skill NER on every rebuild.
       - learning_model_cache:/app/model_cache
     depends_on:
-      - mongodb
       - matching-engine
 
   chatbot-service:
@@ -191,11 +186,9 @@ services:
       - "5005:5005"
     environment:
       - FLASK_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/sboup_dev
+      - MONGODB_URI=${MONGODB_URI}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-    depends_on:
-      - mongodb
     networks:
       - sboup-network
 
@@ -220,7 +213,6 @@ services:
       - server
 
 volumes:
-  mongodb_data:
   redis_data:
   cv_storage:
   cv_model_cache:
