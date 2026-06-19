@@ -237,11 +237,6 @@ exports.getOpportunities = async (req, res) => {
     if (companyId) {
       filter.companyId = companyId;
     }
-
-
-    } = req.query;
-
-    const filter = { status: 'published', deadline: { $gte: new Date() } };
     if (category) filter.category = category;
     if (location) filter.location = { $regex: location, $options: 'i' };
     if (experienceLevel) filter.experienceLevel = experienceLevel;

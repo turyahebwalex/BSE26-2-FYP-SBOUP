@@ -127,26 +127,46 @@ const AdminDashboard = () => {
     }
   };
 
-  // NEW: Handles removal of reported user or message and updates report status
+  // ── Handle user-specific actions (Warn, Suspend, Deactivate)
+  
+  const handleUserAction = async (report, action) => {
+    const targetLabel = getTargetLabel(report);
+    const confirmMsg = `Are you sure you want to ${action} ${targetLabel}?`;
+
+    const reason = window.prompt(`Reason for ${action} (optional):`);
+    if (reason === null) return; // User cancelled
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await adminAPI.moderate({
+        contentId: report.targetId,
+        contentType: 'user',
+        action,
+        reason: reason || '',
+      });
+
+      await reportAPI.updateStatus(report._id, 'action_taken');
+      setReports((prev) => prev.filter((r) => r._id !== report._id));
+
+      toast.success(`User ${action}ed and report closed. Notification sent.`);
+    } catch (error) {
+      console.error('User action failed:', error);
+      toast.error(`Failed to ${action} user.`);
+    }
+  };
+
+  // ── Handles removal of reported message ──
   const handleRemoveContent = async (report) => {
     const { targetId, targetType, _id: reportId } = report;
-    const targetLabel = getTargetLabel(report);
-
-    // Confirm deletion
     if (!window.confirm(`Are you sure you want to permanently remove this ${targetType}?`)) {
       return;
     }
 
     try {
-      // 1. Remove the content
       await adminAPI.moderate({ contentId: targetId, contentType: targetType, action: 'remove' });
-
-      // 2. Update the report status to 'action_taken'
       await reportAPI.updateStatus(reportId, 'action_taken');
-
-      // 3. Update local state: remove the report from the list
       setReports((prev) => prev.filter((r) => r._id !== reportId));
-
       toast.success(`${targetType} removed and report closed. The user has been notified.`);
     } catch (error) {
       console.error('Failed to remove content:', error);
@@ -309,7 +329,6 @@ const AdminDashboard = () => {
       {/* ─── Overview Tab ─── */}
       {tab === 'overview' && stats && (
         <>
-          {/* Stats Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             {[
               { label: 'Total Users', val: stats.stats?.totalUsers, icon: FiUsers, color: 'text-blue-600 bg-blue-50' },
@@ -332,7 +351,6 @@ const AdminDashboard = () => {
             ))}
           </div>
 
-          {/* Charts Row */}
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div className="card">
               <h2 className="font-semibold mb-4">User Distribution by Role</h2>
@@ -359,7 +377,6 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {/* Registration Trends + Urgent Alerts */}
           <div className="grid md:grid-cols-3 gap-6 mb-6">
             <div className="card md:col-span-2">
               <div className="flex items-center justify-between mb-4">
@@ -449,7 +466,6 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {/* Quick Actions */}
           <div className="card mb-6">
             <h2 className="font-semibold mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -484,7 +500,6 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {/* User Density */}
           <div className="card mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -514,7 +529,6 @@ const AdminDashboard = () => {
             )}
           </div>
 
-          {/* Recent Registrations */}
           <div className="card">
             <h2 className="font-semibold mb-3">Recent Registrations</h2>
             <div className="space-y-2">
@@ -687,7 +701,6 @@ const AdminDashboard = () => {
       {/* ─── Users Tab ─── */}
       {tab === 'users' && (
         <div>
-          {/* Search */}
           <div className="relative mb-4">
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -764,7 +777,6 @@ const AdminDashboard = () => {
               <p className="text-center py-8 text-gray-400">No users found</p>
             )}
 
-            {/* Pagination */}
             {filteredUsers.length > 10 && (
               <div className="flex justify-between items-center mt-4 pt-3 border-t">
                 <p className="text-xs text-gray-400">
@@ -836,6 +848,7 @@ const AdminDashboard = () => {
                     {r.status?.replace('_', ' ')}
                   </span>
                 </div>
+
                 {r.status === 'pending' && (
                   <div className="flex flex-wrap gap-2 mt-3">
                     <button
@@ -857,8 +870,32 @@ const AdminDashboard = () => {
                       Dismiss
                     </button>
 
-                    {/* ✨ NEW: Remove button – only for users and messages */}
-                    {(r.targetType === 'user' || r.targetType === 'message') && (
+                    {/* ── User-specific actions ── */}
+                    {r.targetType === 'user' && (
+                      <>
+                        <button
+                          onClick={() => handleUserAction(r, 'warn')}
+                          className="badge bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
+                        >
+                          Warn
+                        </button>
+                        <button
+                          onClick={() => handleUserAction(r, 'suspend')}
+                          className="badge bg-orange-100 text-orange-700 cursor-pointer hover:bg-orange-200"
+                        >
+                          Suspend
+                        </button>
+                        <button
+                          onClick={() => handleUserAction(r, 'deactivate')}
+                          className="badge bg-red-100 text-red-700 cursor-pointer hover:bg-red-200"
+                        >
+                          Deactivate
+                        </button>
+                      </>
+                    )}
+
+                    {/* ── Remove Content (only for messages) ── */}
+                    {r.targetType === 'message' && (
                       <button
                         onClick={() => handleRemoveContent(r)}
                         className="badge bg-red-100 text-red-700 cursor-pointer hover:bg-red-200"

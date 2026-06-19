@@ -10,8 +10,8 @@ const AuditLog = require('../models/AuditLog');
 const FraudLog = require('../models/FraudLog');
 const attachModerationExplanation = require('../utils/attachModerationExplanation');
 const logger = require('../utils/logger');
-const opportunityController = require('./opportunity.controller');   // ✅ added
-const notificationService = require('../services/notification.service'); // ✅ added
+const opportunityController = require('./opportunity.controller');
+const notificationService = require('../services/notification.service');
 
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
 const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
@@ -243,8 +243,7 @@ exports.getFraudInsights = async (req, res) => {
 exports.moderateContent = async (req, res) => {
   try {
     const { contentId, action, contentType, feedback } = req.body;
-    // action: approve, suspend, remove, warn, deactivate, reactivate, restore, ban
-    // feedback: optional reason (used for user notifications and fraud log)
+    // feedback is used as the reason for warnings/suspensions/deactivations
 
     let responseMessage = 'Content moderated successfully.';
     const auditNotes = [];

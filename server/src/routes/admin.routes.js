@@ -1,21 +1,3 @@
-
-const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
-const ctrl = require('../controllers/admin.controller');
-
-router.get('/dashboard', authenticate, authorize('admin'), ctrl.getDashboardStats);
-router.get('/dashboard/trends', authenticate, authorize('admin'), ctrl.getRegistrationTrends);
-router.get('/dashboard/user-distribution', authenticate, authorize('admin'), ctrl.getUserTypeDistribution);
-router.get('/dashboard/alerts', authenticate, authorize('admin'), ctrl.getUrgentAlerts);
-router.get('/dashboard/user-density', authenticate, authorize('admin'), ctrl.getUserDensity);
-router.get('/flagged', authenticate, authorize('admin'), ctrl.getFlaggedContent);
-router.get('/cases', authenticate, authorize('admin'), ctrl.getModerationCases);
-router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent);
-router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);
-router.put('/users/:userId', authenticate, authorize('admin'), ctrl.updateUserStatus);
-
-module.exports = router;
-
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const ctrl = require('../controllers/admin.controller');
@@ -27,6 +9,7 @@ router.get('/dashboard/alerts', authenticate, authorize('admin'), ctrl.getUrgent
 router.get('/dashboard/user-density', authenticate, authorize('admin'), ctrl.getUserDensity);
 router.get('/fraud-insights', authenticate, authorize('admin'), ctrl.getFraudInsights);
 router.get('/flagged', authenticate, authorize('admin'), ctrl.getFlaggedContent);
+router.get('/cases', authenticate, authorize('admin'), ctrl.getModerationCases);
 router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent);
 router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);
 router.put('/users/:userId', authenticate, authorize('admin'), ctrl.updateUserStatus);
@@ -45,4 +28,3 @@ router.get('/model-health', authenticate, authorize('admin'), ctrl.getModelHealt
 router.get('/training-export', authenticate, authorize('admin'), ctrl.getTrainingExport);
 
 module.exports = router;
-
