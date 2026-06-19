@@ -10,10 +10,13 @@ const AuditLog = require('../models/AuditLog');
 const FraudLog = require('../models/FraudLog');
 const attachModerationExplanation = require('../utils/attachModerationExplanation');
 const logger = require('../utils/logger');
+const opportunityController = require('./opportunity.controller');   // ✅ added
+const notificationService = require('../services/notification.service'); // ✅ added
 
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
 const FRAUD_HIGH = parseInt(process.env.FRAUD_HIGH_THRESHOLD, 10) || 70;
 
+// ─── Dashboard ──────────────────────────────────────────────────────────────
 exports.getDashboardStats = async (req, res) => {
   try {
     const [totalUsers, activeUsers, totalOpportunities, pendingReviews, reports] = await Promise.all([
@@ -44,6 +47,7 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+// ─── Employer moderation stats helper ──────────────────────────────────────
 const employerModerationStats = async (opportunityDocs) => {
   const ids = [
     ...new Set(
@@ -67,9 +71,7 @@ const employerModerationStats = async (opportunityDocs) => {
         $group: {
           _id: '$postedByUserId',
           totalPostings: { $sum: 1 },
-          blockedPostings: {
-            $sum: { $cond: [{ $eq: ['$status', 'blocked'] }, 1, 0] },
-          },
+          blockedPostings: { $sum: { $cond: [{ $eq: ['$status', 'blocked'] }, 1, 0] } },
         },
       },
     ]),
@@ -77,10 +79,7 @@ const employerModerationStats = async (opportunityDocs) => {
 
   const userMap = new Map(users.map((u) => [String(u._id), u]));
   const statMap = new Map(
-    agg.map((row) => [
-      String(row._id),
-      { totalPostings: row.totalPostings, blockedPostings: row.blockedPostings },
-    ])
+    agg.map((row) => [String(row._id), { totalPostings: row.totalPostings, blockedPostings: row.blockedPostings }])
   );
 
   const out = new Map();
@@ -111,6 +110,7 @@ const attachEmployerModerationMeta = async (opportunityDocs) => {
   });
 };
 
+// ─── Flagged content ─────────────────────────────────────────────────────────
 exports.getFlaggedContent = async (req, res) => {
   try {
     const populatePaths = [
@@ -148,6 +148,7 @@ exports.getFlaggedContent = async (req, res) => {
   }
 };
 
+// ─── Fraud insights ─────────────────────────────────────────────────────────
 exports.getFraudInsights = async (req, res) => {
   try {
     const { range = '30d', granularity = 'day' } = req.query;
@@ -163,24 +164,12 @@ exports.getFraudInsights = async (req, res) => {
             _id: null,
             totalLogs: { $sum: 1 },
             averageScore: { $avg: '$fraudScore' },
-            autoPublished: {
-              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] },
-            },
-            underReview: {
-              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] },
-            },
-            blocked: {
-              $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] },
-            },
-            modelPredictions: {
-              $sum: { $cond: [{ $eq: ['$source', 'model'] }, 1, 0] },
-            },
-            workflowDecisions: {
-              $sum: { $cond: [{ $eq: ['$source', 'workflow'] }, 1, 0] },
-            },
-            adminActions: {
-              $sum: { $cond: [{ $eq: ['$source', 'admin'] }, 1, 0] },
-            },
+            autoPublished: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] } },
+            underReview: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] } },
+            blocked: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] } },
+            modelPredictions: { $sum: { $cond: [{ $eq: ['$source', 'model'] }, 1, 0] } },
+            workflowDecisions: { $sum: { $cond: [{ $eq: ['$source', 'workflow'] }, 1, 0] } },
+            adminActions: { $sum: { $cond: [{ $eq: ['$source', 'admin'] }, 1, 0] } },
           },
         },
       ]),
@@ -250,92 +239,103 @@ exports.getFraudInsights = async (req, res) => {
   }
 };
 
+// ─── Moderate content (core moderation) ─────────────────────────────────────
 exports.moderateContent = async (req, res) => {
   try {
-    const { contentId, action, contentType } = req.body; // action: approve, remove, ban, restore, reactivate, deactivate
+    const { contentId, action, contentType, feedback } = req.body;
+    // action: approve, suspend, remove, warn, deactivate, reactivate, restore, ban
+    // feedback: optional reason (used for user notifications and fraud log)
 
     let responseMessage = 'Content moderated successfully.';
     const auditNotes = [];
 
-    if (contentType === 'opportunity') {
-      const existing = await Opportunity.findById(contentId).select('status postedByUserId');
-      if (!existing) return res.status(404).json({ error: 'Opportunity not found.' });
-
-      const update = action === 'approve' ? { status: 'published' } : { status: 'blocked' };
-      const updated = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
-      if (!updated) return res.status(404).json({ error: 'Opportunity not found.' });
-
-      if (action === 'approve' && existing.status !== 'published') {
-        setImmediate(async () => {
-          try {
-            await opportunityController.onOpportunityPublished(updated);
-          } catch (err) {
-            logger.warn(`onOpportunityPublished fan-out: ${err.message}`);
-          }
-    const { contentId, action, contentType, feedback } = req.body;
-    // action: approve | suspend (temporary, pending appeal) | remove (permanent block)
-
+    // ── OPPORTUNITY ─────────────────────────────────────────────────────────
     if (contentType === 'opportunity') {
       let update;
       if (action === 'approve') update = { status: 'published' };
       else if (action === 'suspend') update = { status: 'suspended' };
       else if (action === 'remove') update = { status: 'blocked' };
       else {
-        return res.status(400).json({ error: 'Invalid action. Use approve, suspend, or remove.' });
+        return res.status(400).json({ error: 'Invalid action for opportunity. Use approve, suspend, or remove.' });
       }
 
       const opportunity = await Opportunity.findByIdAndUpdate(contentId, update, { new: true });
-      if (opportunity) {
-        const verb =
-          action === 'approve' ? 'approved' : action === 'suspend' ? 'suspended' : 'blocked';
-        await FraudLog.create({
-          opportunityId: opportunity._id,
-          source: 'admin',
-          stage: 'moderation',
-          fraudScore: opportunity.fraudRiskScore || 0,
-          classification:
-            opportunity.fraudRiskScore >= FRAUD_HIGH
-              ? 'High Risk'
-              : opportunity.fraudRiskScore >= FRAUD_LOW
-                ? 'Medium Risk'
-                : 'Low Risk',
-          decisionOutcome: opportunity.status,
-          decisionReason: `Admin ${verb} opportunity during manual review.`,
-          thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
-          features: { fraudSignals: opportunity.fraudSignals || [] },
-          signals: opportunity.fraudSignals || [],
-          adminId: req.user._id,
-          adminAction: action === 'approve' ? 'approve' : action === 'suspend' ? 'suspend' : 'reject',
-          adminFeedback: feedback || '',
-          explanation: feedback || '',
+      if (!opportunity) return res.status(404).json({ error: 'Opportunity not found.' });
 
-        });
-      }
+      // Log to FraudLog
+      const verb = action === 'approve' ? 'approved' : action === 'suspend' ? 'suspended' : 'blocked';
+      await FraudLog.create({
+        opportunityId: opportunity._id,
+        source: 'admin',
+        stage: 'moderation',
+        fraudScore: opportunity.fraudRiskScore || 0,
+        classification:
+          opportunity.fraudRiskScore >= FRAUD_HIGH
+            ? 'High Risk'
+            : opportunity.fraudRiskScore >= FRAUD_LOW
+            ? 'Medium Risk'
+            : 'Low Risk',
+        decisionOutcome: opportunity.status,
+        decisionReason: `Admin ${verb} opportunity during manual review.`,
+        thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
+        features: { fraudSignals: opportunity.fraudSignals || [] },
+        signals: opportunity.fraudSignals || [],
+        adminId: req.user._id,
+        adminAction: action === 'approve' ? 'approve' : action === 'suspend' ? 'suspend' : 'reject',
+        adminFeedback: feedback || '',
+        explanation: feedback || '',
+      });
 
+      responseMessage = `Opportunity ${action === 'approve' ? 'published' : action === 'suspend' ? 'suspended' : 'blocked'} successfully.`;
+      auditNotes.push(`Opportunity status set to ${opportunity.status}`);
+    }
 
-      responseMessage = `Opportunity ${action === 'approve' ? 'restored' : 'removed'} successfully.`;
-      auditNotes.push(`Opportunity status changed from ${existing.status} to ${updated.status}`);
-    } else if (contentType === 'user') {
+    // ── USER ─────────────────────────────────────────────────────────────────
+    else if (contentType === 'user') {
       const existing = await User.findById(contentId).select('accountStatus fullName email');
       if (!existing) return res.status(404).json({ error: 'User not found.' });
 
       let update = {};
-      if (action === 'deactivate' || action === 'remove' || action === 'ban') {
-        update.accountStatus = 'deactivated';
+      let notificationMessage = '';
+      const reason = feedback || '';
+
+      if (action === 'warn') {
+        notificationMessage = reason || 'Your account has received a warning for violating our policies.';
       } else if (action === 'suspend') {
         update.accountStatus = 'suspended';
+        notificationMessage = reason || 'Your account has been suspended for violating our policies.';
+      } else if (action === 'deactivate' || action === 'remove' || action === 'ban') {
+        update.accountStatus = 'deactivated';
+        notificationMessage = reason || 'Your account has been deactivated for violating our policies.';
       } else if (action === 'reactivate' || action === 'restore') {
         update.accountStatus = 'active';
-      }
-
-      if (Object.keys(update).length === 0) {
+        notificationMessage = 'Your account has been reactivated.';
+      } else {
         return res.status(400).json({ error: 'Unsupported user moderation action.' });
       }
 
-      const updated = await User.findByIdAndUpdate(contentId, update, { new: true });
-      responseMessage = `User account ${updated.accountStatus} successfully.`;
-      auditNotes.push(`User accountStatus changed from ${existing.accountStatus} to ${updated.accountStatus}`);
-    } else if (contentType === 'message') {
+      if (Object.keys(update).length > 0) {
+        await User.findByIdAndUpdate(contentId, update);
+      }
+
+      // Send notification (real‑time + DB)
+      if (notificationMessage) {
+        await notificationService.create({
+          userId: contentId,
+          type: 'moderation',
+          title: `Account ${action === 'warn' ? 'Warning' : action === 'suspend' ? 'Suspension' : 'Deactivation'}`,
+          content: notificationMessage,
+          metadata: { adminId: req.user._id, action, reason },
+        });
+      }
+
+      const statusLabel = action === 'warn' ? 'warned' : action === 'suspend' ? 'suspended' : 'deactivated';
+      responseMessage = `User ${statusLabel} successfully.`;
+      auditNotes.push(`User account ${statusLabel} (reason: ${reason || 'none'})`);
+    }
+
+    // ── MESSAGE ─────────────────────────────────────────────────────────────
+    else if (contentType === 'message') {
       const existing = await Message.findById(contentId).select('moderationStatus senderId receiverId');
       if (!existing) return res.status(404).json({ error: 'Message not found.' });
 
@@ -346,19 +346,21 @@ exports.moderateContent = async (req, res) => {
         update.moderationStatus = 'normal';
       } else if (action === 'under_review') {
         update.moderationStatus = 'under_review';
-      }
-
-      if (Object.keys(update).length === 0) {
+      } else {
         return res.status(400).json({ error: 'Unsupported message moderation action.' });
       }
 
       await Message.findByIdAndUpdate(contentId, update);
       responseMessage = `Message ${action === 'remove' ? 'removed' : action === 'restore' ? 'restored' : 'marked for review'} successfully.`;
       auditNotes.push(`Message moderationStatus set to ${update.moderationStatus}`);
-    } else {
+    }
+
+    // ── UNSUPPORTED ──────────────────────────────────────────────────────────
+    else {
       return res.status(400).json({ error: 'Unsupported content type.' });
     }
 
+    // ── Audit log ───────────────────────────────────────────────────────────
     const auditTargetType = contentType === 'user' ? 'user' : contentType === 'message' ? 'message' : 'opportunity';
     await AuditLog.create({
       adminId: req.user._id,
@@ -366,22 +368,18 @@ exports.moderateContent = async (req, res) => {
       targetType: auditTargetType,
       targetId: contentId,
       notes: auditNotes.join('; '),
-      metadata: { contentType, action },
+      metadata: { contentType, action, feedback: feedback || '' },
     });
 
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
     res.json({ message: responseMessage });
-
-    logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
-
-    res.json({ message: `Content ${action}d successfully.` });
-
   } catch (error) {
     logger.error('Moderate content error:', error);
     res.status(500).json({ error: 'Failed to moderate content.' });
   }
 };
 
+// ─── Cases ─────────────────────────────────────────────────────────────────
 exports.getModerationCases = async (req, res) => {
   try {
     const cases = await ModerationCase.find({ status: { $in: ['open', 'under_review'] } })
@@ -395,6 +393,7 @@ exports.getModerationCases = async (req, res) => {
   }
 };
 
+// ─── Users ──────────────────────────────────────────────────────────────────
 exports.getUsers = async (req, res) => {
   try {
     const { page = 1, limit = 20, role, status, search } = req.query;
@@ -420,6 +419,7 @@ exports.getUsers = async (req, res) => {
   }
 };
 
+// ─── Trends ─────────────────────────────────────────────────────────────────
 exports.getRegistrationTrends = async (req, res) => {
   try {
     const { range = '30d', granularity = 'day' } = req.query;
@@ -455,6 +455,7 @@ exports.getRegistrationTrends = async (req, res) => {
   }
 };
 
+// ─── User type distribution ─────────────────────────────────────────────────
 exports.getUserTypeDistribution = async (req, res) => {
   try {
     const distribution = await User.aggregate([
@@ -476,6 +477,7 @@ exports.getUserTypeDistribution = async (req, res) => {
   }
 };
 
+// ─── Alerts ──────────────────────────────────────────────────────────────────
 exports.getUrgentAlerts = async (req, res) => {
   try {
     const fraudHigh = Number(process.env.FRAUD_HIGH_THRESHOLD || 70);
@@ -507,6 +509,7 @@ exports.getUrgentAlerts = async (req, res) => {
   }
 };
 
+// ─── User density ──────────────────────────────────────────────────────────
 exports.getUserDensity = async (req, res) => {
   try {
     const density = await Profile.aggregate([
@@ -524,11 +527,11 @@ exports.getUserDensity = async (req, res) => {
   }
 };
 
+// ─── Archived opportunities ──────────────────────────────────────────────
 exports.getArchivedOpportunities = async (req, res) => {
   try {
     const { page = 1, limit = 20, status = 'archived', search } = req.query;
     const filter = { status };
-    
     if (search) {
       filter.$or = [
         { title: { $regex: search, $options: 'i' } },
@@ -548,10 +551,7 @@ exports.getArchivedOpportunities = async (req, res) => {
       Opportunity.countDocuments(filter),
     ]);
 
-    res.json({
-      opportunities,
-      pagination: { page: Number(page), limit: Number(limit), total },
-    });
+    res.json({ opportunities, pagination: { page: Number(page), limit: Number(limit), total } });
   } catch (error) {
     logger.error('Get archived opportunities error:', error);
     res.status(500).json({ error: 'Failed to fetch archived opportunities.' });
@@ -570,16 +570,16 @@ exports.restoreArchivedOpportunity = async (req, res) => {
       return res.status(404).json({ error: 'Archived opportunity not found.' });
     }
 
-    // Log the restoration action
     await FraudLog.create({
       opportunityId: opportunity._id,
       source: 'admin',
       stage: 'restoration',
       fraudScore: opportunity.fraudRiskScore || 0,
-      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
-        ? 'High Risk' 
-        : opportunity.fraudRiskScore >= FRAUD_LOW 
-          ? 'Medium Risk' 
+      classification:
+        opportunity.fraudRiskScore >= FRAUD_HIGH
+          ? 'High Risk'
+          : opportunity.fraudRiskScore >= FRAUD_LOW
+          ? 'Medium Risk'
           : 'Low Risk',
       decisionOutcome: 'published',
       decisionReason: 'Admin restored archived opportunity to published status.',
@@ -593,10 +593,7 @@ exports.restoreArchivedOpportunity = async (req, res) => {
     });
 
     logger.info(`Admin ${req.user._id} restored archived opportunity ${req.params.id}`);
-    res.json({ 
-      message: 'Opportunity restored successfully.', 
-      opportunity 
-    });
+    res.json({ message: 'Opportunity restored successfully.', opportunity });
   } catch (error) {
     logger.error('Restore archived opportunity error:', error);
     res.status(500).json({ error: 'Failed to restore opportunity.' });
@@ -607,25 +604,23 @@ exports.permanentlyRemoveOpportunity = async (req, res) => {
   try {
     const opportunity = await Opportunity.findOneAndDelete({
       _id: req.params.id,
-      status: { $in: ['archived', 'blocked'] }
+      status: { $in: ['archived', 'blocked'] },
     });
 
     if (!opportunity) {
-      return res.status(404).json({ 
-        error: 'Opportunity not found or cannot be permanently removed.' 
-      });
+      return res.status(404).json({ error: 'Opportunity not found or cannot be permanently removed.' });
     }
 
-    // Log the permanent removal action
     await FraudLog.create({
       opportunityId: opportunity._id,
       source: 'admin',
       stage: 'permanent_removal',
       fraudScore: opportunity.fraudRiskScore || 0,
-      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
-        ? 'High Risk' 
-        : opportunity.fraudRiskScore >= FRAUD_LOW 
-          ? 'Medium Risk' 
+      classification:
+        opportunity.fraudRiskScore >= FRAUD_HIGH
+          ? 'High Risk'
+          : opportunity.fraudRiskScore >= FRAUD_LOW
+          ? 'Medium Risk'
           : 'Low Risk',
       decisionOutcome: 'permanently_removed',
       decisionReason: 'Admin permanently removed opportunity.',
@@ -639,15 +634,14 @@ exports.permanentlyRemoveOpportunity = async (req, res) => {
     });
 
     logger.info(`Admin ${req.user._id} permanently removed opportunity ${req.params.id}`);
-    res.json({ 
-      message: 'Opportunity permanently removed.' 
-    });
+    res.json({ message: 'Opportunity permanently removed.' });
   } catch (error) {
     logger.error('Permanently remove opportunity error:', error);
     res.status(500).json({ error: 'Failed to permanently remove opportunity.' });
   }
 };
 
+// ─── Appeals ──────────────────────────────────────────────────────────────
 exports.getAppealsQueue = async (req, res) => {
   try {
     const { page = 1, limit = 20, status = 'pending' } = req.query;
@@ -665,10 +659,7 @@ exports.getAppealsQueue = async (req, res) => {
       Opportunity.countDocuments(filter),
     ]);
 
-    res.json({
-      appeals: opportunities,
-      pagination: { page: Number(page), limit: Number(limit), total },
-    });
+    res.json({ appeals: opportunities, pagination: { page: Number(page), limit: Number(limit), total } });
   } catch (error) {
     logger.error('Get appeals queue error:', error);
     res.status(500).json({ error: 'Failed to fetch appeals queue.' });
@@ -683,47 +674,41 @@ exports.reviewAppeal = async (req, res) => {
       return res.status(400).json({ error: 'Invalid action. Must be approve or reject.' });
     }
 
-    const opportunity = await Opportunity.findOne({
-      _id: req.params.id,
-      'appeal.status': 'pending'
-    });
-
+    const opportunity = await Opportunity.findOne({ _id: req.params.id, 'appeal.status': 'pending' });
     if (!opportunity) {
       return res.status(404).json({ error: 'Pending appeal not found.' });
     }
 
-    // Update appeal status
     opportunity.appeal.status = action === 'approve' ? 'approved' : 'rejected';
     opportunity.appeal.reviewedAt = new Date();
     opportunity.appeal.reviewedBy = req.user._id;
     opportunity.appeal.adminNote = adminNote || '';
 
-    // Update opportunity status based on appeal decision
     if (action === 'approve') {
-      opportunity.status = 'published'; // Restore the posting
+      opportunity.status = 'published';
     }
 
     await opportunity.save();
 
-    // Log the appeal review action
     await FraudLog.create({
       opportunityId: opportunity._id,
       source: 'admin',
       stage: 'appeal_review',
       fraudScore: opportunity.fraudRiskScore || 0,
-      classification: opportunity.fraudRiskScore >= FRAUD_HIGH 
-        ? 'High Risk' 
-        : opportunity.fraudRiskScore >= FRAUD_LOW 
-          ? 'Medium Risk' 
+      classification:
+        opportunity.fraudRiskScore >= FRAUD_HIGH
+          ? 'High Risk'
+          : opportunity.fraudRiskScore >= FRAUD_LOW
+          ? 'Medium Risk'
           : 'Low Risk',
       decisionOutcome: opportunity.status,
       decisionReason: `Admin ${action}d appeal. ${adminNote ? `Note: ${adminNote}` : ''}`,
       thresholds: { low: FRAUD_LOW, high: FRAUD_HIGH },
-      features: { 
+      features: {
         fraudSignals: opportunity.fraudSignals || [],
         appealReason: opportunity.appeal.reason,
         appealDecision: action,
-        adminNote: adminNote
+        adminNote: adminNote,
       },
       signals: opportunity.fraudSignals || [],
       adminId: req.user._id,
@@ -733,16 +718,14 @@ exports.reviewAppeal = async (req, res) => {
     });
 
     logger.info(`Admin ${req.user._id} ${action}d appeal for opportunity ${req.params.id}`);
-    res.json({ 
-      message: `Appeal ${action}d successfully.`, 
-      opportunity 
-    });
+    res.json({ message: `Appeal ${action}d successfully.`, opportunity });
   } catch (error) {
     logger.error('Review appeal error:', error);
     res.status(500).json({ error: 'Failed to review appeal.' });
   }
 };
 
+// ─── Update user status ─────────────────────────────────────────────────────
 exports.updateUserStatus = async (req, res) => {
   try {
     const { accountStatus, role } = req.body;
@@ -760,42 +743,30 @@ exports.updateUserStatus = async (req, res) => {
   }
 };
 
-/**
- * GET /api/admin/model-health
- * Proxies the fraud-service drift-detection endpoint and augments the response
- * with a weekly performance time-series built from FraudLog data.
- */
+// ─── Model health ───────────────────────────────────────────────────────────
 exports.getModelHealth = async (req, res) => {
   const axios = require('axios');
   try {
-    // ── 1. Drift status from Python service ─────────────────────────────────
     let driftReport = null;
     try {
-      const { data } = await axios.get(
-        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/drift/status`,
-        { timeout: 10_000 }
-      );
+      const { data } = await axios.get(`${process.env.FRAUD_DETECTION_SERVICE_URL}/api/drift/status`, {
+        timeout: 10000,
+      });
       driftReport = data;
     } catch (err) {
       logger.warn(`Drift status fetch failed: ${err.message}`);
     }
 
-    // ── 2. Model stats (accuracy / precision / recall / F1) ─────────────────
     let modelStats = null;
     try {
-      const { data } = await axios.get(
-        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/model/stats`,
-        { timeout: 5_000 }
-      );
+      const { data } = await axios.get(`${process.env.FRAUD_DETECTION_SERVICE_URL}/api/model/stats`, {
+        timeout: 5000,
+      });
       modelStats = data;
     } catch (err) {
       logger.warn(`Model stats fetch failed: ${err.message}`);
     }
 
-    // ── 3. Weekly performance time-series (from FraudLog) ───────────────────
-    // We use the ratio of auto-published vs total model-screened as a proxy
-    // for how lenient/strict the model has been week over week. This gives
-    // the admin a visual trend even without held-out label data.
     const weeks = parseInt(req.query.weeks, 10) || 12;
     const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
 
@@ -822,17 +793,12 @@ exports.getModelHealth = async (req, res) => {
           blocked: 1,
           avgScore: { $round: ['$avgScore', 1] },
           autoApprovalRate: {
-            $cond: [
-              { $gt: ['$total', 0] },
-              { $round: [{ $multiply: [{ $divide: ['$published', '$total'] }, 100] }, 1] },
-              0,
-            ],
+            $cond: [{ $gt: ['$total', 0] }, { $round: [{ $multiply: [{ $divide: ['$published', '$total'] }, 100] }, 1] }, 0],
           },
         },
       },
     ]);
 
-    // ── 4. Admin agreement trend (weekly) ────────────────────────────────────
     const adminWeeklyTrend = await FraudLog.aggregate([
       { $match: { source: 'admin', stage: 'moderation', createdAt: { $gte: since } } },
       {
@@ -855,7 +821,6 @@ exports.getModelHealth = async (req, res) => {
       },
     ]);
 
-    // ── 5. Admin feedback log (most recent 50 labelled entries) ──────────────
     const feedbackLog = await FraudLog.find({
       source: 'admin',
       stage: { $in: ['moderation', 'appeal_review'] },
@@ -880,22 +845,15 @@ exports.getModelHealth = async (req, res) => {
   }
 };
 
-/**
- * GET /api/admin/training-export
- * Proxies the fraud-service training-export endpoint so the admin can download
- * a labelled dataset from the browser without direct service access.
- */
+// ─── Training export ──────────────────────────────────────────────────────
 exports.getTrainingExport = async (req, res) => {
   const axios = require('axios');
   try {
     const { days = 90, min_feedback = 'false' } = req.query;
-    const { data } = await axios.get(
-      `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/training-export`,
-      {
-        timeout: 30_000,
-        params: { days, min_feedback },
-      }
-    );
+    const { data } = await axios.get(`${process.env.FRAUD_DETECTION_SERVICE_URL}/api/training-export`, {
+      timeout: 30000,
+      params: { days, min_feedback },
+    });
     res.json(data);
   } catch (error) {
     logger.error('Training export proxy error:', error);
