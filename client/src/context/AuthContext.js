@@ -34,6 +34,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => { loadUser(); }, [loadUser]);
 
+  // ─── Login with email/password ──────────────────────────────
   const login = async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
     localStorage.setItem('accessToken', data.accessToken);
@@ -43,11 +44,21 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  // ─── Login with tokens (for OTP flow) ──────────────────────
+  const loginWithTokens = (accessToken, refreshToken, user) => {
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
+    api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+    setUser(user);
+  };
+
+  // ─── Register (without OTP) ──────────────────────────────────
   const register = async (userData) => {
     const { data } = await api.post('/auth/register', userData);
     return data;
   };
 
+  // ─── Logout ──────────────────────────────────────────────────
   const logout = () => {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
@@ -56,7 +67,16 @@ export const AuthProvider = ({ children }) => {
     navigate('/login');
   };
 
-  const value = { user, setUser, isLoading, login, register, logout, loadUser };
+  const value = {
+    user,
+    setUser,
+    isLoading,
+    login,
+    loginWithTokens,  
+    register,
+    logout,
+    loadUser,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

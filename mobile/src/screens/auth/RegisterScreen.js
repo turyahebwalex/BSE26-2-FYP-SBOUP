@@ -16,11 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from '../../services/api';
 
-const ROLES = [
-  { key: 'skilled_worker', label: 'Skilled Worker', icon: 'construct-outline' },
-  { key: 'employer', label: 'Employer', icon: 'business-outline' },
-];
-
 const OTP_LENGTH = 6;
 
 const RegisterScreen = ({ navigation }) => {
@@ -30,8 +25,6 @@ const RegisterScreen = ({ navigation }) => {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState('skilled_worker');
-  const [companyName, setCompanyName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -99,24 +92,19 @@ const RegisterScreen = ({ navigation }) => {
       Alert.alert('Error', 'Passwords do not match.');
       return;
     }
-    if (role === 'employer' && !companyName.trim()) {
-      Alert.alert('Error', 'Please provide your company name.');
-      return;
-    }
 
     setOtpSending(true);
     const sent = await sendOtpToEmail(email.trim().toLowerCase());
     setOtpSending(false);
 
     if (sent) {
-      // Store user data temporarily
+      // Store user data temporarily (role fixed to skilled_worker)
       setTempUserData({
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
         phoneNumber: phone.trim(),
         password,
-        role,
-        ...(role === 'employer' ? { companyName: companyName.trim() } : {}),
+        role: 'skilled_worker',
       });
       setOtpDigits(Array(OTP_LENGTH).fill(''));
       setStep('otp');
@@ -174,7 +162,6 @@ const RegisterScreen = ({ navigation }) => {
         await AsyncStorage.setItem('accessToken', data.accessToken);
         await AsyncStorage.setItem('refreshToken', data.refreshToken);
         Alert.alert('Success', 'Account created successfully! Please log in.');
-        // Navigate to Login screen after successful registration
         navigation.replace('Login');
       } else {
         Alert.alert('Success', 'Registration successful. Please log in.');
@@ -204,23 +191,6 @@ const RegisterScreen = ({ navigation }) => {
       <View style={styles.formSection}>
         <Text style={styles.heading}>Sign Up</Text>
         <Text style={styles.subheading}>Join the skill-based opportunity platform</Text>
-
-        {/* Role Selection */}
-        <Text style={styles.label}>I am a</Text>
-        <View style={styles.roleRow}>
-          {ROLES.map((r) => (
-            <TouchableOpacity
-              key={r.key}
-              style={[styles.roleButton, role === r.key && styles.roleButtonActive]}
-              onPress={() => setRole(r.key)}
-            >
-              <Ionicons name={r.icon} size={20} color={role === r.key ? '#FFFFFF' : '#6B7280'} />
-              <Text style={[styles.roleButtonText, role === r.key && styles.roleButtonTextActive]}>
-                {r.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
 
         {/* Full Name */}
         <View style={styles.inputGroup}>
@@ -262,20 +232,6 @@ const RegisterScreen = ({ navigation }) => {
             keyboardType="phone-pad" 
           />
         </View>
-
-        {/* Company Name (Employer only) */}
-        {role === 'employer' && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Company Name</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Your company or business name" 
-              placeholderTextColor="#9CA3AF" 
-              value={companyName} 
-              onChangeText={setCompanyName} 
-            />
-          </View>
-        )}
 
         {/* Password */}
         <View style={styles.inputGroup}>
@@ -422,16 +378,6 @@ const styles = StyleSheet.create({
   },
   heading: { fontSize: 22, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
   subheading: { fontSize: 14, color: '#6B7280', marginBottom: 20 },
-
-  // Role Selection
-  roleRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  roleButton: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, borderWidth: 1.5, borderColor: '#D1D5DB', borderRadius: 10, paddingVertical: 12,
-  },
-  roleButtonActive: { backgroundColor: '#F97316', borderColor: '#F97316' },
-  roleButtonText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
-  roleButtonTextActive: { color: '#FFFFFF' },
 
   // Input Fields
   inputGroup: { marginBottom: 14 },

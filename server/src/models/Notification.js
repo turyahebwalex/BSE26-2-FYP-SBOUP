@@ -16,7 +16,8 @@ const notificationSchema = new mongoose.Schema(
         'connection_request',
         'reminder',
         'mention',
-        'job_alert'
+        'job_alert',
+        'moderation' 
       ],
       required: true,
     },

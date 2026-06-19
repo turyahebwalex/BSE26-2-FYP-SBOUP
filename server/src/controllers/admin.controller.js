@@ -8,6 +8,7 @@ const ModerationCase = require('../models/ModerationCase');
 const AuditLog = require('../models/AuditLog');
 const logger = require('../utils/logger');
 const opportunityController = require('./opportunity.controller');
+const notificationService = require('../services/notification.service'); 
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -58,7 +59,7 @@ exports.getFlaggedContent = async (req, res) => {
 
 exports.moderateContent = async (req, res) => {
   try {
-    const { contentId, action, contentType } = req.body; // action: approve, remove, ban, restore, reactivate, deactivate
+    const { contentId, action, contentType, reason } = req.body;
 
     let responseMessage = 'Content moderated successfully.';
     const auditNotes = [];
@@ -88,21 +89,44 @@ exports.moderateContent = async (req, res) => {
       if (!existing) return res.status(404).json({ error: 'User not found.' });
 
       let update = {};
-      if (action === 'deactivate' || action === 'remove' || action === 'ban') {
-        update.accountStatus = 'deactivated';
+      let notificationMessage = '';
+
+      if (action === 'warn') {
+        notificationMessage = reason || 'Your account has received a warning for violating our policies.';
       } else if (action === 'suspend') {
         update.accountStatus = 'suspended';
+        notificationMessage = reason || 'Your account has been suspended for violating our policies.';
+      } else if (action === 'deactivate' || action === 'remove' || action === 'ban') {
+        update.accountStatus = 'deactivated';
+        notificationMessage = reason || 'Your account has been deactivated for violating our policies.';
       } else if (action === 'reactivate' || action === 'restore') {
         update.accountStatus = 'active';
-      }
-
-      if (Object.keys(update).length === 0) {
+        notificationMessage = 'Your account has been reactivated.';
+      } else {
         return res.status(400).json({ error: 'Unsupported user moderation action.' });
       }
 
-      const updated = await User.findByIdAndUpdate(contentId, update, { new: true });
-      responseMessage = `User account ${updated.accountStatus} successfully.`;
-      auditNotes.push(`User accountStatus changed from ${existing.accountStatus} to ${updated.accountStatus}`);
+      if (Object.keys(update).length > 0) {
+        await User.findByIdAndUpdate(contentId, update);
+      }
+
+      if (notificationMessage) {
+        await notificationService.create({
+          userId: contentId,
+          type: 'moderation',
+          title: `Account ${action === 'warn' ? 'Warning' : action === 'suspend' ? 'Suspension' : 'Deactivation'}`,
+          content: notificationMessage,
+          metadata: {
+            adminId: req.user._id,
+            action,
+            reason: reason || '',
+          },
+        });
+      }
+
+      const statusLabel = action === 'warn' ? 'warned' : action === 'suspend' ? 'suspended' : 'deactivated';
+      responseMessage = `User ${statusLabel} successfully.`;
+      auditNotes.push(`User account ${statusLabel}`);
     } else if (contentType === 'message') {
       const existing = await Message.findById(contentId).select('moderationStatus senderId receiverId');
       if (!existing) return res.status(404).json({ error: 'Message not found.' });
@@ -134,7 +158,7 @@ exports.moderateContent = async (req, res) => {
       targetType: auditTargetType,
       targetId: contentId,
       notes: auditNotes.join('; '),
-      metadata: { contentType, action },
+      metadata: { contentType, action, reason: reason || '' },
     });
 
     logger.info(`Admin ${req.user._id} performed ${action} on ${contentType} ${contentId}`);
