@@ -47,12 +47,28 @@ exports.getFlaggedContent = async (req, res) => {
       .populate('companyId', 'name verificationStatus')
       .sort({ createdAt: -1 });
 
+    const suspended = await Opportunity.find({ status: 'suspended' })
+      .populate('postedByUserId', 'fullName email')
+      .populate('companyId', 'name verificationStatus')
+      .sort({ createdAt: -1 });
+
+    const pendingAppeals = await Opportunity.find({ 'appeal.status': 'pending' })
+      .populate('postedByUserId', 'fullName email')
+      .populate('companyId', 'name verificationStatus')
+      .sort({ 'appeal.submittedAt': -1 });
+
     const reports = await Report.find({ status: 'pending' })
       .populate('reporterId', 'fullName email')
       .sort({ createdAt: -1 });
 
-    res.json({ flaggedOpportunities: flagged, pendingReports: reports });
+    res.json({ 
+      flaggedOpportunities: flagged, 
+      suspendedOpportunities: suspended,
+      pendingAppeals,
+      pendingReports: reports 
+    });
   } catch (error) {
+    logger.error('Get flagged content error:', error);
     res.status(500).json({ error: 'Failed to fetch flagged content.' });
   }
 };
