@@ -43,6 +43,7 @@ const AdminDashboard = () => {
   const [alerts, setAlerts] = useState(null);
   const [density, setDensity] = useState([]);
   const [fraudInsights, setFraudInsights] = useState(null);
+  const [appeals, setAppeals] = useState([]);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
@@ -83,6 +84,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (tab === 'reports') loadReports();
     if (tab === 'fraud') loadFraudInsights();
+    if (tab === 'appeals') loadAppeals();
   }, [tab]);
 
   const loadFraudInsights = async () => {
@@ -90,6 +92,23 @@ const AdminDashboard = () => {
       const { data } = await adminAPI.getFraudInsights({ range: '30d', granularity: 'day' });
       setFraudInsights(data);
     } catch {}
+  };
+
+  const loadAppeals = async () => {
+    try {
+      const { data } = await adminAPI.getAppeals();
+      setAppeals(data.appeals || []);
+    } catch {}
+  };
+
+  const reviewAppeal = async (id, action, adminNote) => {
+    try {
+      await adminAPI.reviewAppeal(id, { action, adminNote });
+      toast.success(`Appeal ${action}d`);
+      loadAppeals();
+    } catch {
+      toast.error('Failed to review appeal');
+    }
   };
 
   const moderate = async (contentId, action) => {
@@ -230,6 +249,7 @@ const AdminDashboard = () => {
     { key: 'overview', label: 'Overview', icon: FiShield },
     { key: 'moderation', label: 'Moderation', icon: FiAlertTriangle },
     { key: 'fraud', label: 'Fraud Insights', icon: FiBarChart2 },
+    { key: 'appeals', label: 'Appeals', icon: FiMessageSquare },
     { key: 'users', label: 'Users', icon: FiUsers },
     { key: 'reports', label: 'Reports', icon: FiFlag },
   ];
@@ -748,6 +768,66 @@ const AdminDashboard = () => {
                 )}
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Appeals Tab ─── */}
+      {tab === 'appeals' && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-lg">Appeals Queue ({appeals.length})</h2>
+          {appeals.length > 0 ? (
+            appeals.map((opp) => (
+              <div key={opp._id} className="card border-l-4 border-l-purple-400">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-semibold">{opp.title}</h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Posted by: {opp.postedByUserId?.fullName || 'Unknown'} • {opp.companyId?.name || 'No company'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className={`text-lg font-bold ${
+                      opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600'
+                    }`}>{opp.fraudRiskScore}</span>
+                    <span className="text-xs text-gray-500">Fraud Score</span>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-purple-50 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FiMessageSquare size={16} className="text-purple-600" />
+                    <span className="text-sm font-medium text-purple-800">Appeal Reason</span>
+                  </div>
+                  <p className="text-sm text-gray-700">{opp.appeal?.reason}</p>
+                  <p className="text-xs text-gray-400 mt-2">Submitted on: {new Date(opp.appeal?.submittedAt).toLocaleString()}</p>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => {
+                      const note = window.prompt('Admin note (optional):');
+                      if (note !== null) reviewAppeal(opp._id, 'approve', note);
+                    }}
+                    className="btn-primary text-sm"
+                  >
+                    Approve Appeal
+                  </button>
+                  <button
+                    onClick={() => {
+                      const note = window.prompt('Admin note (optional):');
+                      if (note !== null) reviewAppeal(opp._id, 'reject', note);
+                    }}
+                    className="bg-red-500 text-white px-4 py-2 rounded-full text-sm hover:bg-red-600 transition"
+                  >
+                    Reject Appeal
+                  </button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="card text-center py-12">
+              <FiMessageSquare size={32} className="mx-auto text-gray-300 mb-3" />
+              <p className="text-gray-400">No appeals pending</p>
+            </div>
           )}
         </div>
       )}
