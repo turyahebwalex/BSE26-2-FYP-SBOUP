@@ -576,3 +576,133 @@ exports.reviewAppeal = async (req, res) => {
     res.status(500).json({ error: 'Failed to review appeal.' });
   }
 };
+
+exports.getModelHealth = async (req, res) => {
+  const axios = require('axios');
+  try {
+    // ── 1. Drift status from Python service ─────────────────────────────────
+    let driftReport = null;
+    try {
+      const { data } = await axios.get(
+        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/drift/status`,
+        { timeout: 10_000 }
+      );
+      driftReport = data;
+    } catch (err) {
+      logger.warn(`Drift status fetch failed: ${err.message}`);
+    }
+
+    // ── 2. Model stats (accuracy / precision / recall / F1) ─────────────────
+    let modelStats = null;
+    try {
+      const { data } = await axios.get(
+        `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/model/stats`,
+        { timeout: 5_000 }
+      );
+      modelStats = data;
+    } catch (err) {
+      logger.warn(`Model stats fetch failed: ${err.message}`);
+    }
+
+    // ── 3. Weekly performance time-series (from FraudLog) ───────────────────
+    const weeks = parseInt(req.query.weeks, 10) || 12;
+    const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
+
+    const weeklyTrend = await FraudLog.aggregate([
+      { $match: { source: { $in: ['model', 'workflow'] }, createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%G-W%V', date: '$createdAt' } },
+          total: { $sum: 1 },
+          published: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'published'] }, 1, 0] } },
+          underReview: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'under_review'] }, 1, 0] } },
+          blocked: { $sum: { $cond: [{ $eq: ['$decisionOutcome', 'blocked'] }, 1, 0] } },
+          avgScore: { $avg: '$fraudScore' },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          week: '$_id',
+          total: 1,
+          published: 1,
+          underReview: 1,
+          blocked: 1,
+          avgScore: { $round: ['$avgScore', 1] },
+          autoApprovalRate: {
+            $cond: [
+              { $gt: ['$total', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$published', '$total'] }, 100] }, 1] },
+              0,
+            ],
+          },
+        },
+      },
+    ]);
+
+    // ── 4. Admin agreement trend (weekly) ────────────────────────────────────
+    const adminWeeklyTrend = await FraudLog.aggregate([
+      { $match: { source: 'admin', stage: 'moderation', createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%G-W%V', date: '$createdAt' } },
+          totalAdminActions: { $sum: 1 },
+          approvals: { $sum: { $cond: [{ $eq: ['$adminAction', 'approve'] }, 1, 0] } },
+          rejections: { $sum: { $cond: [{ $in: ['$adminAction', ['reject', 'suspend']] }, 1, 0] } },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          week: '$_id',
+          totalAdminActions: 1,
+          approvals: 1,
+          rejections: 1,
+        },
+      },
+    ]);
+
+    // ── 5. Admin feedback log (most recent 50 labelled entries) ──────────────
+    const feedbackLog = await FraudLog.find({
+      source: 'admin',
+      stage: { $in: ['moderation', 'appeal_review'] },
+      adminFeedback: { $exists: true, $ne: '' },
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('opportunityId', 'title fraudRiskScore status')
+      .populate('adminId', 'fullName email')
+      .select('opportunityId adminId adminAction adminFeedback decisionOutcome fraudScore createdAt');
+
+    res.json({
+      driftReport,
+      modelStats,
+      weeklyTrend,
+      adminWeeklyTrend,
+      feedbackLog,
+    });
+  } catch (error) {
+    logger.error('Model health error:', error);
+    res.status(500).json({ error: 'Failed to fetch model health data.' });
+  }
+};
+
+exports.getTrainingExport = async (req, res) => {
+  const axios = require('axios');
+  try {
+    const { days = 90, min_feedback = 'false' } = req.query;
+    const { data } = await axios.get(
+      `${process.env.FRAUD_DETECTION_SERVICE_URL}/api/training-export`,
+      {
+        timeout: 30_000,
+        params: { days, min_feedback },
+      }
+    );
+    res.json(data);
+  } catch (error) {
+    logger.error('Training export proxy error:', error);
+    res.status(500).json({ error: 'Failed to fetch training export data.' });
+  }
+};

@@ -36,14 +36,25 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarEle
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
-  const [flagged, setFlagged] = useState({ flaggedOpportunities: [], pendingReports: [] });
+  const [flagged, setFlagged] = useState({
+    flaggedOpportunities: [],
+    suspendedOpportunities: [],
+    pendingAppeals: [],
+    pendingReports: [],
+  });
+  const [modSubTab, setModSubTab] = useState('review');
+  const [archivedOps, setArchivedOps] = useState([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  const [appealNotes, setAppealNotes] = useState({});
   const [users, setUsers] = useState([]);
   const [reports, setReports] = useState([]);
   const [trends, setTrends] = useState([]);
   const [alerts, setAlerts] = useState(null);
   const [density, setDensity] = useState([]);
   const [fraudInsights, setFraudInsights] = useState(null);
-  const [appeals, setAppeals] = useState([]);
+  const [modelHealth, setModelHealth] = useState(null);
+  const [modelHealthLoading, setModelHealthLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
@@ -84,7 +95,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (tab === 'reports') loadReports();
     if (tab === 'fraud') loadFraudInsights();
-    if (tab === 'appeals') loadAppeals();
+    if (tab === 'model_health') loadModelHealth();
   }, [tab]);
 
   const loadFraudInsights = async () => {
@@ -94,21 +105,31 @@ const AdminDashboard = () => {
     } catch {}
   };
 
-  const loadAppeals = async () => {
+  const loadModelHealth = async () => {
+    setModelHealthLoading(true);
     try {
-      const { data } = await adminAPI.getAppeals();
-      setAppeals(data.appeals || []);
+      const { data } = await adminAPI.getModelHealth({ weeks: 12 });
+      setModelHealth(data);
     } catch {}
+    setModelHealthLoading(false);
   };
 
-  const reviewAppeal = async (id, action, adminNote) => {
+  const downloadTrainingExport = async (days = 90) => {
+    setExportLoading(true);
     try {
-      await adminAPI.reviewAppeal(id, { action, adminNote });
-      toast.success(`Appeal ${action}d`);
-      loadAppeals();
+      const { data } = await adminAPI.getTrainingExport({ days });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fraud_training_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${data.totalRecords} labelled records`);
     } catch {
-      toast.error('Failed to review appeal');
+      toast.error('Export failed');
     }
+    setExportLoading(false);
   };
 
   const moderate = async (contentId, action) => {
@@ -118,11 +139,72 @@ const AdminDashboard = () => {
       toast.success(`Content ${action}d`);
       setFlagged((prev) => ({
         ...prev,
-        flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
+        flaggedOpportunities: (prev.flaggedOpportunities || []).filter((o) => o._id !== contentId),
+        suspendedOpportunities: (prev.suspendedOpportunities || []).filter((o) => o._id !== contentId),
+        pendingAppeals: (prev.pendingAppeals || []).filter((o) => o._id !== contentId),
       }));
-      setFeedbacks((prev) => { const n = { ...prev }; delete n[contentId]; return n; });
+      setFeedbacks((prev) => {
+        const n = { ...prev };
+        delete n[contentId];
+        return n;
+      });
     } catch {
       toast.error('Action failed');
+    }
+  };
+
+  const loadArchived = async () => {
+    setArchivedLoading(true);
+    try {
+      const { data } = await adminAPI.getArchivedOpportunities({ limit: 50 });
+      setArchivedOps(data.opportunities || []);
+    } catch {
+      toast.error('Failed to load archived postings');
+    }
+    setArchivedLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === 'moderation' && modSubTab === 'archived') loadArchived();
+  }, [tab, modSubTab]);
+
+  const restoreArchived = async (id) => {
+    try {
+      await adminAPI.restoreArchivedOpportunity(id);
+      toast.success('Posting restored to published');
+      setArchivedOps((prev) => prev.filter((o) => o._id !== id));
+    } catch {
+      toast.error('Restore failed');
+    }
+  };
+
+  const purgeArchived = async (id) => {
+    if (!window.confirm('Permanently delete this posting? This cannot be undone.')) return;
+    try {
+      await adminAPI.permanentlyRemoveOpportunity(id);
+      toast.success('Posting permanently removed');
+      setArchivedOps((prev) => prev.filter((o) => o._id !== id));
+    } catch {
+      toast.error('Removal failed');
+    }
+  };
+
+  const reviewAppeal = async (oppId, action) => {
+    try {
+      const adminNote = appealNotes[oppId] || '';
+      await adminAPI.reviewAppeal(oppId, { action, adminNote });
+      toast.success(`Appeal ${action}d`);
+      setFlagged((prev) => ({
+        ...prev,
+        pendingAppeals: (prev.pendingAppeals || []).filter((o) => o._id !== oppId),
+      }));
+      setAppealNotes((prev) => {
+        const n = { ...prev };
+        delete n[oppId];
+        return n;
+      });
+    } catch {
+      toast.error('Appeal review failed');
     }
   };
 
@@ -235,6 +317,213 @@ const AdminDashboard = () => {
     };
   }, [users]);
 
+  const renderQueueCard = (opp, ctx) => {
+    const { borderClass, statusTag } = ctx;
+    const signals = opp.fraudSignals || [];
+    const isExpanded = expandedOpp === opp._id;
+    const scoreColor = opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600';
+    const scoreBg = opp.fraudRiskScore >= 70 ? 'bg-red-50' : opp.fraudRiskScore >= 30 ? 'bg-yellow-50' : 'bg-green-50';
+
+    const xai = opp.fraudXai || {};
+    const qm = xai.qualityMetrics || {};
+    const checksRaw = qm.completeness_checks || {};
+    const fallbackChecks = {
+      has_description: (opp.description || '').length > 50,
+      has_requirements: (opp.requirements || '').length > 20,
+      has_salary: !!(opp.compensationRange?.min || opp.compensationRange?.max),
+      has_location: !!(opp.location && String(opp.location).length > 2),
+    };
+    const checks = Object.keys(checksRaw).length ? checksRaw : fallbackChecks;
+
+    const meta = opp.employerModerationMeta || {};
+    const emQ = qm.employer_metrics || {};
+    const accountAge = meta.accountAgeDays ?? emQ.account_age_days;
+    const prevPost = meta.previousPostings ?? emQ.previous_postings;
+    const blockedCnt = meta.blockedCount ?? emQ.blocked_count;
+
+    const conf = (xai.confidenceLevel || '').toLowerCase();
+    const confCls =
+      conf === 'high'
+        ? 'bg-indigo-100 text-indigo-800'
+        : conf === 'medium'
+          ? 'bg-amber-100 text-amber-800'
+          : 'bg-gray-100 text-gray-700';
+
+    const rationale =
+      xai.plainEnglishRationale ||
+      opp.moderationExplanation ||
+      (signals.length
+        ? 'No plain-language summary is stored for this posting yet; use the signal list below.'
+        : 'No fraud signals recorded.');
+
+    return (
+      <div key={opp._id} className="card hover:shadow-md transition">
+        <div className="flex justify-between items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold">{opp.title}</h3>
+              {statusTag && (
+                <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                  {statusTag}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Posted by: {opp.postedByUserId?.fullName || 'Unknown'} • {opp.companyId?.name || 'No company'}
+            </p>
+          </div>
+          <div className={`flex flex-col items-center px-3 py-2 rounded-xl shrink-0 ${scoreBg}`}>
+            <span className={`text-2xl font-bold ${scoreColor}`}>{opp.fraudRiskScore ?? '—'}</span>
+            <span className="text-xs text-gray-500">Fraud score</span>
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 mt-3 line-clamp-2">{opp.description}</p>
+
+        <div className="mt-3 grid md:grid-cols-2 gap-3">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-700">Explanation</span>
+              {xai.confidenceLevel && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${confCls}`}>
+                  {xai.confidenceLevel} confidence
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-slate-700 leading-snug">{rationale}</p>
+          </div>
+
+          <div className="p-3 bg-white rounded-xl border border-gray-100">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Posting completeness</p>
+            <div className="space-y-1">
+              {[
+                ['has_description', 'Description'],
+                ['has_requirements', 'Requirements'],
+                ['has_salary', 'Salary'],
+                ['has_location', 'Location'],
+              ].map(([k, label]) => (
+                <div key={k} className="flex justify-between text-xs text-gray-600">
+                  <span>{label}</span>
+                  <span className={checks[k] ? 'text-green-600 font-medium' : 'text-gray-400'}>
+                    {checks[k] ? '✓' : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {typeof qm.overall_score === 'number' && (
+              <p className="text-[11px] text-gray-500 mt-2">Quality score (service): {qm.overall_score}/100</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 p-3 bg-gray-50 rounded-xl text-xs text-gray-700">
+          <span className="font-semibold text-gray-800">Employer history</span>
+          <p className="mt-1">
+            Account age:{' '}
+            {typeof accountAge === 'number' ? `${accountAge} days` : '—'} • Prior postings:{' '}
+            {typeof prevPost === 'number' ? prevPost : '—'} • Blocked postings:{' '}
+            {typeof blockedCnt === 'number' ? blockedCnt : '—'}
+            {emQ.verification_status && (
+              <>
+                {' '}
+                • Company verification: {emQ.verification_status}
+              </>
+            )}
+          </p>
+        </div>
+
+        {signals.length > 0 && (
+          <div className="mt-3 p-3 bg-red-50 rounded-xl">
+            <div className="flex items-center gap-1.5 mb-2">
+              <FiInfo size={13} className="text-red-500" />
+              <span className="text-xs font-semibold text-red-700">Model signals</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {signals.slice(0, 8).map((s, i) => (
+                <span
+                  key={i}
+                  className="text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded-full"
+                >
+                  {s.signal}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setExpandedOpp(isExpanded ? null : opp._id)}
+          className="text-xs text-primary mt-2 hover:underline"
+        >
+          {isExpanded ? 'Hide details' : 'View full posting'}
+        </button>
+
+        {isExpanded && (
+          <div className="mt-3 pt-3 border-t space-y-2 text-sm text-gray-600">
+            {opp.requirements && (
+              <p>
+                <span className="font-medium">Requirements:</span> {opp.requirements}
+              </p>
+            )}
+            {opp.location && (
+              <p>
+                <span className="font-medium">Location:</span> {opp.location}
+              </p>
+            )}
+            {opp.compensationRange && (
+              <p>
+                <span className="font-medium">Salary:</span>{' '}
+                {opp.compensationRange.min?.toLocaleString()} – {opp.compensationRange.max?.toLocaleString()} UGX
+              </p>
+            )}
+            <p>
+              <span className="font-medium">Remote:</span> {opp.isRemote ? 'Yes' : 'No'}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <FiMessageSquare size={13} className="text-gray-400" />
+            <span className="text-xs text-gray-500">Admin feedback (optional)</span>
+          </div>
+          <textarea
+            rows={2}
+            placeholder="Notes for audit trail / retraining..."
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+            value={feedbacks[opp._id] || ''}
+            onChange={(e) => setFeedbacks((prev) => ({ ...prev, [opp._id]: e.target.value }))}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'approve')}
+            className="btn-primary text-sm !py-1.5 !px-4"
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'suspend')}
+            className="bg-amber-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-amber-600 transition"
+          >
+            Suspend
+          </button>
+          <button
+            type="button"
+            onClick={() => moderate(opp._id, 'remove')}
+            className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+          >
+            Block
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   if (loading)
     return (
       <div className="flex items-center justify-center h-64">
@@ -249,7 +538,7 @@ const AdminDashboard = () => {
     { key: 'overview', label: 'Overview', icon: FiShield },
     { key: 'moderation', label: 'Moderation', icon: FiAlertTriangle },
     { key: 'fraud', label: 'Fraud Insights', icon: FiBarChart2 },
-    { key: 'appeals', label: 'Appeals', icon: FiMessageSquare },
+    { key: 'model_health', label: 'Model Health', icon: FiActivity },
     { key: 'users', label: 'Users', icon: FiUsers },
     { key: 'reports', label: 'Reports', icon: FiFlag },
   ];
@@ -517,114 +806,222 @@ const AdminDashboard = () => {
       {/* ─── Moderation Tab ─── */}
       {tab === 'moderation' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-lg">
-              Flagged Opportunities ({flagged.flaggedOpportunities?.length || 0})
-            </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setModSubTab('review')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-yellow-700">Under review</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.flaggedOpportunities?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Initial review queue</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModSubTab('suspended')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Suspended</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.suspendedOpportunities?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Separated moderation queue</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModSubTab('appeals')}
+              className="card text-left hover:shadow-md transition"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Appeals</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{flagged.pendingAppeals?.length || 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Waiting for admin review</p>
+            </button>
           </div>
 
-          {flagged.flaggedOpportunities?.length > 0 ? (
-            flagged.flaggedOpportunities.map((opp) => {
-              const signals = opp.fraudSignals || [];
-              const isExpanded = expandedOpp === opp._id;
-              const scoreColor = opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600';
-              const scoreBg = opp.fraudRiskScore >= 70 ? 'bg-red-50' : opp.fraudRiskScore >= 30 ? 'bg-yellow-50' : 'bg-green-50';
-              return (
-                <div key={opp._id} className="card border-l-4 border-l-yellow-400">
-                  {/* Header */}
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold">{opp.title}</h3>
-                      <p className="text-sm text-gray-500 mt-0.5">
-                        Posted by: {opp.postedByUserId?.fullName || 'Unknown'} •{' '}
-                        {opp.companyId?.name || 'No company'}
-                      </p>
-                    </div>
-                    <div className={`ml-4 flex flex-col items-center px-3 py-2 rounded-xl ${scoreBg}`}>
-                      <span className={`text-2xl font-bold ${scoreColor}`}>{opp.fraudRiskScore ?? '—'}</span>
-                      <span className="text-xs text-gray-500">Fraud Score</span>
-                    </div>
+          <div className="flex flex-wrap gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+            {[
+              { key: 'review', label: 'Review queue' },
+              { key: 'suspended', label: 'Suspended' },
+              { key: 'appeals', label: 'Appeals' },
+              { key: 'archived', label: 'Archived' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setModSubTab(key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  modSubTab === key ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {modSubTab === 'review' && (
+            <>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Under manual review
+                </h3>
+                {(flagged.flaggedOpportunities || []).length > 0 ? (
+                  <div className="space-y-4">
+                    {flagged.flaggedOpportunities.map((opp) =>
+                      renderQueueCard(opp, { borderClass: 'border-l-yellow-400', statusTag: 'under review' })
+                    )}
                   </div>
+                ) : (
+                  <p className="text-sm text-gray-400 py-4">No postings awaiting initial review.</p>
+                )}
+              </div>
+            </>
+          )}
 
-                  {/* Description */}
-                  <p className="text-sm text-gray-600 mt-3 line-clamp-2">{opp.description}</p>
+          {modSubTab === 'suspended' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Suspended (temporary)</h3>
+                <p className="text-xs text-gray-500 mb-3">
+                  Suspended postings stay hidden from the public feed until you approve them or permanently block them
+                  (score ≥ 70 auto-block is separate).
+                </p>
+                {(flagged.suspendedOpportunities || []).length > 0 ? (
+                  <div className="space-y-4">
+                    {flagged.suspendedOpportunities.map((opp) =>
+                      renderQueueCard(opp, { borderClass: 'border-l-amber-400', statusTag: 'suspended' })
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 py-4">No suspended postings.</p>
+                )}
+              </div>
+            </div>
+          )}
 
-                  {/* XAI — Fraud Signals */}
-                  {signals.length > 0 && (
-                    <div className="mt-3 p-3 bg-red-50 rounded-xl">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <FiInfo size={13} className="text-red-500" />
-                        <span className="text-xs font-semibold text-red-700">Why this was flagged</span>
+          {modSubTab === 'appeals' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Employers may submit one appeal per blocked, suspended, or under review posting. Review their
+                justification below.
+              </p>
+              {(flagged.pendingAppeals || []).length > 0 ? (
+                <div className="space-y-4">
+                  {flagged.pendingAppeals.map((opp) => {
+                    const signals = opp.fraudSignals || [];
+                    const submitted = opp.appeal?.submittedAt
+                      ? new Date(opp.appeal.submittedAt).toLocaleString()
+                      : '';
+                    return (
+                      <div key={opp._id} className="card">
+                      <div className="flex justify-between items-start gap-3">
+                        <div>
+                          <h3 className="font-semibold">{opp.title}</h3>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            {opp.postedByUserId?.fullName || 'Unknown'} • Status:{' '}
+                            <span className="font-medium text-gray-700">{opp.status}</span> • Risk{' '}
+                            {opp.fraudRiskScore ?? '—'}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {signals.slice(0, 6).map((s, i) => (
-                          <span key={i} className="text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded-full">
-                            {s.signal}
-                          </span>
-                        ))}
+                      <div className="mt-3 p-3 bg-indigo-50 rounded-xl">
+                        <p className="text-xs font-semibold text-indigo-800 mb-1">Employer appeal</p>
+                        <p className="text-sm text-indigo-950 whitespace-pre-wrap">{opp.appeal?.reason || '—'}</p>
+                        <p className="text-[11px] text-indigo-700 mt-2">Submitted: {submitted || '—'}</p>
                       </div>
-                    </div>
-                  )}
-
-                  {/* Expand for full details */}
-                  <button
-                    onClick={() => setExpandedOpp(isExpanded ? null : opp._id)}
-                    className="text-xs text-primary mt-2 hover:underline"
-                  >
-                    {isExpanded ? 'Hide details' : 'View full posting'}
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-3 pt-3 border-t space-y-2 text-sm text-gray-600">
-                      {opp.requirements && <p><span className="font-medium">Requirements:</span> {opp.requirements}</p>}
-                      {opp.location && <p><span className="font-medium">Location:</span> {opp.location}</p>}
-                      {opp.compensationRange && (
-                        <p>
-                          <span className="font-medium">Salary:</span>{' '}
-                          {opp.compensationRange.min?.toLocaleString()} – {opp.compensationRange.max?.toLocaleString()} UGX
-                        </p>
+                      {signals.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {signals.slice(0, 5).map((s, i) => (
+                            <span
+                              key={i}
+                              className="text-[10px] bg-white border border-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full"
+                            >
+                              {s.signal}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                      <p><span className="font-medium">Remote:</span> {opp.isRemote ? 'Yes' : 'No'}</p>
-                    </div>
-                  )}
-
-                  {/* Admin Feedback */}
-                  <div className="mt-3">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <FiMessageSquare size={13} className="text-gray-400" />
-                      <span className="text-xs text-gray-500">Admin feedback (optional — stored for model retraining)</span>
-                    </div>
-                    <textarea
-                      rows={2}
-                      placeholder="e.g. Legitimate local business, salary is reasonable for Kampala..."
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-                      value={feedbacks[opp._id] || ''}
-                      onChange={(e) => setFeedbacks((prev) => ({ ...prev, [opp._id]: e.target.value }))}
-                    />
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => moderate(opp._id, 'approve')}
-                      className="btn-primary text-sm !py-1.5 !px-4"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => moderate(opp._id, 'remove')}
-                      className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                      <div className="mt-3">
+                        <span className="text-xs text-gray-500">Admin note (optional)</span>
+                        <textarea
+                          rows={2}
+                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                          value={appealNotes[opp._id] || ''}
+                          onChange={(e) => setAppealNotes((prev) => ({ ...prev, [opp._id]: e.target.value }))}
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => reviewAppeal(opp._id, 'approve')}
+                          className="btn-primary text-sm !py-1.5 !px-4"
+                        >
+                          Approve appeal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => reviewAppeal(opp._id, 'reject')}
+                          className="bg-gray-200 text-gray-800 px-4 py-1.5 rounded-full text-sm hover:bg-gray-300 transition"
+                        >
+                          Reject appeal
+                        </button>
+                      </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })
-          ) : (
-            <div className="card text-center py-12">
-              <FiAlertTriangle size={32} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-400">No flagged content — everything looks good!</p>
+              ) : (
+                <div className="card text-center py-12">
+                  <FiMessageSquare size={32} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-gray-400">No pending appeals</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {modSubTab === 'archived' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Employer-archived postings are hidden from discovery. Restore them to published or permanently remove
+                them (distinct from fraud-blocked postings).
+              </p>
+              {archivedLoading ? (
+                <div className="card text-center py-12 text-gray-400 text-sm">Loading archived postings…</div>
+              ) : archivedOps.length > 0 ? (
+                <div className="space-y-4">
+                  {archivedOps.map((opp) => (
+                    <div key={opp._id} className="card flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">{opp.title}</h3>
+                        <p className="text-sm text-gray-500">
+                          {opp.postedByUserId?.fullName || 'Unknown'} • Updated{' '}
+                          {opp.updatedAt ? new Date(opp.updatedAt).toLocaleDateString() : '—'}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => restoreArchived(opp._id)}
+                          className="btn-primary text-sm !py-1.5 !px-4"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => purgeArchived(opp._id)}
+                          className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+                        >
+                          Delete permanently
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="card text-center py-12">
+                  <FiBriefcase size={32} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-gray-400">No archived postings</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -772,62 +1169,345 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* ─── Appeals Tab ─── */}
-      {tab === 'appeals' && (
-        <div className="space-y-4">
-          <h2 className="font-semibold text-lg">Appeals Queue ({appeals.length})</h2>
-          {appeals.length > 0 ? (
-            appeals.map((opp) => (
-              <div key={opp._id} className="card border-l-4 border-l-purple-400">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-semibold">{opp.title}</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Posted by: {opp.postedByUserId?.fullName || 'Unknown'} • {opp.companyId?.name || 'No company'}
+      {/* ─── Model Health Tab ─── */}
+      {tab === 'model_health' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-lg">Model Health &amp; Drift Detection</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Live performance metrics, admin override trends, and training data export.
+              </p>
+            </div>
+            <button
+              onClick={loadModelHealth}
+              className="text-xs text-primary hover:underline"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {modelHealthLoading ? (
+            <div className="card text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3" />
+              <p className="text-gray-400">Analysing model health…</p>
+            </div>
+          ) : !modelHealth ? (
+            <div className="card text-center py-12 text-gray-400 text-sm">
+              No data yet — click Refresh to run drift analysis.
+            </div>
+          ) : (
+            <>
+              {/* ── Drift Status Banner ── */}
+              {(() => {
+                const dr = modelHealth.driftReport;
+                if (!dr) return null;
+                const statusCfg = {
+                  ok: { bg: 'bg-green-50 border-green-200', icon: '✓', iconCls: 'text-green-600', label: 'Model OK', labelCls: 'text-green-800' },
+                  warning: { bg: 'bg-yellow-50 border-yellow-200', icon: '⚠', iconCls: 'text-yellow-600', label: 'Warning — early drift signals', labelCls: 'text-yellow-800' },
+                  drift_detected: { bg: 'bg-red-50 border-red-200', icon: '✕', iconCls: 'text-red-600', label: 'Drift Detected', labelCls: 'text-red-800' },
+                };
+                const cfg = statusCfg[dr.overallStatus] || statusCfg.warning;
+                return (
+                  <div className={`rounded-xl border p-4 ${cfg.bg}`}>
+                    <div className="flex items-start gap-3">
+                      <span className={`text-2xl font-bold mt-0.5 ${cfg.iconCls}`}>{cfg.icon}</span>
+                      <div className="flex-1">
+                        <p className={`font-semibold ${cfg.labelCls}`}>{cfg.label}</p>
+                        <p className="text-sm text-gray-700 mt-1">{dr.recommendation}</p>
+                        {dr.signals && dr.signals.length > 0 && (
+                          <ul className="mt-2 space-y-1">
+                            {dr.signals.map((s, i) => (
+                              <li key={i} className="text-sm text-gray-600 flex items-start gap-1.5">
+                                <span className="text-gray-400 mt-0.5">•</span> {s}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-xs text-gray-400 mt-2">
+                          Model: {dr.modelVersion || '—'} · Checked: {dr.checkedAt ? new Date(dr.checkedAt).toLocaleString() : '—'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Model Performance Metrics ── */}
+              {modelHealth.modelStats && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    <FiBarChart2 size={16} className="text-primary" />
+                    Model Performance Metrics
+                    {modelHealth.modelStats.available && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                      { label: 'Accuracy', val: modelHealth.modelStats.accuracy, target: 0.85 },
+                      { label: 'Precision', val: modelHealth.modelStats.precision, target: 0.90 },
+                      { label: 'Recall', val: modelHealth.modelStats.recall, target: null },
+                      { label: 'F1 Score', val: modelHealth.modelStats.f1, target: 0.82 },
+                    ].map(({ label, val, target }) => {
+                      const pct = val != null ? (val * 100).toFixed(1) : null;
+                      const ok = target == null || val == null || val >= target;
+                      return (
+                        <div key={label} className={`rounded-xl p-4 border ${ok ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                          <p className="text-xs text-gray-500 mb-1">{label}</p>
+                          <p className={`text-2xl font-bold ${ok ? 'text-green-700' : 'text-red-700'}`}>
+                            {pct != null ? `${pct}%` : '—'}
+                          </p>
+                          {target != null && (
+                            <p className={`text-xs mt-1 ${ok ? 'text-green-600' : 'text-red-600'}`}>
+                              Target ≥ {(target * 100).toFixed(0)}% {ok ? '✓' : '✕'}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-4 text-sm text-gray-500">
+                    <span>Evaluated on <strong>{modelHealth.modelStats.sampleCount?.toLocaleString() ?? '—'}</strong> test samples</span>
+                    <span>Features: <strong>{modelHealth.modelStats.featureCount ?? '—'}</strong></span>
+                    <span>Version: <strong className="font-mono text-xs">{modelHealth.modelStats.modelVersion ?? '—'}</strong></span>
+                    {modelHealth.modelStats.lastTrainedAt && (
+                      <span>Last trained: <strong>{new Date(modelHealth.modelStats.lastTrainedAt).toLocaleDateString()}</strong></span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Admin Agreement Rate ── */}
+              {modelHealth.driftReport?.adminAgreementRate != null && (
+                <div className="card">
+                  <h3 className="font-semibold mb-3">Admin Override Rate (last 30 days)</h3>
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600">Agreement with model decisions</span>
+                        <span className="font-semibold">
+                          {(modelHealth.driftReport.adminAgreementRate * 100).toFixed(1)}%
+                          <span className="text-gray-400 font-normal ml-1">
+                            ({modelHealth.driftReport.adminAgreementSampleSize} decisions)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            modelHealth.driftReport.adminAgreementRate >= 0.70 ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${(modelHealth.driftReport.adminAgreementRate * 100).toFixed(1)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Threshold: 70% — below this indicates frequent model/human disagreement (drift signal)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Score Distribution Shift ── */}
+              {modelHealth.driftReport?.scoreDistributionShift && (
+                <div className="card">
+                  <h3 className="font-semibold mb-3">Score Distribution Shift</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    {[
+                      { label: 'Recent high-risk rate (7d)', val: `${(modelHealth.driftReport.scoreDistributionShift.recentHighRiskRate * 100).toFixed(1)}%` },
+                      { label: 'Historical high-risk rate (30d)', val: `${(modelHealth.driftReport.scoreDistributionShift.historicalHighRiskRate * 100).toFixed(1)}%` },
+                      { label: 'Recent avg score', val: modelHealth.driftReport.scoreDistributionShift.recentAvgScore },
+                      { label: 'Historical avg score', val: modelHealth.driftReport.scoreDistributionShift.historicalAvgScore },
+                    ].map(({ label, val }) => (
+                      <div key={label} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                        <p className="text-xs text-gray-500">{label}</p>
+                        <p className="text-xl font-bold text-gray-800 mt-1">{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {Math.abs(modelHealth.driftReport.scoreDistributionShift.shift) > 0.15 && (
+                    <p className="text-sm text-yellow-700 mt-3 p-2 bg-yellow-50 rounded-lg">
+                      ⚠ High-risk rate shifted by{' '}
+                      {(modelHealth.driftReport.scoreDistributionShift.shift * 100).toFixed(1)}% — this may indicate
+                      a change in the type of postings being submitted or concept drift.
                     </p>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <span className={`text-lg font-bold ${
-                      opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600'
-                    }`}>{opp.fraudRiskScore}</span>
-                    <span className="text-xs text-gray-500">Fraud Score</span>
+                  )}
+                </div>
+              )}
+
+              {/* ── Weekly Decision Trend Chart ── */}
+              {modelHealth.weeklyTrend && modelHealth.weeklyTrend.length > 0 && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4">Weekly Model Decision Trend</h3>
+                  <div className="h-64">
+                    <Bar
+                      data={{
+                        labels: modelHealth.weeklyTrend.map((w) => w.week),
+                        datasets: [
+                          {
+                            label: 'Auto-Published',
+                            data: modelHealth.weeklyTrend.map((w) => w.published),
+                            backgroundColor: '#22C55E',
+                            borderRadius: 3,
+                          },
+                          {
+                            label: 'Sent for Review',
+                            data: modelHealth.weeklyTrend.map((w) => w.underReview),
+                            backgroundColor: '#F59E0B',
+                            borderRadius: 3,
+                          },
+                          {
+                            label: 'Auto-Blocked',
+                            data: modelHealth.weeklyTrend.map((w) => w.blocked),
+                            backgroundColor: '#EF4444',
+                            borderRadius: 3,
+                          },
+                        ],
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+                        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+                      }}
+                    />
                   </div>
                 </div>
-                <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FiMessageSquare size={16} className="text-purple-600" />
-                    <span className="text-sm font-medium text-purple-800">Appeal Reason</span>
+              )}
+
+              {/* ── Auto-Approval Rate Trend ── */}
+              {modelHealth.weeklyTrend && modelHealth.weeklyTrend.length > 1 && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4">Auto-Approval Rate Over Time (%)</h3>
+                  <div className="h-48">
+                    <Line
+                      data={{
+                        labels: modelHealth.weeklyTrend.map((w) => w.week),
+                        datasets: [
+                          {
+                            label: 'Auto-Approval Rate %',
+                            data: modelHealth.weeklyTrend.map((w) => w.autoApprovalRate),
+                            borderColor: '#6366F1',
+                            backgroundColor: 'rgba(99,102,241,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 4,
+                          },
+                        ],
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true, max: 100 } },
+                      }}
+                    />
                   </div>
-                  <p className="text-sm text-gray-700">{opp.appeal?.reason}</p>
-                  <p className="text-xs text-gray-400 mt-2">Submitted on: {new Date(opp.appeal?.submittedAt).toLocaleString()}</p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    A sudden drop in auto-approval rate (without a matching rise in reported fraud) can signal over-sensitive model behaviour.
+                  </p>
                 </div>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    onClick={() => {
-                      const note = window.prompt('Admin note (optional):');
-                      if (note !== null) reviewAppeal(opp._id, 'approve', note);
-                    }}
-                    className="btn-primary text-sm"
-                  >
-                    Approve Appeal
-                  </button>
-                  <button
-                    onClick={() => {
-                      const note = window.prompt('Admin note (optional):');
-                      if (note !== null) reviewAppeal(opp._id, 'reject', note);
-                    }}
-                    className="bg-red-500 text-white px-4 py-2 rounded-full text-sm hover:bg-red-600 transition"
-                  >
-                    Reject Appeal
-                  </button>
+              )}
+
+              {/* ── Admin Feedback Log ── */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold">Admin Feedback Log (recent 50)</h3>
+                  <span className="text-xs text-gray-400">Used as training labels</span>
+                </div>
+                {modelHealth.feedbackLog && modelHealth.feedbackLog.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-gray-500">
+                          <th className="pb-2 font-medium">Posting</th>
+                          <th className="pb-2 font-medium">Score</th>
+                          <th className="pb-2 font-medium">Admin Action</th>
+                          <th className="pb-2 font-medium">Label</th>
+                          <th className="pb-2 font-medium">Feedback</th>
+                          <th className="pb-2 font-medium">By</th>
+                          <th className="pb-2 font-medium">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modelHealth.feedbackLog.map((log) => {
+                          const isLegit = ['approve', 'appeal_approve', 'restore'].includes(log.adminAction);
+                          return (
+                            <tr key={log._id} className="border-b last:border-0 hover:bg-gray-50">
+                              <td className="py-2 max-w-[140px] truncate">
+                                {log.opportunityId?.title || 'Deleted'}
+                              </td>
+                              <td className="py-2">
+                                <span className={`font-bold text-xs ${log.fraudScore >= 70 ? 'text-red-600' : log.fraudScore >= 30 ? 'text-yellow-600' : 'text-green-600'}`}>
+                                  {log.fraudScore}
+                                </span>
+                              </td>
+                              <td className="py-2">
+                                <span className="badge bg-gray-100 text-gray-600 text-xs">{log.adminAction}</span>
+                              </td>
+                              <td className="py-2">
+                                <span className={`badge text-xs ${isLegit ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                  {isLegit ? 'Legitimate' : 'Fraud'}
+                                </span>
+                              </td>
+                              <td className="py-2 max-w-[200px] truncate text-gray-500 text-xs">
+                                {log.adminFeedback || '—'}
+                              </td>
+                              <td className="py-2 text-gray-400 text-xs">
+                                {log.adminId?.fullName || '—'}
+                              </td>
+                              <td className="py-2 text-gray-400 text-xs">
+                                {new Date(log.createdAt).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-sm text-center py-6">
+                    No admin feedback recorded yet. Add notes when approving/rejecting postings to build training labels.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Training Export ── */}
+              <div className="card border-l-4 border-l-indigo-400">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold mb-1">Export Training Data</h3>
+                    <p className="text-sm text-gray-600">
+                      Download all admin-labelled fraud decisions as a JSON file. Use this with{' '}
+                      <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">scripts/retrain_model.py</code>{' '}
+                      to retrain the model with real platform feedback.
+                    </p>
+                    {modelHealth.driftReport?.overallStatus !== 'ok' && (
+                      <p className="text-sm text-yellow-700 mt-2 font-medium">
+                        ⚠ Drift signals detected — retraining is recommended.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => downloadTrainingExport(90)}
+                      disabled={exportLoading}
+                      className="btn-primary text-sm !py-2 disabled:opacity-50"
+                    >
+                      {exportLoading ? 'Exporting…' : 'Export 90d'}
+                    </button>
+                    <button
+                      onClick={() => downloadTrainingExport(365)}
+                      disabled={exportLoading}
+                      className="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full text-sm hover:bg-indigo-200 transition disabled:opacity-50"
+                    >
+                      Export 1yr
+                    </button>
+                  </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="card text-center py-12">
-              <FiMessageSquare size={32} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-400">No appeals pending</p>
-            </div>
+            </>
           )}
         </div>
       )}
