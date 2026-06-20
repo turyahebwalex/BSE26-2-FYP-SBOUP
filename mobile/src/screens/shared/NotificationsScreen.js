@@ -15,15 +15,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { BASE_URL } from '../../services/api';
 
-// ─── Tab config ────────────────────────────────────────────────────────────────
+// ─── Tab config (Requests tab removed) ──────────────────────────────────────
 const TABS = [
   { key: 'all',      label: 'All' },
   { key: 'match',    label: 'Matches' },
   { key: 'learning', label: 'Learning' },
-  { key: 'connection_request', label: 'Requests' },
 ];
 
 // ─── Type → icon ───────────────────────────────────────────────────────────────
@@ -155,7 +155,17 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   }, [logout, setUnreadNotificationCount]);
 
-  useEffect(() => { fetchNotifications(1, false); }, []);
+  // ─── Refresh on focus ────────────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotifications(1, false);
+    }, [fetchNotifications])
+  );
+
+  // ─── Initial load ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchNotifications(1, false);
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -539,9 +549,10 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
       return <View style={styles.footerLoader}><ActivityIndicator size="small" color="#F97316" /></View>;
     return null;
   };
+
+  // ── Main render ────────────────────────────────────────────────────────────────
   if (loading && notifications.length === 0) {
     return (
-
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         {!hideHeader && renderHeader()}
         <View style={styles.center}><ActivityIndicator size="large" color="#F97316" /></View>

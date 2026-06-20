@@ -1,3 +1,5 @@
+console.log(' report.routes.js loaded!');
+
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { validate } = require('../validators');

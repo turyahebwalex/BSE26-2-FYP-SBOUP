@@ -22,8 +22,3 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
-
-// Skip NDK installation for signing report
-ext {
-    ndkVersion = null
-}

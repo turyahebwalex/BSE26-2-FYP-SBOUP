@@ -19,13 +19,12 @@ import { applicationAPI, profileAPI } from '../../services/api';
 
 const ApplyFormScreen = ({ route, navigation }) => {
   const { opportunityId, opportunityTitle, requiredDocuments, customQuestions } = route.params || {};
-  
+
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [profile, setProfile] = useState(null);
-  const [submitted, setSubmitted] = useState(false); // Track if already submitted
-  
-  
+  const [submitted, setSubmitted] = useState(false);
+
   const [coverLetter, setCoverLetter] = useState('');
   const [notes, setNotes] = useState('');
   const [cv, setCv] = useState(null);
@@ -45,7 +44,7 @@ const ApplyFormScreen = ({ route, navigation }) => {
       setLoading(true);
       const { data } = await profileAPI.getMyProfile();
       console.log('📱 Profile loaded');
-      
+
       if (data?.profile?._id) {
         setProfile(data.profile);
       } else if (data?._id) {
@@ -75,7 +74,7 @@ const ApplyFormScreen = ({ route, navigation }) => {
       ],
       copyToCacheDirectory: true,
     });
-    
+
     if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
       if (type === 'cv') {
@@ -94,13 +93,13 @@ const ApplyFormScreen = ({ route, navigation }) => {
       Alert.alert('Permission needed', 'Please allow access to your photos');
       return;
     }
-    
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       quality: 0.8,
     });
-    
+
     if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
       setAdditionalDocs([...additionalDocs, {
@@ -133,8 +132,9 @@ const ApplyFormScreen = ({ route, navigation }) => {
     setAdditionalDocs(additionalDocs.filter((_, i) => i !== index));
   };
 
+  // ─── UPDATED SUBMIT HANDLER using applicationAPI.applyWithFiles ──────
   const handleSubmit = async () => {
-    // Prevent multiple submissions
+    // Prevent double submission
     if (isSubmittingRef.current || submittedRef.current || submitted) {
       console.log('Submission already in progress or completed');
       return;
@@ -158,42 +158,83 @@ const ApplyFormScreen = ({ route, navigation }) => {
 
     isSubmittingRef.current = true;
     setSubmitting(true);
-    
+
     try {
-      const applicationData = {
-        opportunityId: opportunityId,
-        profileId: profile._id,
-        coverLetter: coverLetter || '',
-        notes: notes || '',
-      };
-      
-      console.log('Submitting application (single attempt)...');
-      
-      const response = await applicationAPI.apply(applicationData);
-      
+      // Build FormData
+      const formData = new FormData();
+
+      // Text fields
+      formData.append('opportunityId', opportunityId);
+      formData.append('profileId', profile._id);
+      formData.append('coverLetter', coverLetter || '');
+      formData.append('notes', notes || '');
+
+      // CV file (required)
+      if (cv) {
+        const mime = cv.mimeType || 'application/pdf';
+        formData.append('cv', {
+          uri: cv.uri,
+          name: cv.name || 'cv.pdf',
+          type: mime,
+        });
+      }
+
+      // Cover Letter file (optional)
+      if (coverLetterFile) {
+        const mime = coverLetterFile.mimeType || 'application/pdf';
+        formData.append('coverLetterFile', {
+          uri: coverLetterFile.uri,
+          name: coverLetterFile.name || 'cover_letter.pdf',
+          type: mime,
+        });
+      }
+
+      // Additional documents (optional)
+      additionalDocs.forEach((doc, index) => {
+        const mime = doc.mimeType || doc.type || 'application/octet-stream';
+        formData.append('additionalDocs', {
+          uri: doc.uri,
+          name: doc.name || `document_${index + 1}.pdf`,
+          type: mime,
+        });
+      });
+
+      console.log('📤 Submitting with FormData, files:', {
+        cv: cv ? cv.name : null,
+        coverLetterFile: coverLetterFile ? coverLetterFile.name : null,
+        additionalDocs: additionalDocs.map(d => d.name),
+      });
+
+      // Use applicationAPI.applyWithFiles so there's a single place that
+      // owns "how we send a multipart application" — the request
+      // interceptor in services/api.js takes care of not sending a
+      // conflicting Content-Type for FormData payloads.
+      const response = await applicationAPI.applyWithFiles(formData);
+
       console.log('Application submitted successfully');
-      
-      // Mark as submitted to prevent further attempts
+
+      // Mark as submitted
       submittedRef.current = true;
       setSubmitted(true);
-      
+
       Alert.alert(
         'Application Submitted',
         'Your application has been sent successfully! The employer will review it and get back to you.',
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (error) {
-      console.log('Submit error:', error.response?.data);
-      const errorMsg = error.response?.data?.error || 
-                       error.response?.data?.message || 
+      console.log('❌ Submit error:', error);
+      const errorMsg = error.response?.data?.error ||
+                       error.response?.data?.message ||
+                       error.message ||
                        'Failed to submit application';
       Alert.alert('Error', errorMsg);
-     
-      isSubmittingRef.current = false;
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };
+  // ─── END UPDATED SUBMIT HANDLER ──────────────────────────────────────
 
   if (loading) {
     return (

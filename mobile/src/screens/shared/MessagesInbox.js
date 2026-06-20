@@ -15,8 +15,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import socketService from '../../services/socket';
 import api, { BASE_URL } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 const STATIC_BASE_URL = BASE_URL.replace('/api', '');
 
@@ -40,11 +42,11 @@ const formatTime = (timestamp) => {
 
 const AvatarCircle = ({ name = '', size = 46, online = false, imageUrl, onPress }) => {
   const resolvedUrl = imageUrl
-  ? imageUrl.startsWith('http') 
-    ? imageUrl 
-    : `${STATIC_BASE_URL}/${imageUrl.replace(/^\//, '')}`
-  : null;
-  
+    ? imageUrl.startsWith('http')
+      ? imageUrl
+      : `${STATIC_BASE_URL}/${imageUrl.replace(/^\//, '')}`
+    : null;
+
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8} disabled={!resolvedUrl}>
       <View style={{ position: 'relative' }}>
@@ -93,10 +95,10 @@ const MessageRow = ({ item, onPress, isOnline, onAvatarPress }) => {
 
   return (
     <TouchableOpacity style={styles.msgRow} onPress={onPress} activeOpacity={0.75}>
-      <AvatarCircle 
-        name={userName} 
-        size={46} 
-        online={isOnline} 
+      <AvatarCircle
+        name={userName}
+        size={46}
+        online={isOnline}
         imageUrl={userAvatar}
         onPress={() => onAvatarPress(userAvatar, userName)}
       />
@@ -124,6 +126,8 @@ const resetToLogin = (navigation) => {
 };
 
 const MessagesInbox = ({ navigation }) => {
+  const { setUnreadMessageCount } = useAuth(); // 👈 get the setter from context
+
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -133,7 +137,7 @@ const MessagesInbox = ({ navigation }) => {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [pinnedApplications, setPinnedApplications] = useState([]);
   const [loadingPinned, setLoadingPinned] = useState(true);
-  
+
   // Image preview modal state
   const [previewImage, setPreviewImage] = useState(null);
   const [previewUserName, setPreviewUserName] = useState('');
@@ -204,8 +208,11 @@ const MessagesInbox = ({ navigation }) => {
       const response = await api.get('/messages/inbox');
       const conversationsList = response.data?.conversations || [];
       setConversations(conversationsList);
+      // Update total unread from backend
       const totalUnread = conversationsList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
       setUnreadTotal(totalUnread);
+      // Also update auth context
+      if (setUnreadMessageCount) setUnreadMessageCount(totalUnread);
     } catch (err) {
       console.error('Fetch conversations error:', err);
       if (err.response?.status === 401) resetToLogin(navigation);
@@ -214,18 +221,21 @@ const MessagesInbox = ({ navigation }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [navigation]);
+  }, [navigation, setUnreadMessageCount]);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
       const token = await getAuthData();
       if (!token) return;
       const response = await api.get('/messages/unread-count');
-      setUnreadTotal(response.data?.unreadCount || 0);
+      const count = response.data?.unreadCount || 0;
+      setUnreadTotal(count);
+      // Update auth context
+      if (setUnreadMessageCount) setUnreadMessageCount(count);
     } catch (error) {
       console.error('Unread count error:', error);
     }
-  }, []);
+  }, [setUnreadMessageCount]);
 
   const handleNewMessage = useCallback((data) => {
     const { message } = data;
@@ -243,51 +253,46 @@ const MessagesInbox = ({ navigation }) => {
       }
       return updated;
     });
-    if (message.receiverId === currentUserId) setUnreadTotal(prev => prev + 1);
-  }, [currentUserId]);
+    // If the message is for the current user, increment the total unread count
+    if (message.receiverId === currentUserId) {
+      const newTotal = unreadTotal + 1;
+      setUnreadTotal(newTotal);
+      if (setUnreadMessageCount) setUnreadMessageCount(newTotal);
+    }
+  }, [currentUserId, unreadTotal, setUnreadMessageCount]);
 
   const handleUserStatusChange = useCallback((data) => {
     const { userId, isOnline, lastSeenAt } = data;
     setOnlineStatuses(prev => ({ ...prev, [userId]: { isOnline, lastSeenAt } }));
   }, []);
 
-  const handleMessagesRead = useCallback((data) => {
-    const { messageIds, readerId } = data;
-    if (readerId !== currentUserId) {
-      setConversations(prev => prev.map(conv => {
-        if (conv.lastMessage && messageIds.includes(conv.lastMessage._id)) {
-          return { ...conv, lastMessage: { ...conv.lastMessage, readStatus: true, status: 'read' } };
-        }
-        return conv;
-      }));
-    }
-  }, [currentUserId]);
+  // Remove the old handleMessagesRead – not needed for unread count updates.
 
-  // Handle avatar press to preview image
+  // ─── Avatar press preview ───
   const handleAvatarPress = (avatarUrl, userName) => {
     if (!avatarUrl) return;
-    const resolvedUrl = avatarUrl.startsWith('http') 
-      ? avatarUrl 
+    const resolvedUrl = avatarUrl.startsWith('http')
+      ? avatarUrl
       : `${STATIC_BASE_URL}/${avatarUrl.replace(/^\//, '')}`;
     setPreviewImage(resolvedUrl);
     setPreviewUserName(userName);
   };
 
+  // ─── Socket events ──────────────────────────────────────────────────────
   useEffect(() => {
     const initSocket = async () => {
       await socketService.connect();
       socketService.on('new_message', handleNewMessage);
       socketService.on('user_status_changed', handleUserStatusChange);
-      socketService.on('messages_read', handleMessagesRead);
     };
     initSocket();
     return () => {
       socketService.off('new_message');
       socketService.off('user_status_changed');
-      socketService.off('messages_read');
     };
-  }, [handleNewMessage, handleUserStatusChange, handleMessagesRead]);
+  }, [handleNewMessage, handleUserStatusChange]);
 
+  // ─── Initial data load ─────────────────────────────────────────────────
   useEffect(() => {
     fetchConversations();
     fetchUnreadCount();
@@ -296,13 +301,14 @@ const MessagesInbox = ({ navigation }) => {
     return () => clearInterval(interval);
   }, [fetchConversations, fetchUnreadCount, fetchPinnedApplications]);
 
-  useEffect(() => {
-    const parent = navigation.getParent();
-    if (parent) {
-      const unsubscribe = parent.addListener('focus', () => { fetchPinnedApplications(); });
-      return unsubscribe;
-    }
-  }, [navigation, fetchPinnedApplications]);
+  // ─── Refresh on focus ──────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      fetchConversations();
+      fetchUnreadCount();
+      fetchPinnedApplications();
+    }, [fetchConversations, fetchUnreadCount, fetchPinnedApplications])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -314,18 +320,18 @@ const MessagesInbox = ({ navigation }) => {
   const handleNewMessagePress = () => {
     navigation.navigate('MessagesMain', { focusTab: 'search' });
   };
-  
+
   const handleChatPress = (conversation) => {
     const otherUser = conversation.otherUser || {};
-    navigation.navigate('Chat', { 
-      userId: otherUser._id, 
-      userName: otherUser.fullName, 
-      userAvatar: otherUser.avatar, 
-      userRole: otherUser.role 
+    navigation.navigate('Chat', {
+      userId: otherUser._id,
+      userName: otherUser.fullName,
+      userAvatar: otherUser.avatar,
+      userRole: otherUser.role,
     });
   };
 
-  // Image Preview Modal
+  // ─── Image Preview Modal ──────────────────────────────────────────────
   const ImagePreviewModal = () => (
     <Modal visible={!!previewImage} transparent animationType="fade" onRequestClose={() => setPreviewImage(null)}>
       <TouchableOpacity style={styles.imagePreviewOverlay} activeOpacity={1} onPress={() => setPreviewImage(null)}>
@@ -336,9 +342,9 @@ const MessagesInbox = ({ navigation }) => {
               <Ionicons name="close-circle" size={32} color="#fff" />
             </TouchableOpacity>
           </View>
-          <Image 
-            source={{ uri: previewImage }} 
-            style={styles.imagePreviewFull} 
+          <Image
+            source={{ uri: previewImage }}
+            style={styles.imagePreviewFull}
             resizeMode="contain"
           />
         </View>
@@ -432,7 +438,7 @@ const MessagesInbox = ({ navigation }) => {
           )}
         />
       </View>
-      
+
       <ImagePreviewModal />
     </>
   );
@@ -470,17 +476,17 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 20 },
   startBtn: { backgroundColor: '#F97316', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25 },
   startBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
-  
+
   // Image Preview Modal Styles
   imagePreviewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' },
   imagePreviewContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  imagePreviewHeader: { 
-    position: 'absolute', 
-    top: 50, 
-    left: 0, 
-    right: 0, 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  imagePreviewHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
     zIndex: 1,
