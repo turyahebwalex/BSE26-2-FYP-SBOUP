@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { adminAPI, reportAPI } from '../services/api';
@@ -15,6 +14,9 @@ import {
   FiLock,
   FiCheckSquare,
   FiZap,
+  FiInfo,
+  FiBarChart2,
+  FiMessageSquare,
 } from 'react-icons/fi';
 import {
   Chart as ChartJS,
@@ -37,14 +39,16 @@ const AdminDashboard = () => {
   const [flagged, setFlagged] = useState({ flaggedOpportunities: [], pendingReports: [] });
   const [users, setUsers] = useState([]);
   const [reports, setReports] = useState([]);
-  const [cases, setCases] = useState([]);
   const [trends, setTrends] = useState([]);
   const [alerts, setAlerts] = useState(null);
   const [density, setDensity] = useState([]);
+  const [fraudInsights, setFraudInsights] = useState(null);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
   const [userPage, setUserPage] = useState(1);
+  const [feedbacks, setFeedbacks] = useState({});   // { [oppId]: string }
+  const [expandedOpp, setExpandedOpp] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -67,110 +71,39 @@ const AdminDashboard = () => {
       setLoading(false);
     };
     load();
-    loadReports();
-    loadCases();
   }, []);
 
   const loadReports = async () => {
     try {
-      const { data } = await reportAPI.getAll({ page: 1, limit: 100 });
-      const reportList = Array.isArray(data?.reports)
-        ? data.reports
-        : Array.isArray(data?.data?.reports)
-        ? data.data.reports
-        : [];
-      setReports(reportList);
-    } catch (error) {
-      console.error('Failed to load reports:', error);
-      toast.error('Could not load report queue.');
-    }
-  };
-
-  const getTargetLabel = (report) => {
-    const details = report.targetDetails;
-    if (!details) {
-      return report.targetId || 'Unknown target';
-    }
-
-    if (details.fullName) return details.fullName;
-    if (details.name) return details.name;
-    if (details.title) return details.title;
-    if (details.content) return details.content.slice(0, 60);
-    return report.targetType;
-  };
-
-  const loadCases = async () => {
-    try {
-      const { data } = await adminAPI.getCases();
-      setCases(data.cases || []);
+      const { data } = await reportAPI.getAll();
+      setReports(data.reports || []);
     } catch {}
   };
 
   useEffect(() => {
     if (tab === 'reports') loadReports();
-    if (tab === 'cases') loadCases();
+    if (tab === 'fraud') loadFraudInsights();
   }, [tab]);
 
-  const moderateContent = async (contentId, contentType, action) => {
+  const loadFraudInsights = async () => {
     try {
-      await adminAPI.moderate({ contentId, contentType, action });
+      const { data } = await adminAPI.getFraudInsights({ range: '30d', granularity: 'day' });
+      setFraudInsights(data);
+    } catch {}
+  };
+
+  const moderate = async (contentId, action) => {
+    try {
+      const feedback = feedbacks[contentId] || '';
+      await adminAPI.moderate({ contentId, action, contentType: 'opportunity', feedback });
       toast.success(`Content ${action}d`);
-      if (contentType === 'opportunity') {
-        setFlagged((prev) => ({
-          ...prev,
-          flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
-        }));
-      }
-      setCases((prev) => prev.filter((c) => c.targetId !== contentId || c.targetType !== contentType));
+      setFlagged((prev) => ({
+        ...prev,
+        flaggedOpportunities: prev.flaggedOpportunities.filter((o) => o._id !== contentId),
+      }));
+      setFeedbacks((prev) => { const n = { ...prev }; delete n[contentId]; return n; });
     } catch {
       toast.error('Action failed');
-    }
-  };
-
-  // ── Handle user-specific actions (Warn, Suspend, Deactivate)
-  
-  const handleUserAction = async (report, action) => {
-    const targetLabel = getTargetLabel(report);
-    const confirmMsg = `Are you sure you want to ${action} ${targetLabel}?`;
-
-    const reason = window.prompt(`Reason for ${action} (optional):`);
-    if (reason === null) return; // User cancelled
-
-    if (!window.confirm(confirmMsg)) return;
-
-    try {
-      await adminAPI.moderate({
-        contentId: report.targetId,
-        contentType: 'user',
-        action,
-        reason: reason || '',
-      });
-
-      await reportAPI.updateStatus(report._id, 'action_taken');
-      setReports((prev) => prev.filter((r) => r._id !== report._id));
-
-      toast.success(`User ${action}ed and report closed. Notification sent.`);
-    } catch (error) {
-      console.error('User action failed:', error);
-      toast.error(`Failed to ${action} user.`);
-    }
-  };
-
-  // ── Handles removal of reported message ──
-  const handleRemoveContent = async (report) => {
-    const { targetId, targetType, _id: reportId } = report;
-    if (!window.confirm(`Are you sure you want to permanently remove this ${targetType}?`)) {
-      return;
-    }
-
-    try {
-      await adminAPI.moderate({ contentId: targetId, contentType: targetType, action: 'remove' });
-      await reportAPI.updateStatus(reportId, 'action_taken');
-      setReports((prev) => prev.filter((r) => r._id !== reportId));
-      toast.success(`${targetType} removed and report closed. The user has been notified.`);
-    } catch (error) {
-      console.error('Failed to remove content:', error);
-      toast.error('Could not remove content. Please try again.');
     }
   };
 
@@ -296,7 +229,7 @@ const AdminDashboard = () => {
   const tabs = [
     { key: 'overview', label: 'Overview', icon: FiShield },
     { key: 'moderation', label: 'Moderation', icon: FiAlertTriangle },
-    { key: 'cases', label: 'Cases', icon: FiCheckSquare },
+    { key: 'fraud', label: 'Fraud Insights', icon: FiBarChart2 },
     { key: 'users', label: 'Users', icon: FiUsers },
     { key: 'reports', label: 'Reports', icon: FiFlag },
   ];
@@ -329,6 +262,7 @@ const AdminDashboard = () => {
       {/* ─── Overview Tab ─── */}
       {tab === 'overview' && stats && (
         <>
+          {/* Stats Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             {[
               { label: 'Total Users', val: stats.stats?.totalUsers, icon: FiUsers, color: 'text-blue-600 bg-blue-50' },
@@ -351,6 +285,7 @@ const AdminDashboard = () => {
             ))}
           </div>
 
+          {/* Charts Row */}
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div className="card">
               <h2 className="font-semibold mb-4">User Distribution by Role</h2>
@@ -377,6 +312,7 @@ const AdminDashboard = () => {
             </div>
           </div>
 
+          {/* Registration Trends + Urgent Alerts */}
           <div className="grid md:grid-cols-3 gap-6 mb-6">
             <div className="card md:col-span-2">
               <div className="flex items-center justify-between mb-4">
@@ -466,6 +402,7 @@ const AdminDashboard = () => {
             </div>
           </div>
 
+          {/* Quick Actions */}
           <div className="card mb-6">
             <h2 className="font-semibold mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -500,6 +437,7 @@ const AdminDashboard = () => {
             </div>
           </div>
 
+          {/* User Density */}
           <div className="card mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -529,6 +467,7 @@ const AdminDashboard = () => {
             )}
           </div>
 
+          {/* Recent Registrations */}
           <div className="card">
             <h2 className="font-semibold mb-3">Recent Registrations</h2>
             <div className="space-y-2">
@@ -565,38 +504,103 @@ const AdminDashboard = () => {
           </div>
 
           {flagged.flaggedOpportunities?.length > 0 ? (
-            flagged.flaggedOpportunities.map((opp) => (
-              <div key={opp._id} className="card border-l-4 border-l-yellow-400">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-semibold">{opp.title}</h3>
-                    <p className="text-sm text-gray-500">
-                      Posted by: {opp.employerId?.fullName || 'Unknown'} • Fraud Risk Score:{' '}
-                      <span
-                        className={`font-bold ${
-                          opp.fraudRiskScore > 70 ? 'text-red-600' : opp.fraudRiskScore > 30 ? 'text-yellow-600' : 'text-green-600'
-                        }`}
-                      >
-                        {opp.fraudRiskScore}
-                      </span>
-                    </p>
+            flagged.flaggedOpportunities.map((opp) => {
+              const signals = opp.fraudSignals || [];
+              const isExpanded = expandedOpp === opp._id;
+              const scoreColor = opp.fraudRiskScore >= 70 ? 'text-red-600' : opp.fraudRiskScore >= 30 ? 'text-yellow-600' : 'text-green-600';
+              const scoreBg = opp.fraudRiskScore >= 70 ? 'bg-red-50' : opp.fraudRiskScore >= 30 ? 'bg-yellow-50' : 'bg-green-50';
+              return (
+                <div key={opp._id} className="card border-l-4 border-l-yellow-400">
+                  {/* Header */}
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold">{opp.title}</h3>
+                      <p className="text-sm text-gray-500 mt-0.5">
+                        Posted by: {opp.postedByUserId?.fullName || 'Unknown'} •{' '}
+                        {opp.companyId?.name || 'No company'}
+                      </p>
+                    </div>
+                    <div className={`ml-4 flex flex-col items-center px-3 py-2 rounded-xl ${scoreBg}`}>
+                      <span className={`text-2xl font-bold ${scoreColor}`}>{opp.fraudRiskScore ?? '—'}</span>
+                      <span className="text-xs text-gray-500">Fraud Score</span>
+                    </div>
                   </div>
-                  <span className="badge bg-yellow-100 text-yellow-700">Under Review</span>
-                </div>
-                <p className="text-sm text-gray-600 mt-2 line-clamp-3">{opp.description}</p>
-                <div className="flex gap-2 mt-3">
-                  <button onClick={() => moderateContent(opp._id, 'opportunity', 'approve')} className="btn-primary text-sm !py-1.5 !px-4">
-                    Approve
-                  </button>
+
+                  {/* Description */}
+                  <p className="text-sm text-gray-600 mt-3 line-clamp-2">{opp.description}</p>
+
+                  {/* XAI — Fraud Signals */}
+                  {signals.length > 0 && (
+                    <div className="mt-3 p-3 bg-red-50 rounded-xl">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <FiInfo size={13} className="text-red-500" />
+                        <span className="text-xs font-semibold text-red-700">Why this was flagged</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {signals.slice(0, 6).map((s, i) => (
+                          <span key={i} className="text-xs bg-white border border-red-200 text-red-700 px-2 py-0.5 rounded-full">
+                            {s.signal}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expand for full details */}
                   <button
-                    onClick={() => moderateContent(opp._id, 'opportunity', 'remove')}
-                    className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+                    onClick={() => setExpandedOpp(isExpanded ? null : opp._id)}
+                    className="text-xs text-primary mt-2 hover:underline"
                   >
-                    Remove
+                    {isExpanded ? 'Hide details' : 'View full posting'}
                   </button>
+
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t space-y-2 text-sm text-gray-600">
+                      {opp.requirements && <p><span className="font-medium">Requirements:</span> {opp.requirements}</p>}
+                      {opp.location && <p><span className="font-medium">Location:</span> {opp.location}</p>}
+                      {opp.compensationRange && (
+                        <p>
+                          <span className="font-medium">Salary:</span>{' '}
+                          {opp.compensationRange.min?.toLocaleString()} – {opp.compensationRange.max?.toLocaleString()} UGX
+                        </p>
+                      )}
+                      <p><span className="font-medium">Remote:</span> {opp.isRemote ? 'Yes' : 'No'}</p>
+                    </div>
+                  )}
+
+                  {/* Admin Feedback */}
+                  <div className="mt-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <FiMessageSquare size={13} className="text-gray-400" />
+                      <span className="text-xs text-gray-500">Admin feedback (optional — stored for model retraining)</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Legitimate local business, salary is reasonable for Kampala..."
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                      value={feedbacks[opp._id] || ''}
+                      onChange={(e) => setFeedbacks((prev) => ({ ...prev, [opp._id]: e.target.value }))}
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => moderate(opp._id, 'approve')}
+                      className="btn-primary text-sm !py-1.5 !px-4"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => moderate(opp._id, 'remove')}
+                      className="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm hover:bg-red-600 transition"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className="card text-center py-12">
               <FiAlertTriangle size={32} className="mx-auto text-gray-300 mb-3" />
@@ -606,94 +610,144 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* ─── Cases Tab ─── */}
-      {tab === 'cases' && (
-        <div className="space-y-4">
+      {/* ─── Fraud Insights Tab ─── */}
+      {tab === 'fraud' && (
+        <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-lg">Moderation Cases</h2>
-              <p className="text-sm text-gray-500">Review content that reached admin moderation.</p>
-            </div>
-            <span className="text-xs text-gray-400">{cases.length} open case{cases.length !== 1 ? 's' : ''}</span>
+            <h2 className="font-semibold text-lg">Fraud Detection Insights (Last 30 days)</h2>
+            <button
+              onClick={loadFraudInsights}
+              className="text-xs text-primary hover:underline"
+            >
+              Refresh
+            </button>
           </div>
 
-          {cases.length > 0 ? (
-            cases.map((c) => (
-              <div key={c._id} className="card border-l-4 border-l-blue-400">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div className="space-y-2">
-                    <p className="text-sm text-gray-500 uppercase tracking-wide">{c.targetType}</p>
-                    <p className="font-semibold">Target ID: <span className="font-normal text-gray-600 break-all">{c.targetId}</span></p>
-                    <p className="text-sm text-gray-500">Reports: {c.reportCount}</p>
-                    <p className="text-sm text-gray-500">Status: <span className="font-medium">{c.status?.replace('_', ' ')}</span></p>
-                    {c.assignedAdmin ? (
-                      <p className="text-sm text-gray-500">Assigned admin: {c.assignedAdmin.fullName || c.assignedAdmin.email}</p>
-                    ) : null}
+          {!fraudInsights ? (
+            <div className="card text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3" />
+              <p className="text-gray-400">Loading fraud insights...</p>
+            </div>
+          ) : (
+            <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Screened', val: fraudInsights.summary?.totalLogs ?? 0, color: 'text-blue-600 bg-blue-50' },
+                  { label: 'Auto-Published', val: fraudInsights.summary?.autoPublished ?? 0, color: 'text-green-600 bg-green-50' },
+                  { label: 'Sent for Review', val: fraudInsights.summary?.underReview ?? 0, color: 'text-yellow-600 bg-yellow-50' },
+                  { label: 'Auto-Blocked', val: fraudInsights.summary?.blocked ?? 0, color: 'text-red-600 bg-red-50' },
+                ].map((s) => (
+                  <div key={s.label} className="card text-center">
+                    <p className={`text-3xl font-bold ${s.color.split(' ')[0]}`}>{s.val}</p>
+                    <p className="text-xs text-gray-500 mt-1">{s.label}</p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {c.targetType === 'opportunity' && (
-                      <>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'opportunity', 'approve')}
-                          className="badge bg-blue-100 text-blue-700 hover:bg-blue-200"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'opportunity', 'remove')}
-                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
-                        >
-                          Remove
-                        </button>
-                      </>
-                    )}
-                    {c.targetType === 'user' && (
-                      <>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'user', 'remove')}
-                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
-                        >
-                          Remove
-                        </button>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'user', 'suspend')}
-                          className="badge bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-                        >
-                          Suspend
-                        </button>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'user', 'reactivate')}
-                          className="badge bg-green-100 text-green-700 hover:bg-green-200"
-                        >
-                          Reactivate
-                        </button>
-                      </>
-                    )}
-                    {c.targetType === 'message' && (
-                      <>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'message', 'remove')}
-                          className="badge bg-red-100 text-red-700 hover:bg-red-200"
-                        >
-                          Remove
-                        </button>
-                        <button
-                          onClick={() => moderateContent(c.targetId, 'message', 'restore')}
-                          className="badge bg-green-100 text-green-700 hover:bg-green-200"
-                        >
-                          Restore
-                        </button>
-                      </>
-                    )}
+                ))}
+              </div>
+
+              {/* Average Score + Thresholds */}
+              <div className="card">
+                <h3 className="font-semibold mb-3 flex items-center gap-2">
+                  <FiBarChart2 size={16} className="text-primary" />
+                  Model Performance Summary
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500">Avg Fraud Score</p>
+                    <p className="font-bold text-lg">{fraudInsights.summary?.averageScore?.toFixed(1) ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Model Predictions</p>
+                    <p className="font-bold text-lg">{fraudInsights.summary?.modelPredictions ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Low Threshold</p>
+                    <p className="font-bold text-lg text-green-600">{fraudInsights.thresholds?.low ?? 30}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">High Threshold</p>
+                    <p className="font-bold text-lg text-red-600">{fraudInsights.thresholds?.high ?? 70}</p>
                   </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="card text-center py-12">
-              <FiShield size={32} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-400">No moderation cases available.</p>
-            </div>
+
+              {/* Decision Breakdown Bar Chart */}
+              {fraudInsights.breakdown?.length > 0 && (
+                <div className="card">
+                  <h3 className="font-semibold mb-4">Decision Breakdown</h3>
+                  <div className="space-y-3">
+                    {fraudInsights.breakdown.map((b) => {
+                      const total = fraudInsights.summary?.totalLogs || 1;
+                      const pct = Math.round((b.count / total) * 100);
+                      const color = b._id === 'published' ? 'bg-green-500' : b._id === 'blocked' ? 'bg-red-500' : 'bg-yellow-500';
+                      const label = b._id === 'published' ? 'Auto-Published' : b._id === 'blocked' ? 'Auto-Blocked' : 'Sent for Review';
+                      return (
+                        <div key={b._id}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-gray-600">{label}</span>
+                            <span className="font-semibold">{b.count} ({pct}%) — avg score: {b.averageScore?.toFixed(0)}</span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Decision Logs */}
+              <div className="card">
+                <h3 className="font-semibold mb-4">Recent Decision Log (last 25)</h3>
+                {fraudInsights.recentLogs?.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-gray-500">
+                          <th className="pb-2 font-medium">Posting</th>
+                          <th className="pb-2 font-medium">Score</th>
+                          <th className="pb-2 font-medium">Decision</th>
+                          <th className="pb-2 font-medium">Source</th>
+                          <th className="pb-2 font-medium">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fraudInsights.recentLogs.map((log) => (
+                          <tr key={log._id} className="border-b last:border-0 hover:bg-gray-50">
+                            <td className="py-2 max-w-[180px] truncate">
+                              {log.opportunityId?.title || 'Deleted posting'}
+                            </td>
+                            <td className="py-2">
+                              <span className={`font-bold ${log.fraudScore >= 70 ? 'text-red-600' : log.fraudScore >= 30 ? 'text-yellow-600' : 'text-green-600'}`}>
+                                {log.fraudScore}
+                              </span>
+                            </td>
+                            <td className="py-2">
+                              <span className={`badge text-xs ${
+                                log.decisionOutcome === 'published' ? 'bg-green-100 text-green-700' :
+                                log.decisionOutcome === 'blocked' ? 'bg-red-100 text-red-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {log.decisionOutcome?.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="py-2">
+                              <span className="badge bg-gray-100 text-gray-600 text-xs">{log.source}</span>
+                            </td>
+                            <td className="py-2 text-gray-400 text-xs">
+                              {new Date(log.createdAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-gray-400 text-sm text-center py-6">No decision logs yet</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -701,6 +755,7 @@ const AdminDashboard = () => {
       {/* ─── Users Tab ─── */}
       {tab === 'users' && (
         <div>
+          {/* Search */}
           <div className="relative mb-4">
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -777,6 +832,7 @@ const AdminDashboard = () => {
               <p className="text-center py-8 text-gray-400">No users found</p>
             )}
 
+            {/* Pagination */}
             {filteredUsers.length > 10 && (
               <div className="flex justify-between items-center mt-4 pt-3 border-t">
                 <p className="text-xs text-gray-400">
@@ -826,7 +882,7 @@ const AdminDashboard = () => {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="font-semibold text-sm">
-                      {r.targetType}: <span className="text-gray-600">{getTargetLabel(r)}</span>
+                      {r.targetType}: <span className="text-gray-600">{r.targetId}</span>
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
                       Reported by: {r.reporterId?.fullName || r.reporterId?.email || 'Unknown'} •{' '}
@@ -848,9 +904,8 @@ const AdminDashboard = () => {
                     {r.status?.replace('_', ' ')}
                   </span>
                 </div>
-
                 {r.status === 'pending' && (
-                  <div className="flex flex-wrap gap-2 mt-3">
+                  <div className="flex gap-2 mt-3">
                     <button
                       onClick={() => updateReportStatus(r._id, 'reviewed')}
                       className="badge bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
@@ -869,40 +924,6 @@ const AdminDashboard = () => {
                     >
                       Dismiss
                     </button>
-
-                    {/* ── User-specific actions ── */}
-                    {r.targetType === 'user' && (
-                      <>
-                        <button
-                          onClick={() => handleUserAction(r, 'warn')}
-                          className="badge bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
-                        >
-                          Warn
-                        </button>
-                        <button
-                          onClick={() => handleUserAction(r, 'suspend')}
-                          className="badge bg-orange-100 text-orange-700 cursor-pointer hover:bg-orange-200"
-                        >
-                          Suspend
-                        </button>
-                        <button
-                          onClick={() => handleUserAction(r, 'deactivate')}
-                          className="badge bg-red-100 text-red-700 cursor-pointer hover:bg-red-200"
-                        >
-                          Deactivate
-                        </button>
-                      </>
-                    )}
-
-                    {/* ── Remove Content (only for messages) ── */}
-                    {r.targetType === 'message' && (
-                      <button
-                        onClick={() => handleRemoveContent(r)}
-                        className="badge bg-red-100 text-red-700 cursor-pointer hover:bg-red-200"
-                      >
-                        Remove Content
-                      </button>
-                    )}
                   </div>
                 )}
               </div>
