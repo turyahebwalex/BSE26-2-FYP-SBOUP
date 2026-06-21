@@ -27,6 +27,8 @@ const UserProfileScreen = ({ route, navigation }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
+  // Store the actual user _id from the profile
+  const [reportedUserId, setReportedUserId] = useState(userId);
 
   const loadProfile = useCallback(async () => {
     if (!userId) {
@@ -38,6 +40,13 @@ const UserProfileScreen = ({ route, navigation }) => {
       setLoading(true);
       const { data } = await api.get(`/profiles/user/${userId}`);
       setProfile(data);
+      // If the profile contains the user _id, use it for reporting
+      if (data?.user?._id) {
+        console.log('✅ Profile loaded, user _id:', data.user._id);
+        setReportedUserId(data.user._id);
+      } else {
+        console.warn('⚠️ Profile does not contain user _id');
+      }
     } catch (error) {
       console.error('Failed to load user profile:', error);
       Alert.alert('Error', 'Could not load this profile.');
@@ -56,6 +65,18 @@ const UserProfileScreen = ({ route, navigation }) => {
   const displayTitle = profile?.profile?.title || profile?.profile?.headline || '';
   const displayLocation = profile?.profile?.location || '';
   const displayBio = profile?.profile?.bio || '';
+
+  // ─── Handle Report ──────────────────────────────────────────────────────────
+  const handleReportPress = () => {
+    console.log('🔍 Reporting user with ID:', reportedUserId);
+    console.log('🔍 Type of ID:', typeof reportedUserId);
+    console.log('🔍 Is valid ObjectId?', /^[a-f0-9]{24}$/.test(reportedUserId));
+    if (!reportedUserId) {
+      Alert.alert('Error', 'User ID not found. Cannot report this profile.');
+      return;
+    }
+    setShowReport(true);
+  };
 
   if (loading) {
     return (
@@ -138,7 +159,7 @@ const UserProfileScreen = ({ route, navigation }) => {
             </View>
           ) : null}
 
-          <TouchableOpacity style={styles.reportButton} onPress={() => setShowReport(true)}>
+          <TouchableOpacity style={styles.reportButton} onPress={handleReportPress}>
             <Ionicons name="flag-outline" size={18} color="#EF4444" />
             <Text style={styles.reportButtonText}>Report Profile</Text>
           </TouchableOpacity>
@@ -148,7 +169,7 @@ const UserProfileScreen = ({ route, navigation }) => {
       <ReportBottomSheet
         visible={showReport}
         onClose={() => setShowReport(false)}
-        targetId={userId}
+        targetId={reportedUserId}   // ✅ uses the fetched _id
         targetType="user"
         targetLabel={displayName}
       />

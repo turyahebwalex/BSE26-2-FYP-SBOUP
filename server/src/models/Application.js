@@ -39,6 +39,34 @@ const applicationSchema = new mongoose.Schema({
     experienceScore: { type: Number, default: 0 },
     collaborativeScore: { type: Number, default: 0 },
   },
+
+  // ─── NEW FIELDS FOR FILE UPLOADS (used by applyForOpportunity) ───
+  manualCv: {
+    url: { type: String },
+    fileName: { type: String },
+    fileSize: { type: Number },
+    mimeType: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  coverLetterFile: {
+    url: { type: String },
+    fileName: { type: String },
+    fileSize: { type: Number },
+    mimeType: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  additionalDocuments: [
+    {
+      url: { type: String },
+      fileName: { type: String },
+      fileSize: { type: Number },
+      mimeType: { type: String },
+      uploadedAt: { type: Date, default: Date.now },
+    },
+  ],
+  // ─── END NEW FIELDS ──────────────────────────────────────────────
+
+  // Legacy attachments – keep as is
   attachments: [
     {
       fileName: String,
@@ -46,7 +74,8 @@ const applicationSchema = new mongoose.Schema({
       fileType: String,
     },
   ],
-  // 🆕 Pin support – appears in "Pinned Applications" section on Messages tab
+
+  // Pin support – appears in "Pinned Applications" section on Messages tab
   isPinned: { type: Boolean, default: false },
   pinnedAt: { type: Date, default: null },
   submittedAt: { type: Date, default: Date.now },
@@ -56,7 +85,6 @@ applicationSchema.index({ profileId: 1, opportunityId: 1 }, { unique: true });
 applicationSchema.index({ opportunityId: 1, status: 1 });
 applicationSchema.index({ opportunityId: 1, matchScore: -1 });
 applicationSchema.index({ profileId: 1, submittedAt: -1 });
-// 🆕 Index for efficient sorting of pinned applications
 applicationSchema.index({ profileId: 1, isPinned: -1, pinnedAt: -1 });
 
 module.exports = mongoose.model('Application', applicationSchema);

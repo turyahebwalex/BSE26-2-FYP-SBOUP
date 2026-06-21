@@ -3,34 +3,24 @@ import { messageAPI, profileAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 import api from '../services/api';
+import ReportBottomSheet from '../pages/ReportBottomSheet';
+import { FiTrash2 } from 'react-icons/fi'; 
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
-/**
- * Get base URL for static file serving (without /api suffix)
- */
 const getStaticBaseUrl = () => {
   const base = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
   return base.replace('/api', '');
 };
 
-/**
- * Construct full avatar URL from relative path
- */
 const getAvatarUrl = (avatar) => {
   if (!avatar) return null;
   if (avatar.startsWith('http')) return avatar;
   return `${getStaticBaseUrl()}${avatar.startsWith('/') ? avatar : `/${avatar}`}`;
 };
 
-/**
- * Normalize sender ID from populated object or plain string
- */
 const getSenderId = (id) => (id?._id ?? id)?.toString() ?? '';
 
-/**
- * Format timestamp to relative time string
- */
 const formatTime = (ts) => {
   if (!ts) return '';
   const date = new Date(ts);
@@ -46,9 +36,6 @@ const formatTime = (ts) => {
   return date.toLocaleDateString();
 };
 
-/**
- * Allowed file types for attachments
- */
 const ALLOWED_TYPES = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'application/pdf',
@@ -62,9 +49,6 @@ const MAX_FILE_MB = 10;
 
 // ─── UI Components ───────────────────────────────────────────────────────────
 
-/**
- * User avatar component with optional online status indicator
- */
 const Avatar = ({ user, size = 48, showDot = false, isOnline = false }) => {
   const url = getAvatarUrl(user?.avatar || user?.profilePicture);
   const name = user?.fullName || user?.name || 'U';
@@ -124,9 +108,6 @@ const Avatar = ({ user, size = 48, showDot = false, isOnline = false }) => {
   );
 };
 
-/**
- * Message status indicator (sending, sent, delivered, read, failed)
- */
 const StatusIcon = ({ status }) => {
   const getIcon = () => {
     switch (status) {
@@ -147,22 +128,17 @@ const StatusIcon = ({ status }) => {
   return getIcon();
 };
 
-/**
- * Attachment preview component for images and documents
- */
 const AttachmentPreview = ({ attachment, baseUrl }) => {
   if (!attachment) return null;
   
   const [imgError, setImgError] = useState(false);
   const { fileType, fileUrl, fileName, fileSize } = attachment;
   
-  // Construct full URL
   let fullUrl = fileUrl;
   if (fullUrl && !fullUrl.startsWith('http')) {
     fullUrl = `${baseUrl}${fullUrl}`;
   }
   
-  // Try alternative path if primary fails
   const tryUrl = (url) => {
     if (!url) return null;
     if (url.includes('/uploads/messages/')) {
@@ -199,7 +175,6 @@ const AttachmentPreview = ({ attachment, baseUrl }) => {
     );
   }
   
-  // Document type detection and icon
   const getDocIcon = () => {
     if (type === 'application/pdf') return '📄';
     if (type?.includes('word')) return '📝';
@@ -229,9 +204,6 @@ const AttachmentPreview = ({ attachment, baseUrl }) => {
   );
 };
 
-/**
- * Profile picture modal for viewing full-size avatar
- */
 const ProfileModal = ({ user, onClose }) => {
   if (!user) return null;
   const url = getAvatarUrl(user?.avatar || user?.profilePicture);
@@ -283,7 +255,6 @@ const ProfileModal = ({ user, onClose }) => {
 const MessagesPage = () => {
   const { user } = useAuth();
 
-  // State management
   const [conversations, setConversations] = useState([]);
   const [selectedConv, setSelectedConv] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -301,8 +272,8 @@ const MessagesPage = () => {
   const [attachments, setAttachments] = useState([]);
   const [attachPreviews, setAttachPreviews] = useState([]);
   const [uploadError, setUploadError] = useState('');
+  const [reportTarget, setReportTarget] = useState(null);
 
-  // Refs
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -311,7 +282,16 @@ const MessagesPage = () => {
 
   const baseUrl = getStaticBaseUrl();
 
-  // ─── Socket.IO Connection ───────────────────────────────────────────────────
+  // ─── Report handler ─────────────────────────────────────────────────────────
+  const handleReportMessage = (msg) => {
+    setReportTarget({
+      targetId: msg._id,
+      targetType: 'message',
+      targetLabel: `"${msg.content?.substring(0, 30)}${msg.content?.length > 30 ? '...' : ''}"`,
+    });
+  };
+
+  // ─── Socket.IO ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
     if (!token) return;
@@ -321,10 +301,7 @@ const MessagesPage = () => {
       transports: ['websocket', 'polling'],
     });
 
-    socketRef.current.on('connect', () => {
-      // Socket connected successfully
-    });
-
+    socketRef.current.on('connect', () => {});
     socketRef.current.on('new_message', ({ message }) => {
       if (selectedConv && (getSenderId(message.senderId) === selectedConv ||
          getSenderId(message.receiverId) === selectedConv)) {
@@ -352,7 +329,7 @@ const MessagesPage = () => {
     return () => socketRef.current?.disconnect();
   }, []);
 
-  // ─── Conversation Management ───────────────────────────────────────────────
+  // ─── Conversations ─────────────────────────────────────────────────────────
   const fetchConversations = useCallback(async () => {
     try {
       const { data } = await messageAPI.getInbox();
@@ -394,7 +371,6 @@ const MessagesPage = () => {
     return () => clearInterval(interval);
   }, [fetchConversations]);
 
-  // ─── Conversation Actions ──────────────────────────────────────────────────
   const openConversation = async (conversation) => {
     const other = conversation.otherUser;
     const otherId = other._id;
@@ -422,7 +398,7 @@ const MessagesPage = () => {
     }
   };
 
-  // ─── File Attachment Handling ──────────────────────────────────────────────
+  // ─── Attachments ────────────────────────────────────────────────────────────
   const handleFileSelect = (e) => {
     setUploadError('');
     const files = Array.from(e.target.files || []);
@@ -459,13 +435,12 @@ const MessagesPage = () => {
     });
   };
 
-  // ─── Message Sending ───────────────────────────────────────────────────────
+  // ─── Sending ────────────────────────────────────────────────────────────────
   const sendMessage = async () => {
     if ((!newMsg.trim() && attachments.length === 0) || !selectedConv || sending) return;
 
     setSending(true);
     const tempId = `temp_${Date.now()}`;
-    
     const optimistic = {
       _id: tempId,
       content: newMsg,
@@ -474,10 +449,10 @@ const MessagesPage = () => {
       sentAt: new Date().toISOString(),
       status: 'sending',
       readStatus: false,
-      attachments: attachPreviews.map(p => ({ 
-        fileName: p.name, 
-        fileType: p.type, 
-        fileUrl: p.url || '' 
+      attachments: attachPreviews.map(p => ({
+        fileName: p.name,
+        fileType: p.type,
+        fileUrl: p.url || ''
       })),
     };
 
@@ -492,36 +467,28 @@ const MessagesPage = () => {
     try {
       const token = localStorage.getItem('accessToken');
       const url = `${baseUrl}/api/messages`;
-      
       const formData = new FormData();
       formData.append('receiverId', selectedConv);
-      
       if (msgText && msgText.trim()) {
         formData.append('content', msgText.trim());
       }
-      
       msgFiles.forEach((file) => {
         formData.append('attachments', file);
       });
-      
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
-      
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to send message');
       }
-      
       const result = await response.json();
       const realMessage = result.message;
-      
-      setMessages(prev => prev.map(msg => 
+      setMessages(prev => prev.map(msg =>
         msg._id === tempId ? { ...realMessage, status: 'sent' } : msg
       ));
-      
       socketRef.current?.emit('send_message', realMessage);
       fetchConversations();
     } catch (error) {
@@ -536,7 +503,7 @@ const MessagesPage = () => {
     }
   };
 
-  // ─── Typing Indicator ──────────────────────────────────────────────────────
+  // ─── Typing ─────────────────────────────────────────────────────────────────
   const handleTyping = (e) => {
     setNewMsg(e.target.value);
     if (!isTypingRef.current && e.target.value.trim()) {
@@ -552,7 +519,6 @@ const MessagesPage = () => {
     }, 1000);
   };
 
-  // ─── Mark Messages as Read ─────────────────────────────────────────────────
   useEffect(() => {
     if (!messages.length || !selectedConv) return;
     const unread = messages.filter(m =>
@@ -573,7 +539,7 @@ const MessagesPage = () => {
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen bg-gray-100 font-sans">
-      {/* Sidebar - Conversation List */}
+      {/* Sidebar */}
       <div className="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col shadow-sm">
         <div className="p-4 border-b border-gray-100 bg-white sticky top-0 z-10">
           <h1 className="text-xl font-bold text-gray-900 tracking-tight">Messages</h1>
@@ -692,6 +658,35 @@ const MessagesPage = () => {
             <div className="flex-1 overflow-y-auto px-4 py-6 space-y-2">
               {messages.map((msg, idx) => {
                 const isSent = getSenderId(msg.senderId) === user._id?.toString();
+
+                // ─── Check if message was deleted by admin ───
+                if (msg.moderationStatus === 'blocked') {
+                  return (
+                    <div key={msg._id || idx} className={`flex items-end gap-2 ${isSent ? 'justify-end' : 'justify-start'}`}>
+                      {!isSent && (
+                        <button onClick={() => setProfileModal(selectedUser)} className="focus:outline-none flex-shrink-0 mb-1">
+                          <Avatar user={selectedUser} size={36} />
+                        </button>
+                      )}
+                      <div className="max-w-[65%] px-4 py-2 rounded-2xl bg-gray-100 text-gray-500 border border-gray-200 border-dashed">
+                        <div className="flex items-center gap-2 text-sm">
+                          <FiTrash2 className="w-4 h-4 text-gray-500 flex-shrink-0" /> {/* ✅ replaced emoji */}
+                          <span className="italic">This message has been deleted by admin.</span>
+                        </div>
+                        <div className={`flex items-center justify-end mt-1 gap-1 text-gray-400`}>
+                          <span className="text-[10px]">{formatTime(msg.sentAt)}</span>
+                        </div>
+                      </div>
+                      {isSent && (
+                        <div className="flex-shrink-0 mb-1">
+                          <Avatar user={user} size={36} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                // ─── Normal message rendering ───
                 return (
                   <div key={msg._id || idx} className={`flex items-end gap-2 ${isSent ? 'justify-end' : 'justify-start'}`}>
                     {!isSent && (
@@ -699,9 +694,10 @@ const MessagesPage = () => {
                         <Avatar user={selectedUser} size={36} />
                       </button>
                     )}
-                    <div className={`max-w-[65%] px-4 py-2 rounded-2xl shadow-sm ${isSent
+                    <div className={`relative group max-w-[65%] px-4 py-2 rounded-2xl shadow-sm ${isSent
                       ? 'bg-orange-500 text-white rounded-br-sm'
                       : 'bg-white text-gray-800 rounded-bl-sm border border-gray-100'}`}>
+                      {/* Message content */}
                       {msg.attachments?.map((att, ai) => (
                         <AttachmentPreview key={ai} attachment={att} baseUrl={baseUrl} />
                       ))}
@@ -712,6 +708,21 @@ const MessagesPage = () => {
                         <span className="text-[10px]">{formatTime(msg.sentAt)}</span>
                         {isSent && <StatusIcon status={msg.status} />}
                       </div>
+
+                      {/* ─── Report Button ─── */}
+                      {!isSent && (
+                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() => handleReportMessage(msg)}
+                            className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-red-500"
+                            title="Report this message"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
                     {isSent && (
                       <div className="flex-shrink-0 mb-1">
@@ -748,7 +759,6 @@ const MessagesPage = () => {
               </div>
             )}
 
-            {/* Upload Error Message */}
             {uploadError && (
               <div className="bg-red-50 border-t border-red-200 px-4 py-2 text-xs text-red-600 flex justify-between">
                 {uploadError}
@@ -759,7 +769,6 @@ const MessagesPage = () => {
             {/* Message Input Bar */}
             <div className="bg-white border-t border-gray-200 px-4 py-3">
               <div className="flex items-end gap-2">
-                {/* Attach File Button */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   title="Attach file or image"
@@ -779,7 +788,6 @@ const MessagesPage = () => {
                   onChange={handleFileSelect}
                 />
 
-                {/* Attach Image Shortcut */}
                 <button
                   onClick={() => {
                     if (fileInputRef.current) {
@@ -798,7 +806,6 @@ const MessagesPage = () => {
                   </svg>
                 </button>
 
-                {/* Message Text Input */}
                 <textarea
                   rows={1}
                   placeholder="Type a message..."
@@ -810,7 +817,6 @@ const MessagesPage = () => {
                   style={{ lineHeight: '1.5' }}
                 />
 
-                {/* Send Button */}
                 <button
                   onClick={sendMessage}
                   disabled={(!newMsg.trim() && attachments.length === 0) || sending}
@@ -838,6 +844,15 @@ const MessagesPage = () => {
 
       {/* Profile Modal */}
       {profileModal && <ProfileModal user={profileModal} onClose={() => setProfileModal(null)} />}
+
+      {/* Report Modal */}
+      <ReportBottomSheet
+        visible={!!reportTarget}
+        onClose={() => setReportTarget(null)}
+        targetId={reportTarget?.targetId}
+        targetType={reportTarget?.targetType}
+        targetLabel={reportTarget?.targetLabel}
+      />
     </div>
   );
 };

@@ -130,18 +130,22 @@ const ReportBottomSheet = ({
     setSubmitting(true);
     setError(null);
     try {
-      await reportAPI.create({
+      // ── Log the exact payload being sent ──────────────────────────────────
+      const payload = {
         targetId,
         targetType,
         reason,
         details: details.trim() || undefined,
-      });
+      };
+      console.log('📤 Submitting report payload:', payload);
+      await reportAPI.create(payload);
       setStage(STAGE.SUCCESS);
     } catch (err) {
       const msg =
         err?.response?.data?.error ||
         'Failed to submit report. Please try again.';
       setError(msg);
+      console.error('❌ Report submission error:', err);
     } finally {
       setSubmitting(false);
     }

@@ -13,7 +13,10 @@ import {
   FiDownload,
   FiEye,
   FiPaperclip,
+  FiMessageSquare,
+  FiXCircle,
 } from 'react-icons/fi';
+import ChatScreen from './ChatScreen';
 
 const statusStyles = {
   submitted: 'bg-gray-100 text-gray-700',
@@ -37,23 +40,74 @@ const STATUS_TABS = [
 
 const ViewApplicationsPage = () => {
   const { opportunityId } = useParams();
+
   const [applications, setApplications] = useState([]);
   const [opportunity, setOpportunity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(null);
-  const [attachmentModal, setAttachmentModal] = useState(null); // { fileName, fileUrl, fileType }
 
-  // Derive a meaningful skill score from available breakdown data.
-  // The ML model stores cosineScore (0-100). Older applications stored
-  // skillScore which was always 0. Fall back to the overall matchScore
-  // so the employer always sees a non-zero number when there is a match.
+  // ─── Chat Modal State ──────────────────────────────────────────────────
+  const [chatUserId, setChatUserId] = useState(null);
+  const [chatUserName, setChatUserName] = useState('');
+  const [chatUserAvatar, setChatUserAvatar] = useState(null);
+
+  // Helper: build correct file URL
+  const getFullFileUrl = (file) => {
+    if (!file) return null;
+    const url = file.url || file.fileUrl;
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+
+    const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    const rootBase = apiBase.replace(/\/api$/, '');
+    const path = url.startsWith('/') ? url : `/${url}`;
+    return `${rootBase}${path}`;
+  };
+
+  const renderFileLink = (file, defaultName = 'File') => {
+    if (!file) return null;
+    const fullUrl = getFullFileUrl(file);
+    if (!fullUrl) return null;
+
+    const fileName = file.fileName || file.originalname || defaultName;
+    const isImage = file.mimeType?.startsWith('image') || file.fileType?.startsWith('image');
+
+    return (
+      <div
+        key={file._id || fileName}
+        className="flex items-center gap-1 text-xs bg-orange-50 border border-orange-200 rounded-lg px-2 py-1.5"
+      >
+        <span className="mr-0.5">{isImage ? '🖼' : '📄'}</span>
+        <span className="max-w-[110px] truncate text-gray-700" title={fileName}>
+          {fileName}
+        </span>
+        <a
+          href={fullUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-1 text-primary hover:text-primary-dark"
+          title="View"
+        >
+          <FiEye size={13} />
+        </a>
+        <a
+          href={fullUrl}
+          download={fileName}
+          className="text-gray-500 hover:text-gray-700"
+          title="Download"
+        >
+          <FiDownload size={13} />
+        </a>
+      </div>
+    );
+  };
+
   const getSkillScore = (app) => {
     const bd = app.matchBreakdown || {};
     if (bd.cosineScore > 0) return Math.round(bd.cosineScore);
-    if (bd.skillScore > 0)  return Math.round(bd.skillScore);
-    // Use overall match score as the best available proxy
+    if (bd.skillScore > 0) return Math.round(bd.skillScore);
     return Math.round(app.matchScore || 0);
   };
 
@@ -106,6 +160,19 @@ const ViewApplicationsPage = () => {
       .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
   }, [applications, statusFilter, search]);
 
+  // ─── Open Chat Modal ──────────────────────────────────────────────────────
+  const openChat = (userId, userName, userAvatar) => {
+    setChatUserId(userId);
+    setChatUserName(userName || 'User');
+    setChatUserAvatar(userAvatar || null);
+  };
+
+  const closeChat = () => {
+    setChatUserId(null);
+    setChatUserName('');
+    setChatUserAvatar(null);
+  };
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-6">
@@ -118,7 +185,6 @@ const ViewApplicationsPage = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-      {/* Header */}
       <Link to="/employer/opportunities" className="flex items-center gap-2 text-sm text-gray-500 hover:text-primary mb-3">
         <FiArrowLeft size={14} /> Back to opportunities
       </Link>
@@ -140,7 +206,6 @@ const ViewApplicationsPage = () => {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
         {STATUS_TABS.map((t) => (
           <button
@@ -166,7 +231,6 @@ const ViewApplicationsPage = () => {
         />
       </div>
 
-      {/* Applications */}
       {filtered.length === 0 ? (
         <div className="card text-center py-12">
           <FiUsers size={32} className="mx-auto text-gray-300 mb-3" />
@@ -181,6 +245,10 @@ const ViewApplicationsPage = () => {
             const scoreColor =
               score >= 70 ? 'text-green-600' : score >= 40 ? 'text-yellow-600' : 'text-gray-500';
             const open = expanded === app._id;
+            const workerId = app.profileId?.userId?._id;
+            const workerName = app.profileId?.userId?.fullName || 'Applicant';
+            const workerAvatar = app.profileId?.userId?.avatar;
+
             return (
               <div key={app._id} className="card">
                 <div className="flex justify-between items-start gap-3">
@@ -208,7 +276,7 @@ const ViewApplicationsPage = () => {
                   </div>
                 </div>
 
-                {/* Match breakdown — uses ML model fields */}
+                {/* Match breakdown */}
                 <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
                   <div className="bg-gray-50 rounded-lg p-2">
                     <p className="text-gray-500">Skill Match</p>
@@ -234,6 +302,7 @@ const ViewApplicationsPage = () => {
                   </div>
                 </div>
 
+                {/* Cover letter */}
                 {app.coverLetter && (
                   <>
                     <button
@@ -251,70 +320,25 @@ const ViewApplicationsPage = () => {
                 )}
 
                 {/* Attachments */}
-                {app.attachments && app.attachments.length > 0 && (
+                {(app.manualCv || app.coverLetterFile || app.additionalDocuments?.length > 0 || app.attachments?.length > 0) && (
                   <div className="mt-3">
                     <p className="text-xs text-gray-500 mb-1 font-medium flex items-center gap-1">
-                      <FiPaperclip size={11} /> Attachments ({app.attachments.length})
+                      <FiPaperclip size={11} /> Attachments
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {app.attachments.map((att, idx) => {
-                        const isImage = att.fileType?.startsWith('image');
-                        // Build a full URL: server paths start with /uploads/
-                        // Local device paths (file:///) are not accessible from the web
-                        const isServerUrl = att.fileUrl && (
-                          att.fileUrl.startsWith('/uploads/') ||
-                          att.fileUrl.startsWith('http')
-                        );
-                        const fullUrl = isServerUrl
-                          ? att.fileUrl.startsWith('http')
-                            ? att.fileUrl
-                            : `${window.location.protocol}//${window.location.hostname}:5000${att.fileUrl}`
-                          : null;
-
-                        return (
-                          <div
-                            key={att._id || idx}
-                            className="flex items-center gap-1 text-xs bg-orange-50 border border-orange-200 rounded-lg px-2 py-1.5"
-                          >
-                            <span className="mr-0.5">{isImage ? '🖼' : '📄'}</span>
-                            <span className="max-w-[110px] truncate text-gray-700">
-                              {att.fileName || 'Attachment'}
-                            </span>
-                            {fullUrl ? (
-                              <>
-                                {/* View — opens in new tab */}
-                                <a
-                                  href={fullUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="ml-1 text-primary hover:text-primary-dark"
-                                  title="View"
-                                >
-                                  <FiEye size={13} />
-                                </a>
-                                {/* Download */}
-                                <a
-                                  href={fullUrl}
-                                  download={att.fileName || 'attachment'}
-                                  className="text-gray-500 hover:text-gray-700"
-                                  title="Download"
-                                >
-                                  <FiDownload size={13} />
-                                </a>
-                              </>
-                            ) : (
-                              <span className="ml-1 text-gray-400 text-xs italic" title="File was attached from a mobile device and cannot be accessed from the web">
-                                (local file)
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {app.manualCv && renderFileLink(app.manualCv, 'CV')}
+                      {app.coverLetterFile && renderFileLink(app.coverLetterFile, 'Cover Letter')}
+                      {app.additionalDocuments?.map((doc, idx) =>
+                        renderFileLink(doc, doc.fileName || `Document ${idx + 1}`)
+                      )}
+                      {app.attachments?.map((att, idx) =>
+                        renderFileLink(att, att.fileName || `Attachment ${idx + 1}`)
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* Actions */}
+                {/* ─── Actions ─── */}
                 <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
                   <button
                     onClick={() => updateStatus(app._id, 'under_review')}
@@ -346,10 +370,55 @@ const ViewApplicationsPage = () => {
                   >
                     <FiX size={10} /> Reject
                   </button>
+
+                  {/* ─── Message Button ────────────────────────────────────── */}
+                  {workerId ? (
+                    <button
+                      onClick={() => openChat(workerId, workerName, workerAvatar)}
+                      className="badge bg-blue-500 text-white cursor-pointer hover:bg-blue-600 text-xs flex items-center gap-1"
+                      title="Message this applicant"
+                    >
+                      <FiMessageSquare size={12} /> Message
+                    </button>
+                  ) : (
+                    <span className="badge bg-gray-300 text-gray-500 text-xs cursor-not-allowed" title="User ID missing">
+                      No user
+                    </span>
+                  )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ─── Chat Modal ──────────────────────────────────────────────────── */}
+      {chatUserId && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[80vh] max-h-[700px] flex flex-col overflow-hidden relative">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white rounded-t-2xl">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Chat with {chatUserName || 'User'}
+              </h2>
+              <button
+                onClick={closeChat}
+                className="text-gray-400 hover:text-gray-600 transition"
+                title="Close chat"
+              >
+                <FiXCircle size={24} />
+              </button>
+            </div>
+
+            {/* Chat Content */}
+            <div className="flex-1 overflow-hidden">
+              <ChatScreen
+                userId={chatUserId}
+                userName={chatUserName}
+                userAvatar={chatUserAvatar}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

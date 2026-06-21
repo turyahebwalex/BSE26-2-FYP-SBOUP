@@ -65,3 +65,5 @@ ai-services/fraud-detection/debug_prediction.py
 # Local-only pip wheel cache for offline/slow-network Docker builds (do not commit)
 ai-services/fraud-detection/wheelhouse/
 ai-services/fraud-detection/Dockerfile.offline
+first-ng-app/
+mobile/ios/

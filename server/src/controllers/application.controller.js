@@ -8,23 +8,71 @@ const logger = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
+// Set to true only if you still need to accept the legacy JSON `attachments`
+// array on write (old app builds). Recommended: false, now that all current
+// clients use multipart/form-data with cv / coverLetterFile / additionalDocs.
+const ALLOW_LEGACY_JSON_ATTACHMENTS = false;
+
+// Hard caps — keep in sync with your multer config (limits.fileSize etc.)
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'image/jpeg',
+  'image/png',
+  'image/jpg',
+]);
+
+// Helper: best-effort removal of a multer temp file (used when we reject
+// a request after multer has already written the file to disk).
+const cleanupTempFile = (file) => {
+  if (!file?.path) return;
+  fs.unlink(file.path, (err) => {
+    if (err && err.code !== 'ENOENT') {
+      logger.error('Failed to clean up temp file:', err);
+    }
+  });
+};
+
+const cleanupAllTempFiles = (reqFiles) => {
+  if (!reqFiles) return;
+  for (const key of Object.keys(reqFiles)) {
+    for (const file of reqFiles[key]) {
+      cleanupTempFile(file);
+    }
+  }
+};
+
 // Helper function to save uploaded file
 const saveUploadedFile = async (file, userId, type) => {
   if (!file) return null;
-  
+
+  // Defensive validation in case multer's own limits/fileFilter were
+  // misconfigured or bypassed (e.g. a different upload path in future).
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    throw new Error(`File "${file.originalname}" exceeds the ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB limit.`);
+  }
+  if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    throw new Error(`File "${file.originalname}" has an unsupported type (${file.mimetype}).`);
+  }
+
   const uploadDir = path.join(__dirname, '../../uploads/applications');
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
-  
+
   const timestamp = Date.now();
-  const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+  let safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+  if (!safeName) safeName = 'file';
+  safeName = safeName.slice(-100); // cap length, keep extension-end intact
   const filename = `application_${userId}_${type}_${timestamp}_${safeName}`;
   const filepath = path.join(uploadDir, filename);
-  
+
   // Move file to uploads directory
   fs.renameSync(file.path, filepath);
-  
+
   return {
     url: `/uploads/applications/${filename}`,
     fileName: file.originalname,
@@ -37,7 +85,9 @@ const saveUploadedFile = async (file, userId, type) => {
 /**
  * POST /api/applications
  * Apply for an opportunity with file uploads (CV, cover letter, additional docs)
- * Supports both JSON and multipart/form-data
+ * Accepts multipart/form-data (current clients). JSON bodies are still
+ * accepted for text-only fields, but cannot be used to satisfy a required
+ * document — that always requires an actual uploaded file.
  */
 exports.applyForOpportunity = async (req, res) => {
   try {
@@ -45,88 +95,103 @@ exports.applyForOpportunity = async (req, res) => {
     console.log('📝 Content-Type:', req.headers['content-type']);
     console.log('📝 Body:', JSON.stringify(req.body, null, 2));
     console.log('📝 Files:', req.files ? Object.keys(req.files) : 'No files');
-    
-    // Support both JSON and form-data
-    let opportunityId, coverLetter, profileId, cvId, notes;
-    let manualCvFile = null;
-    let coverLetterFile = null;
-    let additionalDocs = [];
-    
-    if (req.files || req.headers['content-type']?.includes('multipart/form-data')) {
-      // Handle multipart/form-data (file uploads)
-      opportunityId = req.body.opportunityId;
-      coverLetter = req.body.coverLetter;
-      profileId = req.body.profileId;
-      cvId = req.body.cvId;
-      notes = req.body.notes;
-      
-      // Handle manual CV upload
-      if (req.files?.cv) {
-        manualCvFile = await saveUploadedFile(req.files.cv[0], req.user._id, 'cv');
-      }
-      
-      // Handle cover letter file upload
-      if (req.files?.coverLetterFile) {
-        coverLetterFile = await saveUploadedFile(req.files.coverLetterFile[0], req.user._id, 'coverletter');
-      }
-      
-      // Handle additional documents
-      if (req.files?.additionalDocs) {
-        for (const file of req.files.additionalDocs) {
-          const saved = await saveUploadedFile(file, req.user._id, 'document');
-          if (saved) {
-            additionalDocs.push(saved);
-          }
-        }
-      }
-    } else {
-      // Handle JSON request (no file uploads)
-      opportunityId = req.body.opportunityId;
-      coverLetter = req.body.coverLetter;
-      profileId = req.body.profileId;
-      cvId = req.body.cvId;
-      notes = req.body.notes;
-    }
+
+    const isMultipart = !!req.files || !!req.headers['content-type']?.includes('multipart/form-data');
+
+    // Support both JSON and form-data for the text fields
+    const opportunityId = req.body.opportunityId;
+    const coverLetter = req.body.coverLetter;
+    const profileId = req.body.profileId;
+    const cvId = req.body.cvId;
+    const notes = req.body.notes;
 
     // Validate required fields
     if (!opportunityId) {
-      console.log('❌ Missing opportunityId');
+      console.log('Missing opportunityId');
+      cleanupAllTempFiles(req.files);
       return res.status(400).json({ error: 'Opportunity ID is required.' });
     }
 
     console.log('🔍 Looking for opportunity:', opportunityId);
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity) {
-      console.log('❌ Opportunity not found');
+      console.log('Opportunity not found');
+      cleanupAllTempFiles(req.files);
       return res.status(404).json({ error: 'Opportunity not found.' });
     }
-    
+
     if (opportunity.status !== 'published') {
-      console.log('❌ Opportunity not published:', opportunity.status);
+      console.log('Opportunity not published:', opportunity.status);
+      cleanupAllTempFiles(req.files);
       return res.status(400).json({ error: 'This opportunity is not available for application.' });
+    }
+
+    // ── Required-document enforcement ──────────────────────────────────
+    // If the opportunity requires a CV, a JSON-only (no-files) request
+    // can never satisfy that — this is exactly the legacy-client failure
+    // mode where applications were silently created with no attachments.
+    const requiredDocs = opportunity.requiredDocuments || ['cv'];
+    const requiresCv = requiredDocs.includes('cv');
+    const hasCvFile = !!req.files?.cv;
+    const hasExistingCvId = !!cvId;
+
+    if (requiresCv && !hasCvFile && !hasExistingCvId) {
+      console.log(' Required CV missing from request (isMultipart:', isMultipart, ')');
+      cleanupAllTempFiles(req.files);
+      return res.status(400).json({
+        error: 'A CV/resume file is required to apply for this opportunity. Please update your app if you do not see an upload option.',
+      });
     }
 
     // Get or create profile - PRIORITIZE finding by userId
     console.log('🔍 Looking for profile for user:', req.user._id);
     let profile = await Profile.findOne({ userId: req.user._id });
-    
+
     if (!profile && profileId) {
       console.log('🔍 Looking for profile by ID:', profileId);
       profile = await Profile.findOne({ _id: profileId, userId: req.user._id });
     }
-    
+
     if (!profile) {
-      console.log('❌ No profile found');
+      console.log('No profile found');
+      cleanupAllTempFiles(req.files);
       return res.status(403).json({ error: 'Please complete your profile before applying.' });
     }
-    
-    console.log('✅ Profile found:', profile._id);
+
+    console.log(' Profile found:', profile._id);
 
     // Check for existing application
     const existing = await Application.findOne({ profileId: profile._id, opportunityId });
     if (existing) {
-      console.log('❌ Already applied');
+      console.log('Already applied');
+      cleanupAllTempFiles(req.files);
       return res.status(400).json({ error: 'You have already applied to this opportunity.' });
+    }
+
+    // ── Save uploaded files (if any) ───────────────────────────────────
+    let manualCvFile = null;
+    let coverLetterFile = null;
+    let additionalDocs = [];
+
+    try {
+      if (req.files?.cv) {
+        manualCvFile = await saveUploadedFile(req.files.cv[0], req.user._id, 'cv');
+      }
+      if (req.files?.coverLetterFile) {
+        coverLetterFile = await saveUploadedFile(req.files.coverLetterFile[0], req.user._id, 'coverletter');
+      }
+      if (req.files?.additionalDocs) {
+        for (const file of req.files.additionalDocs) {
+          const saved = await saveUploadedFile(file, req.user._id, 'document');
+          if (saved) additionalDocs.push(saved);
+        }
+      }
+    } catch (fileError) {
+      // A file failed validation (size/type) or failed to move to disk.
+      // Don't create a partial application — reject the whole request.
+      console.log('File handling error:', fileError.message);
+      cleanupAllTempFiles(req.files);
+      return res.status(400).json({ error: fileError.message });
     }
 
     // Compute match score from the matching engine (optional, don't fail if it errors)
@@ -139,7 +204,7 @@ exports.applyForOpportunity = async (req, res) => {
         matchBreakdown = matchResult.data.breakdown || matchBreakdown;
       }
     } catch (mlError) {
-      console.log('⚠️ Match score calculation failed, using defaults:', mlError.message);
+      console.log('Match score calculation failed, using defaults:', mlError.message);
     }
 
     // Prepare application data
@@ -156,24 +221,15 @@ exports.applyForOpportunity = async (req, res) => {
       isPinned: false,
       pinnedAt: null,
     };
-    
-    // Add manual CV if uploaded
-    if (manualCvFile) {
-      applicationData.manualCv = manualCvFile;
-    }
-    
-    // Add cover letter file if uploaded
-    if (coverLetterFile) {
-      applicationData.coverLetterFile = coverLetterFile;
-    }
-    
-    // Add additional documents
-    if (additionalDocs.length > 0) {
-      applicationData.additionalDocuments = additionalDocs;
-    }
-    
-    // Handle legacy attachments from JSON
-    if (req.body.attachments && Array.isArray(req.body.attachments)) {
+
+    if (manualCvFile) applicationData.manualCv = manualCvFile;
+    if (coverLetterFile) applicationData.coverLetterFile = coverLetterFile;
+    if (additionalDocs.length > 0) applicationData.additionalDocuments = additionalDocs;
+
+    // Legacy JSON `attachments` — disabled by default. Flip
+    // ALLOW_LEGACY_JSON_ATTACHMENTS to true only if you knowingly still
+    // need to support old clients sending file references this way.
+    if (ALLOW_LEGACY_JSON_ATTACHMENTS && req.body.attachments && Array.isArray(req.body.attachments)) {
       applicationData.attachments = req.body.attachments;
     }
 
@@ -185,7 +241,7 @@ exports.applyForOpportunity = async (req, res) => {
     });
 
     const application = await Application.create(applicationData);
-    console.log('✅ Application created:', application._id);
+    console.log('Application created:', application._id);
 
     // Increment application count
     opportunity.applicationCount += 1;
@@ -198,16 +254,16 @@ exports.applyForOpportunity = async (req, res) => {
         type: 'application_update',
         title: `New Application: ${opportunity.title}`,
         content: `${req.user.fullName} applied for "${opportunity.title}" (${Math.round(matchScore)}% match)`,
-        metadata: { 
-          applicationId: application._id, 
-          opportunityId, 
+        metadata: {
+          applicationId: application._id,
+          opportunityId,
           matchScore,
           applicantName: req.user.fullName,
           applicantId: req.user._id,
         },
       });
     } catch (notifyError) {
-      console.log('⚠️ Notification failed:', notifyError.message);
+      console.log(' Notification failed:', notifyError.message);
     }
 
     // Also notify via socket if available
@@ -224,7 +280,7 @@ exports.applyForOpportunity = async (req, res) => {
       });
     }
 
-    res.status(201).json({ 
+    res.status(201).json({
       success: true,
       message: 'Application submitted successfully',
       application: {
@@ -232,11 +288,12 @@ exports.applyForOpportunity = async (req, res) => {
         status: application.status,
         matchScore: application.matchScore,
         submittedAt: application.submittedAt,
-      }
+      },
     });
   } catch (error) {
-    console.error('❌ Apply error:', error);
+    console.error('Apply error:', error);
     logger.error('Apply error:', error);
+    cleanupAllTempFiles(req.files);
     res.status(500).json({ error: 'Failed to submit application: ' + error.message });
   }
 };
@@ -256,7 +313,7 @@ exports.getMyApplications = async (req, res) => {
         populate: { path: 'companyId', select: 'name logoUrl' },
       })
       .sort({ isPinned: -1, pinnedAt: -1, submittedAt: -1 });
-    
+
     // Add document info to each application
     const enrichedApplications = applications.map(app => ({
       ...app.toObject(),
@@ -264,7 +321,7 @@ exports.getMyApplications = async (req, res) => {
       hasCoverLetter: !!(app.coverLetter || app.coverLetterFile?.url),
       hasAdditionalDocs: (app.additionalDocuments?.length > 0) || (app.attachments?.length > 0),
     }));
-    
+
     res.json({ applications: enrichedApplications });
   } catch (error) {
     logger.error('Get my applications error:', error);
@@ -281,29 +338,28 @@ exports.getApplicationDocuments = async (req, res) => {
     const application = await Application.findById(req.params.id)
       .populate('profileId', 'userId')
       .populate('opportunityId', 'title');
-    
+
     if (!application) {
       return res.status(404).json({ error: 'Application not found.' });
     }
-    
+
     // Check authorization
-    const profile = await Profile.findOne({ userId: req.user._id });
     const isOwner = application.profileId.userId.toString() === req.user._id.toString();
     const isEmployer = application.opportunityId.postedByUserId.toString() === req.user._id.toString();
     const isAdmin = req.user.role === 'admin';
-    
+
     if (!isOwner && !isEmployer && !isAdmin) {
       return res.status(403).json({ error: 'Not authorized.' });
     }
-    
+
     const documents = {
       cv: application.manualCv || null,
       coverLetter: application.coverLetterFile || null,
       coverLetterText: application.coverLetter || null,
       additionalDocuments: application.additionalDocuments || [],
-      attachments: application.attachments || [],
+      attachments: application.attachments || [], // legacy, read-only
     };
-    
+
     res.json({ documents });
   } catch (error) {
     logger.error('Get application documents error:', error);
@@ -329,7 +385,7 @@ exports.getApplicationsForOpportunity = async (req, res) => {
         populate: { path: 'userId', select: 'fullName email avatar' },
       })
       .sort({ matchScore: -1, submittedAt: -1 });
-    
+
     // Enrich applications with document info
     const enrichedApplications = applications.map(app => ({
       ...app.toObject(),
@@ -338,7 +394,7 @@ exports.getApplicationsForOpportunity = async (req, res) => {
       cvUrl: app.manualCv?.url || null,
       coverLetterUrl: app.coverLetterFile?.url || null,
     }));
-    
+
     res.json({ applications: enrichedApplications });
   } catch (error) {
     logger.error('Get applications for opportunity error:', error);
@@ -366,16 +422,13 @@ exports.updateApplicationStatus = async (req, res) => {
     application.status = status;
     await application.save();
 
-    // Get applicant info
-    const applicant = await User.findById(application.profileId.userId).select('fullName email');
-
     await notify.create({
       userId: application.profileId.userId,
       type: 'application_update',
       title: `Application Status Update: ${application.opportunityId.title}`,
       content: `Your application has been ${status.replace(/_/g, ' ')}.`,
-      metadata: { 
-        applicationId: application._id, 
+      metadata: {
+        applicationId: application._id,
         opportunityId: application.opportunityId._id,
         newStatus: status,
       },

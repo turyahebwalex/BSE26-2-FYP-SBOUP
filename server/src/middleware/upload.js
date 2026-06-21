@@ -15,7 +15,7 @@ const ALLOWED_TYPES = {
 // server.js:  uploadsRoot = path.join(__dirname, '..', 'uploads') = /app/uploads
 // __dirname here (upload.js) = /app/src/middleware
 // So the permanent messages folder is /app/uploads/messages:
-//   path.join('/app/src/middleware', '../../uploads/messages') = /app/uploads/messages ✅
+//   path.join('/app/src/middleware', '../../uploads/messages') = /app/uploads/messages 
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {

@@ -29,6 +29,7 @@ import EmployerProfilePage from './pages/EmployerProfilePage';
 // Shared Pages
 import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
+import ChatScreen from './pages/ChatScreen';
 
 // Admin Pages
 import AdminDashboard from './pages/AdminDashboard';
@@ -96,6 +97,7 @@ function AppContent() {
           {/* Shared Routes */}
           <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          <Route path="/chat/:userId" element={<ChatScreen />} />
 
           {/* Admin Routes */}
           <Route path="/admin" element={<ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>} />
