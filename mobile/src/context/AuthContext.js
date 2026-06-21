@@ -171,6 +171,45 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: message };
     }
   };
+
+  // Browser-flow Google sign-in: the server runs the OAuth exactly like the
+  // web app, then deep-links back to the app with freshly minted JWTs. We just
+  // persist them and fetch the user (same admin-block rule as password login).
+  // No native Google client, Expo login, or per-user OAuth config required.
+  const googleLoginWithTokens = async (accessToken, refreshToken) => {
+    try {
+      if (!accessToken) {
+        return { success: false, error: 'No token returned from Google sign-in.' };
+      }
+      await AsyncStorage.setItem('accessToken', accessToken);
+      if (refreshToken) {
+        await AsyncStorage.setItem('refreshToken', refreshToken);
+      }
+
+      const { data } = await authAPI.getMe();
+      const userData = data.user || data;
+
+      if (userData?.role === 'admin') {
+        await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+        return {
+          success: false,
+          adminBlocked: true,
+          error: 'System administrators must sign in from the web portal.',
+        };
+      }
+
+      setUser(userData);
+      return { success: true, user: userData };
+    } catch (error) {
+      console.error('Google token login error:', error);
+      await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      const message =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        'Google login failed. Please try again.';
+      return { success: false, error: message };
+    }
+  };
   // ───────────────────────────────────────────────────────────
 
   const register = async (userData) => {
@@ -217,7 +256,8 @@ export const AuthProvider = ({ children }) => {
         user,
         isLoading,
         login,
-        googleLogin,  // ← Added Google login method
+        googleLogin,  // ← token-based (legacy native flow)
+        googleLoginWithTokens,  // ← browser-flow (server-side OAuth, deep link)
         register,
         logout,
         loadUser,

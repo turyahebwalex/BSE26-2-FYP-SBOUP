@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,54 +15,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
+import { BASE_URL } from '../../services/api';
 
 WebBrowser.maybeCompleteAuthSession();
 
+// Redirect the server sends the browser back to after Google auth. Resolved
+// per-environment by Expo: `exp://<host>/--/auth/callback` inside Expo Go,
+// `skillbridge://auth/callback` in a dev/standalone build. We send this to the
+// server so it redirects to whatever the running app can actually catch —
+// hardcoding `skillbridge://` would break in Expo Go (it owns `exp://`, not
+// our scheme), which is what left sign-in stuck in the loop.
+const GOOGLE_REDIRECT = makeRedirectUri({ path: 'auth/callback' });
+
 const LoginScreen = ({ navigation }) => {
-  const { login, googleLogin } = useAuth();
+  const { login, googleLoginWithTokens } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-
- // Google OAuth configuration with Web Client ID (for backend verification)
-const [request, response, promptAsync] = Google.useAuthRequest({
-  webClientId: '917017536836-kkdis5dpuv1p4n8rb3jtfeqtd6i3sqv4.apps.googleusercontent.com', 
-  androidClientId: '917017536836-ighp9ct2srnob7lqpne9u802h5muo3ju.apps.googleusercontent.com', 
-  redirectUri: makeRedirectUri({
-    scheme: 'skillbridge',
-  }),
-});
-
-  // Handle Google OAuth response
-  useEffect(() => {
-    const handleGoogleResponse = async () => {
-      if (response?.type === 'success') {
-        const { authentication } = response;
-        const idToken = authentication?.idToken;
-        
-        if (idToken) {
-          setGoogleLoading(true);
-          const result = await googleLogin(idToken);
-          setGoogleLoading(false);
-          
-          if (result.success) {
-            Alert.alert('Success', 'Logged in with Google successfully!');
-            navigation.replace('MainApp');
-          } else {
-            Alert.alert('Google Login Failed', result.error);
-          }
-        }
-      } else if (response?.type === 'error') {
-        Alert.alert('Google Login Error', response.error?.message || 'Something went wrong');
-      }
-    };
-    
-    handleGoogleResponse();
-  }, [response]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -84,11 +56,42 @@ const [request, response, promptAsync] = Google.useAuthRequest({
 
   const handleGoogleSignIn = async () => {
     try {
-      console.log("Generated Redirect URI:", request?.redirectUri);
-      await promptAsync();
+      setGoogleLoading(true);
+      // Open the server's web Google flow in a browser session. The server runs
+      // OAuth (reusing the same client the web app uses) and redirects back to
+      // GOOGLE_REDIRECT with tokens. No native Google client / Expo login needed.
+      const authUrl =
+        `${BASE_URL}/auth/google?platform=mobile` +
+        `&redirect=${encodeURIComponent(GOOGLE_REDIRECT)}`;
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, GOOGLE_REDIRECT);
+
+      if (result.type !== 'success' || !result.url) {
+        // User dismissed the browser or it was cancelled — stay silent.
+        return;
+      }
+
+      const params = new URL(result.url).searchParams;
+      if (params.get('error')) {
+        Alert.alert('Google Login Failed', 'Google authentication failed. Please try again.');
+        return;
+      }
+
+      const accessToken = params.get('token');
+      const refreshToken = params.get('refresh');
+      const loginResult = await googleLoginWithTokens(accessToken, refreshToken);
+
+      // On success, googleLoginWithTokens has already called setUser(), and the
+      // root navigator (App.js) swaps AuthStack → WorkerTabs/EmployerTabs based
+      // on `user`. There is no 'MainApp' route — navigating to it crashes. So we
+      // only need to surface failures here; success transitions automatically.
+      if (!loginResult.success) {
+        Alert.alert('Google Login Failed', loginResult.error);
+      }
     } catch (error) {
       console.error('Google Sign-In error:', error);
       Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -173,7 +176,7 @@ const [request, response, promptAsync] = Google.useAuthRequest({
             <TouchableOpacity
               style={styles.googleButton}
               onPress={handleGoogleSignIn}
-              disabled={googleLoading || !request}
+              disabled={googleLoading}
             >
               {googleLoading ? (
                 <ActivityIndicator color="#757575" />
