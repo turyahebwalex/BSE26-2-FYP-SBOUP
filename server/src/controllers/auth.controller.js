@@ -37,6 +37,33 @@ const logAttempt = async (req, payload) => {
   }
 };
 
+// ─── Helper: check company moderation status ───────────────────────────────
+const checkCompanyStatus = async (companyIdOrDoc) => {
+  if (!companyIdOrDoc) return null;
+  const company = typeof companyIdOrDoc === 'object' && companyIdOrDoc.moderationStatus
+    ? companyIdOrDoc
+    : await Company.findById(companyIdOrDoc);
+  if (!company) return null;
+  return company.moderationStatus || null;
+};
+
+// ─── Helper: check user account status ────────────────────────────────────
+const checkUserStatus = (user) => {
+  if (user.accountStatus === 'banned') {
+    return { blocked: true, message: 'Your account has been banned. Please contact support.' };
+  }
+  if (user.accountStatus === 'suspended') {
+    return { blocked: true, message: 'Your account has been suspended. Please contact support.' };
+  }
+  if (user.accountStatus === 'locked') {
+    return { blocked: true, message: 'Account is locked. Contact support.' };
+  }
+  if (user.accountStatus === 'deactivated') {
+    return { blocked: true, message: 'Account is deactivated. Contact support.' };
+  }
+  return { blocked: false };
+};
+
 /**
  * POST /api/auth/register
  */
@@ -50,12 +77,7 @@ exports.register = async (req, res) => {
     }
 
     let companyId = null;
-    if (role === 'employer' && companyName) {
-      const existingCompany = await Company.findOne({ name: companyName });
-      const company = existingCompany || (await Company.create({ name: companyName, contactEmail: email }));
-      companyId = company._id;
-    }
-
+    // We'll create the user first, then company, so we have the userId.
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const user = await User.create({
       email,
@@ -63,9 +85,27 @@ exports.register = async (req, res) => {
       fullName,
       role: role || 'skilled_worker',
       phoneNumber,
-      companyId,
       emailVerificationToken: verificationToken,
     });
+
+    // If employer, create company with the user's _id as userId
+    if (role === 'employer' && companyName) {
+      let company = await Company.findOne({ name: companyName });
+      if (!company) {
+        company = await Company.create({
+          name: companyName,
+          contactEmail: email,
+          userId: user._id,  // ✅ store the user ID
+        });
+      } else {
+        // If company already exists, assign it to this user (optional)
+        company.userId = user._id;
+        await company.save();
+      }
+      companyId = company._id;
+      user.companyId = companyId;
+      await user.save();
+    }
 
     await emailService.sendVerificationEmail(user, verificationToken);
     logger.info(`New user registered: ${email} (${role})`);
@@ -94,17 +134,27 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    if (user.accountStatus === 'locked') {
-      await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: 'account_locked' });
-      return res.status(403).json({ error: 'Account is locked. Contact support.' });
-    }
-    if (user.accountStatus === 'deactivated' || user.accountStatus === 'suspended') {
-      await logAttempt(req, {
-        userId: user._id, emailAttempted: email, success: false, reason: 'account_deactivated',
-      });
-      return res.status(403).json({ error: `Account is ${user.accountStatus}.` });
+    // ─── Check user account status ──────────────────────────────
+    const userStatus = checkUserStatus(user);
+    if (userStatus.blocked) {
+      await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: user.accountStatus });
+      return res.status(403).json({ error: userStatus.message });
     }
 
+    // ─── Check company moderation status for employers ──────────
+    if (user.role === 'employer') {
+      const companyStatus = await checkCompanyStatus(user.companyId);
+      if (companyStatus === 'banned') {
+        await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: 'company_banned' });
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+      }
+      if (companyStatus === 'suspended') {
+        await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: 'company_suspended' });
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+      }
+    }
+
+    // ─── Verify password ──────────────────────────────────────────
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       await user.incrementFailedAttempts();
@@ -139,7 +189,6 @@ exports.googleLogin = async (req, res) => {
       return res.status(400).json({ error: 'ID token is required.' });
     }
 
-    // Verify Google ID token
     const ticket = await googleClient.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -152,25 +201,22 @@ exports.googleLogin = async (req, res) => {
       return res.status(400).json({ error: 'Email not provided by Google.' });
     }
 
-    // Check if user exists
     let user = await User.findOne({ email });
     
     if (!user) {
-      // Create new user for Google sign-in
       user = await User.create({
         email,
         fullName: name || email.split('@')[0],
         avatar: picture || null,
         oauthProvider: 'google',
         oauthId: googleId,
-        isEmailVerified: true, // Google verified the email
-        role: 'skilled_worker', // Default role
-        passwordHash: 'oauth-no-password', // Special marker for OAuth users
+        isEmailVerified: true,
+        role: 'skilled_worker',
+        passwordHash: 'oauth-no-password',
         accountStatus: 'active',
       });
       logger.info(`New user created via Google OAuth: ${email}`);
     } else {
-      // Update existing user's Google info if needed
       if (!user.oauthProvider) {
         user.oauthProvider = 'google';
         user.oauthId = googleId;
@@ -180,16 +226,24 @@ exports.googleLogin = async (req, res) => {
       }
     }
 
-    // Check if user is blocked
-    if (user.accountStatus !== 'active') {
-      return res.status(403).json({ 
-        error: `Account is ${user.accountStatus}. Please contact support.` 
-      });
+    // ─── Check user account status ──────────────────────────────
+    const userStatus = checkUserStatus(user);
+    if (userStatus.blocked) {
+      return res.status(403).json({ error: userStatus.message });
     }
 
-    // Generate tokens
+    // ─── Check company moderation status for employers ──────────
+    if (user.role === 'employer') {
+      const companyStatus = await checkCompanyStatus(user.companyId);
+      if (companyStatus === 'banned') {
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+      }
+      if (companyStatus === 'suspended') {
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+      }
+    }
+
     const tokens = generateTokens(user);
-    
     res.json({
       message: 'Google login successful.',
       user: user.toJSON(),
@@ -212,10 +266,26 @@ exports.refreshToken = async (req, res) => {
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
     if (decoded.type !== 'refresh') return res.status(401).json({ error: 'Invalid refresh token.' });
 
-    const user = await User.findById(decoded.id);
-    if (!user || user.accountStatus !== 'active') {
-      return res.status(401).json({ error: 'Invalid refresh token.' });
+    const user = await User.findById(decoded.id).populate('companyId');
+    if (!user) return res.status(401).json({ error: 'Invalid refresh token.' });
+
+    // ─── Check user account status ──────────────────────────────
+    const userStatus = checkUserStatus(user);
+    if (userStatus.blocked) {
+      return res.status(403).json({ error: userStatus.message });
     }
+
+    // ─── Check company moderation status for employers ──────────
+    if (user.role === 'employer') {
+      const companyStatus = await checkCompanyStatus(user.companyId);
+      if (companyStatus === 'banned') {
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+      }
+      if (companyStatus === 'suspended') {
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+      }
+    }
+
     res.json(generateTokens(user));
   } catch (error) {
     res.status(401).json({ error: 'Invalid refresh token.' });
@@ -291,7 +361,31 @@ exports.verifyEmail = async (req, res) => {
  * GET /api/auth/me
  */
 exports.getMe = async (req, res) => {
-  res.json({ user: req.user });
+  try {
+    const user = req.user;
+
+    // ─── Check user account status ──────────────────────────────
+    const userStatus = checkUserStatus(user);
+    if (userStatus.blocked) {
+      return res.status(403).json({ error: userStatus.message });
+    }
+
+    // ─── Check company moderation status for employers ──────────
+    if (user.role === 'employer') {
+      const companyStatus = await checkCompanyStatus(user.companyId);
+      if (companyStatus === 'banned') {
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+      }
+      if (companyStatus === 'suspended') {
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+      }
+    }
+
+    res.json({ user });
+  } catch (error) {
+    logger.error('Get me error:', error);
+    res.status(500).json({ error: 'Failed to fetch user data.' });
+  }
 };
 
 /**
@@ -313,7 +407,6 @@ exports.googleCallback = async (req, res) => {
 
 /**
  * POST /api/auth/send-otp
- * Send OTP verification code to user's email
  */
 exports.sendOtp = async (req, res) => {
   try {
@@ -322,24 +415,20 @@ exports.sendOtp = async (req, res) => {
       return res.status(400).json({ error: 'Email is required.' });
     }
 
-    // Check if email already registered
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already registered. Please login.' });
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Store OTP in database
     await OtpRequest.findOneAndUpdate(
       { email },
       { otp, expiresAt, channel: 'email' },
       { upsert: true, new: true }
     );
 
-    // Send OTP via email
     await emailService.sendOtpEmail(email, otp);
     logger.info(`OTP sent to ${email}`);
 
@@ -352,57 +441,58 @@ exports.sendOtp = async (req, res) => {
 
 /**
  * POST /api/auth/verify-otp
- * Verify OTP and complete registration
  */
 exports.verifyOtp = async (req, res) => {
   try {
     const { email, otp, userData } = req.body;
 
-    // Validate required fields
     if (!email || !otp) {
       return res.status(400).json({ error: 'Email and OTP are required.' });
     }
 
-    // Find valid OTP record
     const record = await OtpRequest.findOne({ email, otp });
-
     if (!record || record.expiresAt < new Date()) {
       return res.status(400).json({ error: 'Invalid or expired OTP.' });
     }
 
-    // Extract user data
     const { fullName, password, role, phoneNumber, companyName } = userData;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already registered.' });
     }
 
-    // Handle company creation for employers
-    let companyId = null;
-    if (role === 'employer' && companyName) {
-      const existingCompany = await Company.findOne({ name: companyName });
-      const company = existingCompany || (await Company.create({ name: companyName, contactEmail: email }));
-      companyId = company._id;
-    }
-
-    // Create new user
+    // Create user first
     const user = await User.create({
       email,
       passwordHash: password,
       fullName,
       role: role || 'skilled_worker',
       phoneNumber: phoneNumber || null,
-      companyId,
-      isEmailVerified: true, // Email verified via OTP
+      isEmailVerified: true,
     });
 
-    // Clean up used OTP
+    let companyId = null;
+    if (role === 'employer' && companyName) {
+      let company = await Company.findOne({ name: companyName });
+      if (!company) {
+        company = await Company.create({
+          name: companyName,
+          contactEmail: email,
+          userId: user._id,  // ✅ store the user ID
+        });
+      } else {
+        company.userId = user._id;
+        await company.save();
+      }
+      companyId = company._id;
+      user.companyId = companyId;
+      await user.save();
+    }
+
     await OtpRequest.deleteOne({ _id: record._id });
     logger.info(`User registered via email OTP: ${email}`);
 
-    // Generate tokens and send response
     const tokens = generateTokens(user);
     res.status(201).json({
       message: 'Registration successful.',
