@@ -393,12 +393,39 @@ exports.getMe = async (req, res) => {
  * Redirect handler for Passport Google OAuth (if you're using Passport)
  */
 exports.googleCallback = async (req, res) => {
+  // Decode the OAuth `state` we set in the /google route: { platform, redirect }.
+  // For mobile we redirect to the app-provided URI (exp://… in Expo Go,
+  // skillbridge://… in a dev build) so the WebBrowser session resolves and the
+  // app receives the tokens. Web keeps going to CLIENT_URL as before.
+  let platform = 'web';
+  let mobileRedirect;
+  try {
+    const decoded = JSON.parse(Buffer.from(req.query.state || '', 'base64').toString('utf8'));
+    platform = decoded.platform || 'web';
+    mobileRedirect = decoded.redirect;
+  } catch (_) {
+    // Legacy/plain state (e.g. "mobile") or none — fall back gracefully.
+    if (req.query.state === 'mobile') platform = 'mobile';
+  }
+  const isMobile = platform === 'mobile';
+  const redirectBase =
+    mobileRedirect || process.env.MOBILE_AUTH_REDIRECT || 'skillbridge://auth/callback';
+  const sep = redirectBase.includes('?') ? '&' : '?';
+
   try {
     const tokens = generateTokens(req.user);
+    if (isMobile) {
+      return res.redirect(
+        `${redirectBase}${sep}token=${tokens.accessToken}&refresh=${tokens.refreshToken}`
+      );
+    }
     res.redirect(
       `${process.env.CLIENT_URL}/auth/callback?token=${tokens.accessToken}&refresh=${tokens.refreshToken}`
     );
   } catch (error) {
+    if (isMobile) {
+      return res.redirect(`${redirectBase}${sep}error=oauth_failed`);
+    }
     res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
   }
 };

@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const passport = require('passport');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
@@ -156,6 +157,10 @@ app.use('/api/', (req, res, next) => {
 
 // ─── Passport ─────────────────────────────────────────────────────────────────
 configurePassport();
+// Mount Passport's Express middleware. Required by passport >= 0.6 for the
+// web Google OAuth redirect flow (GET /api/auth/google); without it
+// passport.authenticate() throws "passport.initialize() middleware not in use".
+app.use(passport.initialize());
 
 app.set('io', io);
 

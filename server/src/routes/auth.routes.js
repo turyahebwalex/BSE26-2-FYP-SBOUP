@@ -13,8 +13,24 @@ router.post('/reset-password/:token', validate('resetPassword'), ctrl.resetPassw
 router.get('/verify-email/:token', ctrl.verifyEmail);
 router.get('/me', authenticate, ctrl.getMe);
 
-// Google OAuth - Passport (Web redirect flow)
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+// Google OAuth - Passport (Web + mobile browser redirect flow)
+// `?platform=mobile` is carried through Google as the OAuth `state` so the
+// callback knows to redirect back to the app's deep link instead of the web
+// client. Lets mobile reuse the exact same server-side Google flow as web —
+// no per-device or per-user OAuth config needed.
+router.get('/google', (req, res, next) => {
+  // Carry the platform flag and (for mobile) the app's own redirect URI through
+  // Google as the OAuth `state`, base64-encoded JSON. The app passes a redirect
+  // that the *running* environment can catch (exp:// in Expo Go, skillbridge://
+  // in a dev build), so the callback can send the browser back to the right place.
+  const isMobile = req.query.platform === 'mobile';
+  const statePayload = {
+    platform: isMobile ? 'mobile' : 'web',
+    redirect: isMobile && req.query.redirect ? String(req.query.redirect) : undefined,
+  };
+  const state = Buffer.from(JSON.stringify(statePayload)).toString('base64');
+  passport.authenticate('google', { scope: ['profile', 'email'], state })(req, res, next);
+});
 router.get('/google/callback', passport.authenticate('google', { session: false }), ctrl.googleCallback);
 
 // Google Login - Token-based (For mobile apps)
