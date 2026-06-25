@@ -64,6 +64,13 @@ const AdminDashboard = () => {
   const [reportSearch, setReportSearch] = useState('');
   const [reportActionLoading, setReportActionLoading] = useState({});
 
+  const loadDashboardStats = async () => {
+    try {
+      const { data } = await adminAPI.getDashboard();
+      setStats(data);
+    } catch {}
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -165,6 +172,7 @@ const AdminDashboard = () => {
         delete n[contentId];
         return n;
       });
+      await loadDashboardStats();
     } catch {
       toast.error('Action failed');
     }
@@ -308,6 +316,7 @@ const AdminDashboard = () => {
             : r
         )
       );
+      await loadDashboardStats();
       toast.success(action === 'remove' ? 'Opportunity removed from public view' : 'Opportunity left as is');
     } catch {
       toast.error('Failed to update opportunity');
