@@ -1,7 +1,11 @@
 services:
   # ─── Data Layer ───
-  # MongoDB is the shared hosted Atlas cluster (MONGODB_URI in the root .env),
-  # so there is no local mongo container — every service connects to Atlas.
+  # MongoDB runs as a standalone local container `sboup-mongo` (image mongo:7)
+  # on the host's localhost:27017 — started outside this compose file (see
+  # db-backups/README.md), not as a compose service. The Atlas M0 cluster was
+  # the previous DB; its URI is kept commented in the root .env as a fallback.
+  # Every service below uses network_mode: host, so MONGODB_URI=...localhost...
+  # reaches this container on the host's port 27017.
   redis:
     image: redis:7-alpine
     container_name: sboup-redis
@@ -83,15 +87,16 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-matching
-    # Host networking so the Atlas (mongodb+srv) DNS SRV lookup uses the host
-    # resolver — Docker's bridge embedded DNS (127.0.0.11) times out the SRV
-    # query on some campus/corporate Wi-Fi, the same reason server/fraud/cv/
-    # learning use host mode. Port 5001 is already bound on the host directly.
+    # Host networking so the container reaches the local mongo on the host's
+    # localhost:27017, and so outbound egress (Hugging Face, ESCO) uses the host
+    # resolver — Docker's bridge embedded DNS (127.0.0.11) times out on some
+    # campus/corporate Wi-Fi, the same reason server/fraud/cv/learning use host
+    # mode. Port 5001 is already bound on the host directly.
     network_mode: host
     # The host runs systemd-resolved on 127.0.0.53, which Docker can't pass into
     # a container, so it falls back to 8.8.8.8 — blocked on some campus networks
     # (mak.ac.ug blocks 8.8.8.8 *and* public resolvers), causing an instant DNS
-    # crash loop for Atlas (mongodb+srv) and Hugging Face downloads. SERVICE_DNS
+    # crash loop for Hugging Face downloads. SERVICE_DNS
     # is auto-set by scripts/dev.sh to the host's *current* upstream resolver, so
     # this works on ANY network (campus, mobile hotspot, home Wi-Fi). The 9.9.9.9
     # default (Quad9) is only the fallback for a bare `docker compose up` on a
@@ -100,7 +105,7 @@ services:
     environment:
       - FLASK_ENV=development
       - MONGODB_URI=${MONGODB_URI}
-      # Shared single source of truth for the Atlas db name (default `sboup`).
+      # Shared single source of truth for the db name (default `sboup`).
       - MONGODB_DB_NAME=${MONGODB_DB_NAME:-sboup}
 
   fraud-detection:
@@ -109,19 +114,19 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-fraud
-    # Host networking so the container's outbound TLS to MongoDB Atlas uses the
-    # host resolver/route table — the Docker bridge subnet is blocked on some
-    # campus/corporate Wi-Fi, which otherwise breaks the Atlas (mongodb+srv) DNS
-    # SRV lookup on startup. Matches server/cv-generation/learning-engine.
+    # Host networking so the container reaches the local mongo on the host's
+    # localhost:27017 and its outbound egress uses the host resolver/route table
+    # — the Docker bridge subnet is blocked on some campus/corporate Wi-Fi.
+    # Matches server/cv-generation/learning-engine.
     network_mode: host
     # Campus DNS — see matching-engine for why 8.8.8.8/public resolvers fail.
     dns: ${SERVICE_DNS:-9.9.9.9}
     environment:
       - FLASK_ENV=development
-      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
-      # truth, same as server/matching-engine/chatbot-service).
+      # Local MongoDB URI, taken from the root .env (single source of truth,
+      # same as server/matching-engine/chatbot-service).
       - MONGODB_URI=${MONGODB_URI}
-      # Shared single source of truth for the Atlas db name (default `sboup`).
+      # Shared single source of truth for the db name (default `sboup`).
       - MONGODB_DB_NAME=${MONGODB_DB_NAME:-sboup}
 
   cv-generation:
@@ -137,16 +142,16 @@ services:
     network_mode: host
     # Campus DNS — see matching-engine for why 8.8.8.8/public resolvers fail.
     # cv pulls MiniLM + Flan-T5 + NER from huggingface.co on first start, so a
-    # working resolver here is mandatory, not just for Atlas.
+    # working resolver here is mandatory.
     dns: ${SERVICE_DNS:-9.9.9.9}
     environment:
-      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
-      # truth, same as server/matching-engine/fraud-detection/chatbot-service).
+      # Local MongoDB URI, taken from the root .env (single source of truth,
+      # same as server/matching-engine/fraud-detection/chatbot-service).
       - MONGODB_URI=${MONGODB_URI}
-      # Must match the db the server/seeder actually write to. The shared Atlas
-      # URI pins the db name in its path (…/sboup?…) and the server connects
+      # Must match the db the server/seeder actually write to. The local mongo
+      # URI pins the db name in its path (…/sboup) and the server connects
       # without an explicit dbName, so all data lands in `sboup`. Hardcoding a
-      # different name here points this service at an empty Atlas db.
+      # different name here points this service at an empty db.
       - MONGODB_DB_NAME=${MONGODB_DB_NAME:-sboup}
       - STORAGE_BACKEND=${CV_STORAGE_BACKEND:-local}
       - LOCAL_STORAGE_DIR=/app/storage
@@ -178,14 +183,14 @@ services:
     # learning pulls MiniLM + Flan-T5 + Skill NER from huggingface.co.
     dns: ${SERVICE_DNS:-9.9.9.9}
     environment:
-      # Shared hosted MongoDB Atlas, taken from the root .env (single source of
-      # truth, same as server/matching-engine/fraud-detection/chatbot-service).
+      # Local MongoDB URI, taken from the root .env (single source of truth,
+      # same as server/matching-engine/fraud-detection/chatbot-service).
       - MONGODB_URI=${MONGODB_URI}
-      # Must match the db the server/seeder actually write to. The shared Atlas
-      # URI pins the db name in its path (…/sboup?…) and the server connects
+      # Must match the db the server/seeder actually write to. The local mongo
+      # URI pins the db name in its path (…/sboup) and the server connects
       # without an explicit dbName, so all data (users, profiles) lands in
       # `sboup`. Hardcoding `sboup_dev` here pointed learning-engine at an empty
-      # Atlas db → every profile lookup returned PROFILE_NOT_FOUND (404) and the
+      # db → every profile lookup returned PROFILE_NOT_FOUND (404) and the
       # mobile app showed "Learning service unavailable" on "Bridge a skill gap".
       - MONGODB_DB_NAME=${MONGODB_DB_NAME:-sboup}
       - INTERNAL_API_KEY=${LEARNING_INTERNAL_API_KEY:-}
@@ -217,10 +222,11 @@ services:
       dockerfile: Dockerfile
       network: host
     container_name: sboup-chatbot
-    # Host networking so the Atlas (mongodb+srv) DNS SRV lookup uses the host
-    # resolver — Docker's bridge embedded DNS (127.0.0.11) times out the SRV
-    # query on some campus/corporate Wi-Fi, the same reason server/fraud/cv/
-    # learning use host mode. Port 5005 is already bound on the host directly.
+    # Host networking so the container reaches the local mongo on the host's
+    # localhost:27017, and so outbound egress (Hugging Face) uses the host
+    # resolver — Docker's bridge embedded DNS (127.0.0.11) times out on some
+    # campus/corporate Wi-Fi, the same reason server/fraud/cv/learning use host
+    # mode. Port 5005 is already bound on the host directly.
     network_mode: host
     # Campus DNS — see matching-engine for why 8.8.8.8/public resolvers fail.
     # chatbot's knowledge base needs huggingface.co for MiniLM on first start.
@@ -228,7 +234,7 @@ services:
     environment:
       - FLASK_ENV=development
       - MONGODB_URI=${MONGODB_URI}
-      # Shared single source of truth for the Atlas db name (default `sboup`).
+      # Shared single source of truth for the db name (default `sboup`).
       - MONGODB_DB_NAME=${MONGODB_DB_NAME:-sboup}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
