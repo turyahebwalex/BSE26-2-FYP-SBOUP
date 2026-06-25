@@ -27,17 +27,40 @@ function resolveBaseUrl() {
 const BASE_URL = resolveBaseUrl();
 console.log('🔍 [API] BASE_URL =', BASE_URL);
 
+// Default timeout. Over LAN Wi-Fi the laptop usually answers in <1s; a long
+// timeout only means a request hangs the UI for minutes when the phone can't
+// reach the laptop (wrong Wi-Fi, firewall, laptop asleep). 20s fails fast so
+// the user sees an error and can retry instead of staring at a spinner. Slow
+// AI-backed endpoints (CV/learning generation) pass a longer per-request
+// timeout where they're called.
+const DEFAULT_TIMEOUT = 20000;
+
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 300000, 
+  timeout: DEFAULT_TIMEOUT,
   headers: { 'Content-Type': 'application/json' },
 });
+
+// Cache the access token in memory so we don't hit AsyncStorage (a disk read)
+// on every single request — that latency was adding up across the many calls
+// each screen fires. AsyncStorage stays the source of truth; we keep this cache
+// in sync from the auth flow via setAuthToken() below.
+let cachedToken = null;
+let tokenLoaded = false;
+
+export const setAuthToken = (token) => {
+  cachedToken = token || null;
+  tokenLoaded = true;
+};
 
 api.interceptors.request.use(
   async (config) => {
     try {
-      const token = await AsyncStorage.getItem('accessToken');
-      if (token) config.headers.Authorization = `Bearer ${token}`;
+      if (!tokenLoaded) {
+        cachedToken = await AsyncStorage.getItem('accessToken');
+        tokenLoaded = true;
+      }
+      if (cachedToken) config.headers.Authorization = `Bearer ${cachedToken}`;
     } catch (_) {}
     return config;
   },
@@ -91,6 +114,7 @@ api.interceptors.response.use(
         await AsyncStorage.setItem('accessToken', newAccessToken);
         if (data.refreshToken) await AsyncStorage.setItem('refreshToken', data.refreshToken);
 
+        setAuthToken(newAccessToken);
         api.defaults.headers.common.Authorization = `Bearer ${newAccessToken}`;
         processQueue(null, newAccessToken);
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -98,6 +122,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+        setAuthToken(null);
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -189,7 +214,7 @@ export const learningAPI = {
   // Pass targetSkill OR opportunityId; opportunity-driven mode engages
   // the §6.0 matching-engine consistency contract on the AI service.
   generate: ({ targetSkill, opportunityId } = {}) =>
-    api.post('/learning/generate', { targetSkill, opportunityId }),
+    api.post('/learning/generate', { targetSkill, opportunityId }, { timeout: 120000 }),
   // Pure analysis (no DB write). Returns missingSkills + matchBreakdown
   // + aliasHints for a (profile, opportunity) pair. Useful for the
   // mobile breakdown card to surface 'did you mean…?' hints alongside
@@ -203,14 +228,14 @@ export const learningAPI = {
   // present. Called on LearningScreen mount so the worker doesn't have to
   // type a skill to get started.
   autoSuggest: ({ max = 3, force = false } = {}) =>
-    api.post('/learning/auto-suggest', { max, force }),
+    api.post('/learning/auto-suggest', { max, force }, { timeout: 120000 }),
   updateProgress: (pathId, resourceIndex, isCompleted) =>
     api.put(`/learning/${pathId}/progress`, { resourceIndex, isCompleted }),
 };
 
 // ── CV ──
 export const cvAPI = {
-  generate: (options) => api.post('/cv/generate', options),
+  generate: (options) => api.post('/cv/generate', options, { timeout: 120000 }),
   getMine: () => api.get('/cv/mine'),
   getOne: (id) => api.get(`/cv/${id}`),
   delete: (id) => api.delete(`/cv/${id}`),

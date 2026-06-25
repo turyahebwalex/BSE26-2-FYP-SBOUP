@@ -12,29 +12,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
-import { BASE_URL } from '../../services/api';
-
-WebBrowser.maybeCompleteAuthSession();
-
-// Redirect the server sends the browser back to after Google auth. Resolved
-// per-environment by Expo: `exp://<host>/--/auth/callback` inside Expo Go,
-// `skillbridge://auth/callback` in a dev/standalone build. We send this to the
-// server so it redirects to whatever the running app can actually catch —
-// hardcoding `skillbridge://` would break in Expo Go (it owns `exp://`, not
-// our scheme), which is what left sign-in stuck in the loop.
-const GOOGLE_REDIRECT = makeRedirectUri({ path: 'auth/callback' });
 
 const LoginScreen = ({ navigation }) => {
-  const { login, googleLoginWithTokens } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -51,47 +36,6 @@ const LoginScreen = ({ navigation }) => {
         result.adminBlocked ? 'Admin Access Restricted' : 'Login Failed',
         result.error
       );
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    try {
-      setGoogleLoading(true);
-      // Open the server's web Google flow in a browser session. The server runs
-      // OAuth (reusing the same client the web app uses) and redirects back to
-      // GOOGLE_REDIRECT with tokens. No native Google client / Expo login needed.
-      const authUrl =
-        `${BASE_URL}/auth/google?platform=mobile` +
-        `&redirect=${encodeURIComponent(GOOGLE_REDIRECT)}`;
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, GOOGLE_REDIRECT);
-
-      if (result.type !== 'success' || !result.url) {
-        // User dismissed the browser or it was cancelled — stay silent.
-        return;
-      }
-
-      const params = new URL(result.url).searchParams;
-      if (params.get('error')) {
-        Alert.alert('Google Login Failed', 'Google authentication failed. Please try again.');
-        return;
-      }
-
-      const accessToken = params.get('token');
-      const refreshToken = params.get('refresh');
-      const loginResult = await googleLoginWithTokens(accessToken, refreshToken);
-
-      // On success, googleLoginWithTokens has already called setUser(), and the
-      // root navigator (App.js) swaps AuthStack → WorkerTabs/EmployerTabs based
-      // on `user`. There is no 'MainApp' route — navigating to it crashes. So we
-      // only need to surface failures here; success transitions automatically.
-      if (!loginResult.success) {
-        Alert.alert('Google Login Failed', loginResult.error);
-      }
-    } catch (error) {
-      console.error('Google Sign-In error:', error);
-      Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -162,29 +106,6 @@ const LoginScreen = ({ navigation }) => {
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.loginButtonText}>Sign In</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Divider */}
-            <View style={styles.dividerContainer}>
-              <View style={styles.divider} />
-              <Text style={styles.dividerText}>OR</Text>
-              <View style={styles.divider} />
-            </View>
-
-            {/* Google Sign-In Button */}
-            <TouchableOpacity
-              style={styles.googleButton}
-              onPress={handleGoogleSignIn}
-              disabled={googleLoading}
-            >
-              {googleLoading ? (
-                <ActivityIndicator color="#757575" />
-              ) : (
-                <>
-                  <Ionicons name="logo-google" size={20} color="#757575" />
-                  <Text style={styles.googleButtonText}>Continue with Google</Text>
-                </>
               )}
             </TouchableOpacity>
 
@@ -308,38 +229,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  dividerText: {
-    marginHorizontal: 10,
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginBottom: 16,
-    backgroundColor: '#FFFFFF',
-  },
-  googleButtonText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#757575',
   },
   registerRow: {
     flexDirection: 'row',

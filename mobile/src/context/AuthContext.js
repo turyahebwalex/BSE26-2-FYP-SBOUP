@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api, { authAPI } from '../services/api';
+import api, { authAPI, setAuthToken } from '../services/api';
 import socketService from '../services/socket';
 
 const AuthContext = createContext(null);
@@ -80,6 +80,7 @@ export const AuthProvider = ({ children }) => {
         const userData = data.user || data;
         if (userData?.role === 'admin') {
           await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+          setAuthToken(null);
           setUser(null);
         } else {
           setUser(userData);
@@ -88,6 +89,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.log('Failed to load user:', error?.message);
       await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      setAuthToken(null);
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -114,6 +116,7 @@ export const AuthProvider = ({ children }) => {
       if (refresh) {
         await AsyncStorage.setItem('refreshToken', refresh);
       }
+      setAuthToken(token);
 
       setUser(userData);
       return { success: true, user: userData };
@@ -159,6 +162,7 @@ export const AuthProvider = ({ children }) => {
       if (refreshToken) {
         await AsyncStorage.setItem('refreshToken', refreshToken);
       }
+      setAuthToken(accessToken);
 
       setUser(userData);
       return { success: true, user: userData };
@@ -185,12 +189,14 @@ export const AuthProvider = ({ children }) => {
       if (refreshToken) {
         await AsyncStorage.setItem('refreshToken', refreshToken);
       }
+      setAuthToken(accessToken);
 
       const { data } = await authAPI.getMe();
       const userData = data.user || data;
 
       if (userData?.role === 'admin') {
         await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+        setAuthToken(null);
         return {
           success: false,
           adminBlocked: true,
@@ -203,6 +209,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Google token login error:', error);
       await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      setAuthToken(null);
       const message =
         error.response?.data?.message ||
         error.response?.data?.error ||
@@ -223,6 +230,7 @@ export const AuthProvider = ({ children }) => {
         if (refresh) {
           await AsyncStorage.setItem('refreshToken', refresh);
         }
+        setAuthToken(token);
         const registeredUser = data.user || data;
         setUser(registeredUser);
         return { success: true, user: registeredUser };
@@ -241,11 +249,13 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      setAuthToken(null);
       setUser(null);
       setUnreadMessageCount(0);
       setUnreadNotificationCount(0);
     } catch (error) {
       console.log('Logout error:', error?.message);
+      setAuthToken(null);
       setUser(null);
     }
   };
