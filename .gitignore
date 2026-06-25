@@ -67,3 +67,7 @@ ai-services/fraud-detection/wheelhouse/
 ai-services/fraud-detection/Dockerfile.offline
 first-ng-app/
 mobile/ios/
+
+# Local database dumps / backups (Atlas snapshots, etc.)
+db-backups/
+.mongo-data/
