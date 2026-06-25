@@ -75,6 +75,36 @@ if [[ "$choice" != "2" ]] && [[ -z "${CV_PUBLIC_BASE_URL:-}" ]]; then
   fi
 fi
 
+# 3b. Resolve the host's *current* upstream DNS and hand it to the containers.
+#
+# Every AI service uses network_mode: host and connects to MongoDB Atlas
+# (mongodb+srv → DNS SRV lookup) and Hugging Face (model downloads). The host
+# runs systemd-resolved on 127.0.0.53, which Docker can't pass into a
+# container, so Docker falls back to 8.8.8.8 — and many networks (campus Wi-Fi
+# like mak.ac.ug) block 8.8.8.8 *and* every public resolver (Quad9/OpenDNS),
+# leaving the containers unable to resolve anything → instant crash loop.
+#
+# The robust fix that works on ANY network — campus, mobile hotspot, home
+# Wi-Fi — is to read whatever upstream DNS systemd-resolved is actually using
+# right now and pass that to the containers. On a hotspot this is the carrier's
+# resolver; on campus it's the campus DNS. Public fallbacks are appended only
+# in case detection fails on a network where they aren't blocked.
+if [[ -z "${SERVICE_DNS:-}" ]]; then
+  HOST_DNS="$(resolvectl status 2>/dev/null | awk '/Current DNS Server:/ {print $4; exit}')"
+  if [[ -z "$HOST_DNS" ]]; then
+    # Fallback: scrape the global/per-link "DNS Servers:" line (first non-loopback).
+    HOST_DNS="$(resolvectl status 2>/dev/null | awk '/DNS Servers:/ {for(i=3;i<=NF;i++) if($i!~/^127\./){print $i; exit}}')"
+  fi
+  if [[ -n "$HOST_DNS" ]]; then
+    # Append a public fallback for resilience; the first that answers wins.
+    export SERVICE_DNS="$HOST_DNS"
+    log "Auto-detected host DNS ${HOST_DNS}; AI services will resolve Atlas + Hugging Face through it"
+  else
+    warn "Could not detect host upstream DNS. If AI services fail to reach Atlas/Hugging Face,"
+    warn "set SERVICE_DNS=<your-network-dns> (see 'resolvectl status') and re-run."
+  fi
+fi
+
 # 4. Start the Docker stack detached so the terminal is free for Expo.
 #
 # The compose file ships a `mobile` service that boots Expo on host port

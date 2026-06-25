@@ -1,3 +1,13 @@
+# CPU-only PyTorch, matching the cv-generation / learning-engine services and
+# the SDD's "torch CPU" image budget. The chatbot only runs CPU inference
+# (sentence-transformers for the ChromaDB knowledge base), so the CUDA-bundled
+# default torch was pure dead weight — it ballooned the image to ~9.4GB and made
+# every rebuild re-download 500MB+ of GPU libraries. Pinning the CPU wheel keeps
+# the image near ~2GB. Must precede sentence-transformers so pip resolves CPU
+# torch first instead of pulling the CUDA default as a transitive dependency.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+
 flask==3.0.0
 flask-cors==4.0.0
 pymongo==4.6.1

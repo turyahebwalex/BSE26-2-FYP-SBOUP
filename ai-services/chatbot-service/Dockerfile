@@ -2,12 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies in two steps:
-# 1. sentence-transformers pulls in torch (~500MB) — give it extra time
-# 2. Everything else is small and fast
+# Install everything from requirements.txt in one pass. The CPU-only torch pin
+# (--extra-index-url + torch==2.4.1+cpu) sits at the top of that file, so pip
+# resolves the lightweight CPU wheel before sentence-transformers can pull the
+# CUDA default. Installing sentence-transformers separately first (as before)
+# defeated the pin and re-introduced the ~9.4GB CUDA torch.
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=300 --retries=5 sentence-transformers==2.7.0
-RUN pip install --no-cache-dir --timeout=120 --retries=5 -r requirements.txt
+RUN pip install --no-cache-dir --timeout=300 --retries=5 -r requirements.txt
 
 # Copy application code
 COPY . .

@@ -45,7 +45,11 @@ client = MongoClient(
     serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '8000')),
     connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '10000')),
 )
-db = client.get_default_database() if 'sboup' in MONGODB_URI else client['sboup_dev']
+# Single source of truth for the db name across all services: MONGODB_DB_NAME
+# (default `sboup`, the db the server/seeder write to on the shared Atlas
+# cluster). Replaces the old `'sboup' in URI` substring check, which silently
+# fell back to an empty `sboup_dev` for any URI using a different db name.
+db = client[os.getenv('MONGODB_DB_NAME', 'sboup')]
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / 'models'
 # Optional training/export data (only used by the /api/training-export path).

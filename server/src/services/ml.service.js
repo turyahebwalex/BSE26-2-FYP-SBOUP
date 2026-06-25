@@ -112,10 +112,18 @@ const generateLearningPath = ({ userId, targetSkill, opportunityId }) =>
   );
 
 const analyseSkillGaps = ({ profileId, opportunityId }) =>
-  tryPost(`${process.env.LEARNING_SERVICE_URL}/api/learning/skill-gaps`, {
-    profileId: String(profileId),
-    opportunityId: String(opportunityId),
-  });
+  tryPost(
+    `${process.env.LEARNING_SERVICE_URL}/api/learning/skill-gaps`,
+    {
+      profileId: String(profileId),
+      opportunityId: String(opportunityId),
+    },
+    // Opportunity-driven skill-gaps calls the matching-engine first (semantic
+    // embedding + ML inference) before analysing, which runs ~17s warm on CPU
+    // — past the 15s default, so the gateway was returning 503 on a request
+    // the learning-engine actually completes. Match dashboard-fit's headroom.
+    { timeout: 30_000 }
+  );
 
 const getDashboardFit = ({ userId }) =>
   tryPost(

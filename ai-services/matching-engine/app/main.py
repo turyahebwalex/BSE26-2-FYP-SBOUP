@@ -31,11 +31,13 @@ logger = logging.getLogger(__name__)
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/sboup_dev')
 mongo_client = MongoClient(MONGODB_URI)
-db = (
-    mongo_client.get_default_database()
-    if 'sboup' in MONGODB_URI
-    else mongo_client['sboup_dev']
-)
+# Single source of truth for the db name across all services: MONGODB_DB_NAME
+# (default `sboup`, the db the server/seeder write to on the shared Atlas
+# cluster). Falling back to the URI path before `sboup_dev` keeps older URIs
+# working, but the env var should normally decide so every service stays in
+# sync — the previous `'sboup' in URI` substring check silently diverged to an
+# empty `sboup_dev` whenever a URI used a different db name.
+db = mongo_client[os.getenv('MONGODB_DB_NAME', 'sboup')]
 
 # ── Load ML models once at startup ────────────────────────────────────────────
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'model')
@@ -469,17 +471,26 @@ def batch_match_scores():
         profile_id = ObjectId(data['profileId'])
         opp_ids = [ObjectId(x) for x in (data.get('opportunityIds') or []) if x]
 
+        # Resolve the worker context once, then reuse it for every opportunity
+        # so the batch is cheap (one profile read instead of N).
+        profile_doc   = db.profiles.find_one({'_id': profile_id})
         worker_skills = get_profile_skill_vector(profile_id)
+        worker_ctx    = _get_worker_context(profile_id, profile_doc)
+
         scores = {}
         for opp_id in opp_ids:
             opp = db.opportunities.find_one({'_id': opp_id})
             if not opp:
                 scores[str(opp_id)] = 0
                 continue
-            opp_skills = get_opportunity_skill_vector(opp_id)
-            skill_score = compute_cosine_similarity(worker_skills, opp_skills) * 100
-            exp_score = compute_experience_score(profile_id, opp.get('category', ''))
-            match_score = round((0.5 * skill_score) + (0.25 * exp_score) + (0.25 * 0), 1)
+            # Use the exact same feature-row + ML scorer as /api/match/score so
+            # the percentage on a list card matches the one on its detail view.
+            # (The previous formula called two functions that never existed —
+            # compute_cosine_similarity / compute_experience_score — so this
+            # endpoint always 500'd and every card fell back to 0%.)
+            opp_skills      = get_opportunity_skill_vector(opp_id)
+            feature_row     = _build_feature_row(worker_skills, opp_skills, worker_ctx, opp)
+            match_score, _  = _ml_predict(feature_row)
             scores[str(opp_id)] = match_score
 
         return jsonify({'scores': scores})

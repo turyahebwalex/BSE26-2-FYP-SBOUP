@@ -43,7 +43,11 @@ GROQ_MODEL    = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 # ─────────────────────────────────────────────────────────────────────────────
 MONGODB_URI   = os.getenv("MONGODB_URI", "mongodb://localhost:27017/sboup_dev")
-DB_NAME       = MONGODB_URI.split("/")[-1].split("?")[0]
+# Single source of truth for the db name across all services: MONGODB_DB_NAME
+# (default `sboup`, the db the server/seeder write to on the shared Atlas
+# cluster). Falls back to the URI path only if the env var is unset, so the
+# chatbot reads the same db as everything else.
+DB_NAME       = os.getenv("MONGODB_DB_NAME") or MONGODB_URI.split("/")[-1].split("?")[0] or "sboup"
 
 # Proficiency weights (mirrors matching engine)
 PROFICIENCY_WEIGHT = {
