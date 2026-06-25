@@ -190,7 +190,7 @@ const blockUser = Joi.object({
 // ─── Report ──────────────────────────────────────────────────────
 const createReport = Joi.object({
   targetId: Joi.string().hex().length(24).required(),
-  targetType: Joi.string().valid('opportunity', 'user', 'message').required(),
+  targetType: Joi.string().valid('opportunity', 'user', 'message', 'company').required(),
   reason: Joi.string().valid(
     'fraudulent_scam',
     'spam',

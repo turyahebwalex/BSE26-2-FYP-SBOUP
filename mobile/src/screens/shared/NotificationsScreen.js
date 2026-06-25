@@ -19,14 +19,16 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { BASE_URL } from '../../services/api';
 
-// ─── Tab config (Requests tab removed) ──────────────────────────────────────
+// ─── Tab config ──────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'all',      label: 'All' },
-  { key: 'match',    label: 'Matches' },
-  { key: 'learning', label: 'Learning' },
+  { key: 'all',                label: 'All' },
+  { key: 'match',              label: 'Match' },
+  { key: 'application_update', label: 'Application Update' },
+  { key: 'learning',           label: 'Learning' },
+  { key: 'message',            label: 'Message' },
 ];
 
-// ─── Type → icon ───────────────────────────────────────────────────────────────
+// ─── Type → icon ─────────────────────────────────────────────────────────────
 const TYPE_ICONS = {
   message:            'chatbubble-outline',
   match:              'sparkles-outline',
@@ -59,10 +61,16 @@ const TYPE_COLORS = {
   job_alert:          '#F97316',
 };
 
-
+// ─── Action buttons ──────────────────────────────────────────────────────────
 const getActions = (notif) => {
   const type = notif?.type;
   const meta = notif?.metadata || {};
+
+  // No "Open" button for application notifications (matches web client)
+  if (type === 'application_update' || type === 'application') {
+    return null;
+  }
+
   switch (type) {
     case 'match':
       if (meta.readyToApply && meta.opportunityId) {
@@ -70,21 +78,23 @@ const getActions = (notif) => {
       }
       return { primary: { label: 'View', nav: 'Discover' } };
     case 'job_alert':
-    case 'opportunity':       return { primary: { label: 'View',   nav: 'Discover' } };
-    case 'application_update':
-    case 'application':       return { primary: { label: 'Open',   nav: 'ApplicationDetails' } };
+    case 'opportunity':
+      return { primary: { label: 'View', nav: 'Discover' } };
     case 'learning':
       return meta.kind === 'completed'
-        ? { primary: { label: 'View',  nav: 'Learning' } }
+        ? { primary: { label: 'View', nav: 'Learning' } }
         : { primary: { label: 'Start', nav: 'Learning' } };
-    case 'fraud_alert':       return { primary: { label: 'Report', nav: 'FraudReport' } };
+    case 'fraud_alert':
+      return { primary: { label: 'Report', nav: 'FraudReport' } };
     case 'connection_request':
       return {
         primary:   { label: 'Accept',  action: 'accept' },
         secondary: { label: 'Decline', action: 'decline' },
       };
-    case 'message':           return { primary: { label: 'Reply',  nav: 'Chat' } };
-    default:                  return null;
+    case 'message':
+      return { primary: { label: 'Reply', nav: 'Chat' } };
+    default:
+      return null;
   }
 };
 
@@ -103,19 +113,18 @@ const formatTimeAgo = (timestamp) => {
   return date.toLocaleDateString('en-UG', { month: 'short', day: 'numeric' });
 };
 
-// ─── Main component (forwardRef) ───────────────────────────────────────────────
+// ─── Main component ──────────────────────────────────────────────────────────
 const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref) => {
   const { logout, setUnreadNotificationCount } = useAuth();
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading]       = useState(true);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState(null);
+  const [error, setError] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [page, setPage]             = useState(1);
-  const [hasMore, setHasMore]       = useState(true);
-  const [activeTab, setActiveTab]   = useState('all');
-  
-  // Image preview modal state
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [activeTab, setActiveTab] = useState('all');
+
   const [previewImage, setPreviewImage] = useState(null);
   const [previewUserName, setPreviewUserName] = useState('');
 
@@ -155,14 +164,13 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   }, [logout, setUnreadNotificationCount]);
 
-  // ─── Refresh on focus ────────────────────────────────────────────────────────
+  // ─── Refresh on focus ──────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       fetchNotifications(1, false);
     }, [fetchNotifications])
   );
 
-  // ─── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchNotifications(1, false);
   }, []);
@@ -181,12 +189,11 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   };
 
- 
   useImperativeHandle(ref, () => ({
     refresh: onRefresh,
   }));
 
-  // ── CRUD helpers ──────────────────────────────────────────────────────────────
+  // ─── CRUD helpers ──────────────────────────────────────────────────────────
   const markAsRead = async (notifId) => {
     try {
       const token = await getToken();
@@ -242,7 +249,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     ]);
   };
 
-  // ── Connection request actions ────────────────────────────────────────────────
+  // ── Connection request actions ────────────────────────────────────────────
   const handleConnectionAction = async (notifId, action) => {
     try {
       const token = await getToken();
@@ -268,7 +275,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     } catch { Alert.alert('Error', `Failed to ${action} request`); }
   };
 
-  // ── Navigation helper ─────────────────────────────────────────────────────────
+  // ─── Navigation helpers ────────────────────────────────────────────────────
   const navigateToRootTab = (screenName, params = {}) => {
     navigation.getParent()?.navigate(screenName, params);
   };
@@ -284,7 +291,6 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
     navigation.navigate('Chat', { userId, userName, userAvatar });
   };
-
 
   const navigateToLearning = (meta = {}) => {
     navigation.getParent()?.navigate('HomeTab', {
@@ -347,7 +353,6 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
         if (meta.opportunityId) navigateToOpportunityDetail(meta.opportunityId);
         break;
       case 'match':
-      
         if (meta.readyToApply && meta.opportunityId) {
           navigateToOpportunityDetail(meta.opportunityId);
         } else {
@@ -368,22 +373,21 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     }
   };
 
-  
   const handleAvatarPress = (imageUrl, userName) => {
     if (!imageUrl) return;
-    const resolvedUrl = imageUrl.startsWith('http') 
-      ? imageUrl 
+    const resolvedUrl = imageUrl.startsWith('http')
+      ? imageUrl
       : `${BASE_URL.replace('/api', '')}/${imageUrl.replace(/^\//, '')}`;
     setPreviewImage(resolvedUrl);
     setPreviewUserName(userName);
   };
 
-  // ── Filter by tab ─────────────────────────────────────────────────────────────
+  // ─── Filter by tab ─────────────────────────────────────────────────────────
   const filtered = activeTab === 'all'
     ? notifications
     : notifications.filter(n => n.type === activeTab);
 
-  // Image Preview Modal
+  // ─── Image Preview Modal ──────────────────────────────────────────────────
   const ImagePreviewModal = () => (
     <Modal visible={!!previewImage} transparent animationType="fade" onRequestClose={() => setPreviewImage(null)}>
       <TouchableOpacity style={styles.imagePreviewOverlay} activeOpacity={1} onPress={() => setPreviewImage(null)}>
@@ -394,33 +398,23 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
               <Ionicons name="close-circle" size={32} color="#fff" />
             </TouchableOpacity>
           </View>
-          <Image 
-            source={{ uri: previewImage }} 
-            style={styles.imagePreviewFull} 
-            resizeMode="contain"
-          />
+          <Image source={{ uri: previewImage }} style={styles.imagePreviewFull} resizeMode="contain" />
         </View>
       </TouchableOpacity>
     </Modal>
   );
 
-  // ── Render helpers ────────────────────────────────────────────────────────────
+  // ─── Render helpers ────────────────────────────────────────────────────────
   const renderIcon = (item) => {
-    const type    = item.type || 'system';
-    const isRead  = item.isRead || item.read;
-    const color   = isRead ? '#9CA3AF' : (TYPE_COLORS[type] || '#F97316');
+    const type = item.type || 'system';
+    const isRead = item.isRead || item.read;
+    const color = isRead ? '#9CA3AF' : (TYPE_COLORS[type] || '#F97316');
     const bgColor = type === 'fraud_alert' ? '#FEF2F2' : isRead ? '#F3F4F6' : `${color}18`;
 
     if (type === 'connection_request' && item.metadata?.senderPhoto) {
       return (
-        <TouchableOpacity 
-          onPress={() => handleAvatarPress(item.metadata.senderPhoto, item.metadata.senderName || 'User')}
-          activeOpacity={0.8}
-        >
-          <Image
-            source={{ uri: item.metadata.senderPhoto }}
-            style={styles.avatarImg}
-          />
+        <TouchableOpacity onPress={() => handleAvatarPress(item.metadata.senderPhoto, item.metadata.senderName || 'User')}>
+          <Image source={{ uri: item.metadata.senderPhoto }} style={styles.avatarImg} />
         </TouchableOpacity>
       );
     }
@@ -455,16 +449,10 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
       }
       return (
         <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.btnPrimary}
-            onPress={() => handleConnectionAction(notifId, 'accept')}
-          >
+          <TouchableOpacity style={styles.btnPrimary} onPress={() => handleConnectionAction(notifId, 'accept')}>
             <Text style={styles.btnPrimaryText}>Accept</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.btnSecondary}
-            onPress={() => handleConnectionAction(notifId, 'decline')}
-          >
+          <TouchableOpacity style={styles.btnSecondary} onPress={() => handleConnectionAction(notifId, 'decline')}>
             <Text style={styles.btnSecondaryText}>Decline</Text>
           </TouchableOpacity>
         </View>
@@ -474,22 +462,17 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     if (item.type === 'fraud_alert') {
       return (
         <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.btnDanger}
-            onPress={() => navigateForNotif(item, actions.primary.nav)}
-          >
+          <TouchableOpacity style={styles.btnDanger} onPress={() => navigateForNotif(item, actions.primary.nav)}>
             <Text style={styles.btnPrimaryText}>{actions.primary.label}</Text>
           </TouchableOpacity>
         </View>
       );
     }
 
+    // For other types (match, learning, etc.) show the primary button
     return (
       <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={styles.btnPrimary}
-          onPress={() => navigateForNotif(item, actions.primary.nav)}
-        >
+        <TouchableOpacity style={styles.btnPrimary} onPress={() => navigateForNotif(item, actions.primary.nav)}>
           <Text style={styles.btnPrimaryText}>{actions.primary.label}</Text>
         </TouchableOpacity>
       </View>
@@ -498,9 +481,9 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
 
   const renderNotification = ({ item }) => {
     const notifId = item._id || item.id;
-    const isRead  = item.isRead || item.read;
-    const type    = item.type || 'system';
-    const title   = item.title || '';
+    const isRead = item.isRead || item.read;
+    const type = item.type || 'system';
+    const title = item.title || '';
     const message = item.content || item.message || item.text || '';
     const isFraud = type === 'fraud_alert';
 
@@ -550,7 +533,7 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
     return null;
   };
 
-  // ── Main render ────────────────────────────────────────────────────────────────
+  // ─── Main render ───────────────────────────────────────────────────────────
   if (loading && notifications.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -654,17 +637,15 @@ const NotificationsScreen = forwardRef(({ navigation, hideHeader = false }, ref)
           }
         />
       </SafeAreaView>
-      
       <ImagePreviewModal />
     </>
   );
 });
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#F9FAFB' },
-  center:      { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
- 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -675,9 +656,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
-  headerBtn:      { width: 60, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { width: 60, alignItems: 'center', justifyContent: 'center' },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  headerTitle:    { fontSize: 18, fontWeight: '600', color: '#1F2937' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937' },
   badge: {
     marginLeft: 6,
     backgroundColor: '#EF4444',
@@ -688,10 +669,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
   },
-  badgeText:   { fontSize: 10, fontWeight: '700', color: '#FFF' },
-  readAllText: { fontSize: 13, color: '#F97316', fontWeight: '600' }, // kept for compatibility
+  badgeText: { fontSize: 10, fontWeight: '700', color: '#FFF' },
 
-  // Tab bar
   tabBar: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
@@ -705,11 +684,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#F3F4F6',
   },
-  tabActive:     { backgroundColor: '#F97316' },
-  tabText:       { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  tabActive: { backgroundColor: '#F97316' },
+  tabText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
   tabTextActive: { color: '#FFFFFF' },
 
-  
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -723,10 +701,8 @@ const styles = StyleSheet.create({
   errorText: { flex: 1, fontSize: 13, color: '#EF4444' },
   retryText: { fontSize: 13, color: '#F97316', fontWeight: '600' },
 
-  // List
   listContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 12 },
 
-  
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -752,7 +728,6 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, marginRight: 8 },
   cardRight: { alignItems: 'flex-end', gap: 4 },
 
- 
   iconWrap: {
     width: 42,
     height: 42,
@@ -769,7 +744,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
   },
 
-  // Card text
   cardTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -788,7 +762,7 @@ const styles = StyleSheet.create({
   cardTime: { fontSize: 11, color: '#9CA3AF', marginTop: 4 },
 
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#F97316' },
-  closeBtn:  { padding: 2 },
+  closeBtn: { padding: 2 },
 
   actionRow: {
     flexDirection: 'row',
@@ -819,33 +793,30 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
 
-
   outcomePill: {
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 5,
   },
-  pillGreen:     { backgroundColor: '#D1FAE5' },
+  pillGreen: { backgroundColor: '#D1FAE5' },
   pillGreenText: { fontSize: 12, fontWeight: '600', color: '#065F46' },
-  pillGray:      { backgroundColor: '#F3F4F6' },
-  pillGrayText:  { fontSize: 12, fontWeight: '600', color: '#6B7280' },
+  pillGray: { backgroundColor: '#F3F4F6' },
+  pillGrayText: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
 
-  // Footer & empty
-  footerLoader:     { paddingVertical: 20, alignItems: 'center' },
-  emptyContainer:   { alignItems: 'center', paddingVertical: 56 },
-  emptyTitle:       { fontSize: 16, fontWeight: '600', color: '#1F2937', marginTop: 12, marginBottom: 6 },
-  emptyText:        { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 24 },
+  footerLoader: { paddingVertical: 20, alignItems: 'center' },
+  emptyContainer: { alignItems: 'center', paddingVertical: 56 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937', marginTop: 12, marginBottom: 6 },
+  emptyText: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 24 },
 
-  // Image Preview Modal Styles
   imagePreviewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' },
   imagePreviewContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  imagePreviewHeader: { 
-    position: 'absolute', 
-    top: 50, 
-    left: 0, 
-    right: 0, 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  imagePreviewHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
     zIndex: 1,

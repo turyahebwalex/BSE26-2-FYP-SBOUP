@@ -11,7 +11,7 @@ const reportSchema = new mongoose.Schema(
     targetType: {
       type: String,
       required: true,
-      enum: ['opportunity', 'user', 'message'],
+      enum: ['opportunity', 'user', 'message', 'company'],
     },
     reason: {
       type: String,

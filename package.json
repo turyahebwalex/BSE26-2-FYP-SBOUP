@@ -1,7 +1,8 @@
 {
   "dependencies": {
     "multer": "^2.1.1",
-    "nodemailer": "^8.0.7"
+    "nodemailer": "^8.0.7",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "expo-module-scripts": "^56.0.3"

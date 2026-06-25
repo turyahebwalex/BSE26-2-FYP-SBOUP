@@ -19,9 +19,7 @@ const userSchema = new mongoose.Schema(
     passwordHash: {
       type: String,
       required: [true, 'Password is required'],
-      maxlength: 255, // FIXED: was 60 — bcrypt hashes are 60 chars but
-                      // give headroom for future algorithm changes and to
-                      // prevent Mongoose validation from tripping on edge cases
+      maxlength: 255,
       select: true,
     },
     role: {
@@ -46,8 +44,17 @@ const userSchema = new mongoose.Schema(
     },
     accountStatus: {
       type: String,
-      enum: ['active', 'locked', 'suspended', 'deactivated'],
+      // 'warned'  – account is active but has a formal warning on record
+      // 'banned'  – permanent ban, cannot log in or use the platform
+      enum: ['active', 'locked', 'suspended', 'warned', 'banned'],
       default: 'active',
+    },
+    // Set by admin when applying a moderation action (warn/suspend/ban).
+    // Included in the notification so the user knows the specific reason.
+    moderationNote: {
+      type: String,
+      maxlength: 500,
+      default: null,
     },
     failedAttempts: {
       type: Number,
@@ -121,22 +128,8 @@ userSchema.index({ socketIds: 1 });
 userSchema.index({ fullName: 'text' });
 
 // ── Password hashing ──────────────────────────────────────────────────────────
-//
-// FIXED: Use a dedicated flag (`_passwordNeedsHashing`) instead of relying
-// solely on `isModified('passwordHash')`.
-//
-// The old approach called `this.save()` inside incrementFailedAttempts() and
-// resetFailedAttempts(). Even though passwordHash wasn't intentionally changed,
-// Mongoose could mark it as modified on a freshly-fetched document, causing the
-// pre-save hook to hash an already-hashed value (hash-of-a-hash). The next
-// login then always fails because comparePassword gets the wrong stored value.
-//
-// The fix: use updateOne() in the attempt helpers so pre('save') never fires
-// for non-password changes. The pre('save') hook only runs on explicit password
-// assignment (register, reset password).
 
 userSchema.pre('save', async function (next) {
-  // Only hash if passwordHash was explicitly set to a plaintext value
   if (!this.isModified('passwordHash')) return next();
   if (this.oauthProvider && this.passwordHash === 'oauth-no-password') return next();
 
@@ -156,8 +149,6 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.passwordHash);
 };
 
-// FIXED: Use updateOne() so pre('save') is NOT triggered.
-// This prevents the double-hash bug that corrupted passwords after failed logins.
 userSchema.methods.incrementFailedAttempts = async function () {
   const limit = parseInt(process.env.MAX_LOGIN_ATTEMPTS, 10) || 5;
   const newCount = this.failedAttempts + 1;
@@ -173,27 +164,35 @@ userSchema.methods.incrementFailedAttempts = async function () {
     }
   );
 
-  // Keep in-memory values consistent so auth controller can read them
   this.failedAttempts = newCount;
   if (shouldLock) this.accountStatus = 'locked';
 };
 
-// FIXED: Use updateOne() here too — same reason.
 userSchema.methods.resetFailedAttempts = async function () {
+  // Only reset status to 'active' if it was 'locked' (login-lock due to failed
+  // attempts). Do NOT override admin-applied moderation statuses like 'warned',
+  // 'suspended', or 'banned' — those must be lifted by an admin explicitly.
+  const moderationStatuses = ['warned', 'suspended', 'banned'];
+  const statusUpdate = moderationStatuses.includes(this.accountStatus)
+    ? {}
+    : { accountStatus: 'active' };
+
   await this.constructor.updateOne(
     { _id: this._id },
     {
       $set: {
         failedAttempts: 0,
         lastLoginAt: new Date(),
-        accountStatus: 'active', // unlock if it was locked
+        ...statusUpdate,
       },
     }
   );
 
   this.failedAttempts = 0;
   this.lastLoginAt    = new Date();
-  this.accountStatus  = 'active';
+  if (!moderationStatuses.includes(this.accountStatus)) {
+    this.accountStatus = 'active';
+  }
 };
 
 // ── Messaging methods ─────────────────────────────────────────────────────────
@@ -216,7 +215,9 @@ userSchema.methods.updateOnlineStatus = async function (isOnline, socketId = nul
 
 userSchema.methods.canReceiveFrom = function (senderId) {
   if (this.blockedUsers.includes(senderId)) return false;
-  if (this.accountStatus !== 'active') return false;
+  // 'warned' users are still active on the platform — only hard blocks apply.
+  const blockedStatuses = ['suspended', 'banned', 'locked'];
+  if (blockedStatuses.includes(this.accountStatus)) return false;
   return true;
 };
 

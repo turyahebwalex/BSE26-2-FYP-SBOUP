@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { messageAPI, profileAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
-import { FiArrowLeft, FiTrash2 } from 'react-icons/fi';
+import { FiArrowLeft, FiTrash2, FiMoreVertical } from 'react-icons/fi';
 import ReportBottomSheet from './ReportBottomSheet';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -210,6 +211,8 @@ const ChatScreen = ({
   const [uploadError, setUploadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [reportTarget, setReportTarget] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
 
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -474,7 +477,30 @@ const ChatScreen = ({
       targetType: 'message',
       targetLabel: `"${msg.content?.substring(0, 30)}${msg.content?.length > 30 ? '...' : ''}"`,
     });
+    setOpenMenuId(null);
   };
+
+  const handleDeleteMessage = async (msg) => {
+    setOpenMenuId(null);
+    try {
+      await messageAPI.deleteMessage(msg._id);
+      setMessages((prev) => prev.filter((m) => m._id !== msg._id));
+    } catch {
+      alert('Failed to delete message');
+    }
+  };
+
+  // Close message menu when clicking outside
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleClick = (e) => {
+      if (!e.target.closest('.msg-menu-container') && !e.target.closest('.msg-menu-portal')) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openMenuId]);
 
   // ─── Render ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -521,7 +547,7 @@ const ChatScreen = ({
             onClick={() => navigate(`/profile/${userId}`)}
             className="text-xs text-orange-500 hover:text-orange-700 font-medium border border-orange-200 rounded-full px-3 py-1 transition hover:bg-orange-50"
           >
-            View Profile
+            View Profile Dah
           </button>
         </div>
       )}
@@ -578,19 +604,20 @@ const ChatScreen = ({
                     </span>
                   )}
                 </div>
-                {!isSent && (
-                  <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      onClick={() => handleReportMessage(msg)}
-                      className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-red-500"
-                      title="Report this message"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                      </svg>
-                    </button>
-                  </div>
-                )}
+                <div className="absolute top-1 right-1 msg-menu-container">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuPos({ top: rect.bottom + 4, left: rect.right - 140 });
+                      setOpenMenuId(openMenuId === msg._id ? null : msg._id);
+                    }}
+                    className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition"
+                    title="Message options"
+                  >
+                    <FiMoreVertical size={14} />
+                  </button>
+                </div>
               </div>
               {isSent && (
                 <div className="flex-shrink-0 mb-1">
@@ -685,6 +712,39 @@ const ChatScreen = ({
           Enter to send · Shift+Enter for new line · Max {MAX_FILE_MB} MB per file
         </p>
       </div>
+
+      {/* Message options dropdown (portal) */}
+      {openMenuId && createPortal(
+        <div
+          className="msg-menu-portal fixed bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-[9999] min-w-[140px]"
+          style={{ top: menuPos.top, left: menuPos.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              const msg = messages.find(m => m._id === openMenuId);
+              if (msg) handleReportMessage(msg);
+            }}
+            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+            </svg>
+            Report Message
+          </button>
+          <button
+            onClick={() => {
+              const msg = messages.find(m => m._id === openMenuId);
+              if (msg) handleDeleteMessage(msg);
+            }}
+            className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+          >
+            <FiTrash2 className="w-4 h-4" />
+            Delete
+          </button>
+        </div>,
+        document.body
+      )}
 
       {/* Report Modal */}
       <ReportBottomSheet

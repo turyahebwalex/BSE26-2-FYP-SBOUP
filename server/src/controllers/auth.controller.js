@@ -50,16 +50,13 @@ const checkCompanyStatus = async (companyIdOrDoc) => {
 // ─── Helper: check user account status ────────────────────────────────────
 const checkUserStatus = (user) => {
   if (user.accountStatus === 'banned') {
-    return { blocked: true, message: 'Your account has been banned. Please contact support.' };
+    return { blocked: true, message: 'Your account has been banned. Please contact admin@skillbridge.ug.' };
   }
   if (user.accountStatus === 'suspended') {
-    return { blocked: true, message: 'Your account has been suspended. Please contact support.' };
+    return { blocked: true, message: 'Your account has been suspended. Please contact admin@skillbridge.ug.' };
   }
   if (user.accountStatus === 'locked') {
     return { blocked: true, message: 'Account is locked. Contact support.' };
-  }
-  if (user.accountStatus === 'deactivated') {
-    return { blocked: true, message: 'Account is deactivated. Contact support.' };
   }
   return { blocked: false };
 };
@@ -146,11 +143,11 @@ exports.login = async (req, res) => {
       const companyStatus = await checkCompanyStatus(user.companyId);
       if (companyStatus === 'banned') {
         await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: 'company_banned' });
-        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin@skillbridge.ug.' });
       }
       if (companyStatus === 'suspended') {
         await logAttempt(req, { userId: user._id, emailAttempted: email, success: false, reason: 'company_suspended' });
-        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin@skillbridge.ug.' });
       }
     }
 
@@ -236,10 +233,10 @@ exports.googleLogin = async (req, res) => {
     if (user.role === 'employer') {
       const companyStatus = await checkCompanyStatus(user.companyId);
       if (companyStatus === 'banned') {
-        return res.status(403).json({ error: 'Your company has been banned. Please contact admin.' });
+        return res.status(403).json({ error: 'Your company has been banned. Please contact admin@skillbridge.ug.' });
       }
       if (companyStatus === 'suspended') {
-        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin.' });
+        return res.status(403).json({ error: 'Your company has been suspended. Please contact admin@skillbridge.ug.' });
       }
     }
 

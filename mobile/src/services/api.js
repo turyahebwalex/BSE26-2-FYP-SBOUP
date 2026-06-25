@@ -222,6 +222,7 @@ export const messageAPI = {
   getConversation: (userId, params) => api.get(`/messages/conversation/${userId}`, { params }),
   getUnreadCount: () => api.get('/messages/unread-count'),
   send: (data) => api.post('/messages', data),
+  deleteMessage: (id) => api.delete(`/messages/${id}`),
 };
 
 // ── Notification ──

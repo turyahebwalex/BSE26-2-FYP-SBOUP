@@ -7,7 +7,6 @@ import {
   FiEye,
   FiArchive,
   FiBriefcase,
-  FiMapPin,
   FiCalendar,
   FiUsers,
   FiAlertTriangle,
@@ -51,10 +50,7 @@ const ManageOpportunitiesPage = () => {
 
   const filtered = useMemo(() => {
     return opportunities.filter((opp) => {
-      const matchesSearch =
-        !search ||
-        opp.title?.toLowerCase().includes(search.toLowerCase()) ||
-        opp.location?.toLowerCase().includes(search.toLowerCase());
+      const matchesSearch = !search || opp.title?.toLowerCase().includes(search.toLowerCase());
       const matchesStatus = !statusFilter || opp.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
@@ -147,7 +143,7 @@ const ManageOpportunitiesPage = () => {
         <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           className="input-field pl-11"
-          placeholder="Search by title or location..."
+          placeholder="Search by title..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -194,11 +190,6 @@ const ManageOpportunitiesPage = () => {
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
-                    {opp.location && (
-                      <span className="flex items-center gap-1">
-                        <FiMapPin className="text-gray-400" /> {opp.location}
-                      </span>
-                    )}
                     {opp.category && (
                       <span className="flex items-center gap-1">
                         <FiBriefcase className="text-gray-400" /> {opp.category}

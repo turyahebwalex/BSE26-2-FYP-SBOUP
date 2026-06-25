@@ -61,6 +61,8 @@ const AdminDashboard = () => {
   const [userPage, setUserPage] = useState(1);
   const [feedbacks, setFeedbacks] = useState({});   // { [oppId]: string }
   const [expandedOpp, setExpandedOpp] = useState(null);
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportActionLoading, setReportActionLoading] = useState({});
 
   useEffect(() => {
     const load = async () => {
@@ -93,7 +95,22 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    if (tab === 'reports') loadReports();
+    if (tab === 'reports') {
+      loadReports();
+
+      const intervalId = window.setInterval(() => {
+        loadReports();
+      }, 10000);
+
+      const onFocus = () => loadReports();
+      window.addEventListener('focus', onFocus);
+
+      return () => {
+        window.clearInterval(intervalId);
+        window.removeEventListener('focus', onFocus);
+      };
+    }
+
     if (tab === 'fraud') loadFraudInsights();
     if (tab === 'model_health') loadModelHealth();
   }, [tab]);
@@ -229,6 +246,76 @@ const AdminDashboard = () => {
     }
   };
 
+  const applyTargetAction = async (report, action) => {
+    const id = report.targetId;
+    const type = report.targetType;
+    if (!id) return;
+    const note = window.prompt(`Reason for ${action} (shown to ${type}):`);
+    if (note === null) return;
+    setReportActionLoading((prev) => ({ ...prev, [report._id]: true }));
+    try {
+      if (type === 'company') {
+        await adminAPI.applyCompanyAction(id, { action, note });
+      } else {
+        await adminAPI.applyUserAction(id, { action, note });
+      }
+      setReports((prev) =>
+        prev.map((r) =>
+          r._id === report._id
+            ? { ...r, status: action === 'reinstate' ? 'dismissed' : 'action_taken' }
+            : r
+        )
+      );
+      toast.success(`${type === 'company' ? 'Company' : 'User'} ${action} applied`);
+    } catch {
+      toast.error(`Failed to ${action} ${type}`);
+    } finally {
+      setReportActionLoading((prev) => ({ ...prev, [report._id]: false }));
+    }
+  };
+
+  const applyMessageAction = async (report, action) => {
+    const id = report.targetId;
+    if (!id) return;
+    setReportActionLoading((prev) => ({ ...prev, [report._id]: true }));
+    try {
+      await adminAPI.applyMessageAction(id, { action });
+      setReports((prev) =>
+        prev.map((r) =>
+          r._id === report._id
+            ? { ...r, status: action === 'leave' ? 'dismissed' : 'action_taken' }
+            : r
+        )
+      );
+      toast.success(`Message ${action === 'remove' ? 'removed' : 'left'}`);
+    } catch {
+      toast.error('Failed to update message');
+    } finally {
+      setReportActionLoading((prev) => ({ ...prev, [report._id]: false }));
+    }
+  };
+
+  const applyOpportunityAction = async (report, action) => {
+    const id = report.targetId;
+    if (!id) return;
+    setReportActionLoading((prev) => ({ ...prev, [report._id]: true }));
+    try {
+      await adminAPI.moderate({ contentId: id, action: action === 'remove' ? 'remove' : 'approve', contentType: 'opportunity', feedback: '' });
+      setReports((prev) =>
+        prev.map((r) =>
+          r._id === report._id
+            ? { ...r, status: action === 'leave' ? 'dismissed' : 'action_taken' }
+            : r
+        )
+      );
+      toast.success(action === 'remove' ? 'Opportunity removed from public view' : 'Opportunity left as is');
+    } catch {
+      toast.error('Failed to update opportunity');
+    } finally {
+      setReportActionLoading((prev) => ({ ...prev, [report._id]: false }));
+    }
+  };
+
   const filteredUsers = useMemo(() => {
     if (!userSearch) return users;
     const q = userSearch.toLowerCase();
@@ -239,6 +326,32 @@ const AdminDashboard = () => {
         u.role?.toLowerCase().includes(q)
     );
   }, [users, userSearch]);
+
+  const visibleReports = useMemo(() => {
+    const sorted = [...reports].sort((a, b) => {
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+
+    const q = reportSearch.trim().toLowerCase();
+    if (!q) return sorted;
+
+    return sorted.filter((r) => {
+      const d = r.targetDetails || {};
+      return (
+        d.fullName?.toLowerCase().includes(q) ||
+        d.name?.toLowerCase().includes(q) ||
+        d.title?.toLowerCase().includes(q) ||
+        d.email?.toLowerCase().includes(q) ||
+        d.content?.toLowerCase().includes(q) ||
+        r.targetType?.toLowerCase().includes(q) ||
+        r.reason?.toLowerCase().includes(q) ||
+        r.reporterId?.fullName?.toLowerCase().includes(q) ||
+        r.reporterId?.email?.toLowerCase().includes(q)
+      );
+    });
+  }, [reports, reportSearch]);
 
   const pagedUsers = useMemo(() => {
     const start = (userPage - 1) * 10;
@@ -1624,70 +1737,203 @@ const AdminDashboard = () => {
       {/* ─── Reports Tab ─── */}
       {tab === 'reports' && (
         <div className="space-y-4">
-          <h2 className="font-semibold text-lg">Content Reports ({reports.length})</h2>
-          {reports.length > 0 ? (
-            reports.map((r) => (
-              <div
-                key={r._id}
-                className={`card border-l-4 ${
-                  r.status === 'pending'
-                    ? 'border-l-yellow-400'
-                    : r.status === 'reviewed'
-                    ? 'border-l-blue-400'
-                    : r.status === 'action_taken'
-                    ? 'border-l-green-400'
-                    : 'border-l-gray-300'
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-semibold text-sm">
-                      {r.targetType}: <span className="text-gray-600">{r.targetId}</span>
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Reported by: {r.reporterId?.fullName || r.reporterId?.email || 'Unknown'} •{' '}
-                      {new Date(r.createdAt).toLocaleDateString()}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-2">{r.reason}</p>
-                  </div>
-                  <span
-                    className={`badge text-xs ${
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-lg">Content Reports ({reports.length})</h2>
+            <div className="relative">
+              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search by target, reason, reporter..."
+                value={reportSearch}
+                onChange={(e) => setReportSearch(e.target.value)}
+                className="input-field !pl-9 !py-1.5 text-sm w-64"
+              />
+            </div>
+          </div>
+          {visibleReports.length > 0 ? (
+            visibleReports.map((r) => {
+                const details = r.targetDetails || {};
+                const targetName =
+                  details.fullName || details.name || details.title || r.targetId;
+                const targetSubLabel =
+                  r.targetType === 'message'
+                    ? `${details.senderId?.fullName || details.senderId?.email || 'Unknown sender'} → ${details.receiverId?.fullName || details.receiverId?.email || 'Unknown recipient'}`
+                    : r.targetType === 'company'
+                    ? details.industry || details.location || ''
+                    : details.email || details.role || '';
+                const isResolved = r.status !== 'pending';
+                const actionsBusy = !!reportActionLoading[r._id];
+
+                return (
+                  <div
+                    key={r._id}
+                    className={`card border-l-4 ${
                       r.status === 'pending'
-                        ? 'bg-yellow-100 text-yellow-700'
+                        ? 'border-l-yellow-400'
                         : r.status === 'reviewed'
-                        ? 'bg-blue-100 text-blue-700'
+                        ? 'border-l-blue-400'
                         : r.status === 'action_taken'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-100 text-gray-600'
+                        ? 'border-l-green-400'
+                        : 'border-l-gray-300'
                     }`}
                   >
-                    {r.status?.replace('_', ' ')}
-                  </span>
-                </div>
-                {r.status === 'pending' && (
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => updateReportStatus(r._id, 'reviewed')}
-                      className="badge bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
-                    >
-                      Mark Reviewed
-                    </button>
-                    <button
-                      onClick={() => updateReportStatus(r._id, 'action_taken')}
-                      className="badge bg-green-100 text-green-700 cursor-pointer hover:bg-green-200"
-                    >
-                      Action Taken
-                    </button>
-                    <button
-                      onClick={() => updateReportStatus(r._id, 'dismissed')}
-                      className="badge bg-gray-100 text-gray-600 cursor-pointer hover:bg-gray-200"
-                    >
-                      Dismiss
-                    </button>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold text-sm">
+                          {r.targetType}: <span className="text-gray-600">{targetName}</span>
+                        </p>
+                        {targetSubLabel && (
+                          <p className="text-xs text-gray-400 mt-0.5">{targetSubLabel}</p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                          Reported by: {r.reporterId?.fullName || r.reporterId?.email || 'Unknown'} •{' '}
+                          {new Date(r.createdAt).toLocaleDateString()}
+                        </p>
+                        <p className="text-sm text-gray-600 mt-2">{r.reason?.replace(/_/g, ' ')}</p>
+                        {r.details && (
+                          <p className="text-xs text-gray-500 mt-1 italic">"{r.details}"</p>
+                        )}
+                        {(r.targetType === 'user' || r.targetType === 'company') && (
+                          <div className="mt-2">
+                            <Link
+                              to={`/admin/target/${r.targetType}/${r.targetId}`}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              View {r.targetType === 'company' ? 'company' : 'user'} details
+                            </Link>
+                          </div>
+                        )}
+                        {r.targetType === 'opportunity' && (
+                          <div className="mt-2">
+                            <Link
+                              to={`/admin/opportunities/${r.targetId}/review`}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              Review opportunity
+                            </Link>
+                          </div>
+                        )}
+                        {r.targetType === 'message' && details.content && (
+                          <div className="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-100">
+                            <p className="text-xs text-gray-500 mb-0.5">Reported message:</p>
+                            <p className="text-sm text-gray-700">{details.content}</p>
+                          </div>
+                        )}
+                      </div>
+                      <span
+                        className={`badge text-xs shrink-0 ${
+                          r.status === 'pending'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : r.status === 'reviewed'
+                            ? 'bg-blue-100 text-blue-700'
+                            : r.status === 'action_taken'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {r.status?.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    {/* ── Generic status controls (always available) ── */}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {r.status === 'pending' && (
+                        <button
+                          onClick={() => updateReportStatus(r._id, 'reviewed')}
+                          className="badge bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
+                        >
+                          Mark Reviewed
+                        </button>
+                      )}
+                      {r.status !== 'dismissed' && (
+                        <button
+                          onClick={() => updateReportStatus(r._id, 'dismissed')}
+                          className="badge bg-gray-100 text-gray-600 cursor-pointer hover:bg-gray-200"
+                        >
+                          Dismiss
+                        </button>
+                      )}
+                    </div>
+
+                    {/* ── Target-specific moderation actions ── */}
+                    {r.targetType === 'opportunity' && (
+                      <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-xs text-gray-400 self-center mr-1">Opportunity action:</span>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyOpportunityAction(r, 'remove')}
+                          className="badge bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyOpportunityAction(r, 'leave')}
+                          className="badge bg-gray-100 text-gray-600 cursor-pointer hover:bg-gray-200 disabled:opacity-50"
+                        >
+                          Leave as is
+                        </button>
+                      </div>
+                    )}
+
+                    {(r.targetType === 'user' || r.targetType === 'company') && (
+                      <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-xs text-gray-400 self-center mr-1">Account action:</span>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyTargetAction(r, 'warn')}
+                          className="badge bg-amber-50 text-amber-700 cursor-pointer hover:bg-amber-100 disabled:opacity-50"
+                        >
+                          Warn
+                        </button>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyTargetAction(r, 'suspend')}
+                          className="badge bg-orange-50 text-orange-700 cursor-pointer hover:bg-orange-100 disabled:opacity-50"
+                        >
+                          Suspend
+                        </button>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyTargetAction(r, 'ban')}
+                          className="badge bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 disabled:opacity-50"
+                        >
+                          Ban
+                        </button>
+                        {isResolved && (
+                          <button
+                            disabled={actionsBusy}
+                            onClick={() => applyTargetAction(r, 'reinstate')}
+                            className="badge bg-green-50 text-green-700 cursor-pointer hover:bg-green-100 disabled:opacity-50"
+                          >
+                            Reinstate
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {r.targetType === 'message' && (
+                      <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-xs text-gray-400 self-center mr-1">Message action:</span>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyMessageAction(r, 'remove')}
+                          className="badge bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 disabled:opacity-50"
+                        >
+                          Remove message
+                        </button>
+                        <button
+                          disabled={actionsBusy}
+                          onClick={() => applyMessageAction(r, 'leave')}
+                          className="badge bg-gray-100 text-gray-600 cursor-pointer hover:bg-gray-200 disabled:opacity-50"
+                        >
+                          Leave as-is
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))
+                );
+              })
           ) : (
             <div className="card text-center py-12">
               <FiFlag size={32} className="mx-auto text-gray-300 mb-3" />

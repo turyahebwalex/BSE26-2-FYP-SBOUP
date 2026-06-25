@@ -389,7 +389,7 @@ const CompanyProfileScreen = ({ route, navigation }) => {
         visible={showReport}
         onClose={() => setShowReport(false)}
         targetId={companyId}
-        targetType="user"
+        targetType="company"
         targetLabel={company?.name ? `"${company.name}"` : 'this company'}
       />
     </>

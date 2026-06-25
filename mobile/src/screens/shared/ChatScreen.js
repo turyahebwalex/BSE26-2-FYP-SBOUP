@@ -75,6 +75,7 @@ const ChatScreen = ({ route, navigation }) => {
   const [previewImage, setPreviewImage] = useState(null);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
+  const [selectedMessage, setSelectedMessage] = useState(null);
 
   const flatListRef       = useRef(null);
   const typingTimeoutRef  = useRef(null);
@@ -82,6 +83,7 @@ const ChatScreen = ({ route, navigation }) => {
   // ─── Report helpers ──────────────────────────────────────────────────────────
   const openReportUser = () => {
     setShowContextMenu(false);
+    setSelectedMessage(null);
     setReportTarget({
       targetId:    userId,
       targetType:  'user',
@@ -90,6 +92,8 @@ const ChatScreen = ({ route, navigation }) => {
   };
 
   const openReportMessage = (msg) => {
+    setShowContextMenu(false);
+    setSelectedMessage(null);
     setReportTarget({
       targetId:    msg._id,
       targetType:  'message',
@@ -97,7 +101,23 @@ const ChatScreen = ({ route, navigation }) => {
     });
   };
 
+  const deleteMessage = async (msg) => {
+    setShowContextMenu(false);
+    setSelectedMessage(null);
+    try {
+      await messageAPI.deleteMessage(msg._id);
+      setMessages((prev) => prev.filter((m) => m._id !== msg._id));
+    } catch {
+      Alert.alert('Error', 'Failed to delete message');
+    }
+  };
+
   const closeReport = () => setReportTarget(null);
+
+  const onMessageLongPress = (msg) => {
+    setSelectedMessage(msg);
+    setShowContextMenu(true);
+  };
 
   // ─── Profile image viewer ─────────────────────────────────────────────────────
   const viewProfileImage = () => {
@@ -600,7 +620,7 @@ const ChatScreen = ({ route, navigation }) => {
         )}
 
         <TouchableWithoutFeedback
-          onLongPress={() => canReport && openReportMessage(item)}
+          onLongPress={() => onMessageLongPress(item)}
           delayLongPress={450}
         >
           <View style={[
@@ -621,7 +641,7 @@ const ChatScreen = ({ route, navigation }) => {
               {isSent && <MessageStatusIcon status={item.status} />}
             </View>
             {canReport && isLastInGroup && (
-              <Text style={styles.longPressHint}>Hold to report</Text>
+              <Text style={styles.longPressHint}>Hold for options</Text>
             )}
           </View>
         </TouchableWithoutFeedback>
@@ -727,6 +747,7 @@ const ChatScreen = ({ route, navigation }) => {
       socketService.on('typing_status',       (data) => { if (data.userId === userId) setUserTyping(data.isTyping); });
       socketService.on('message_delivered',    (data) => { setMessages((prev) => prev.map((msg) => data.messageIds?.includes(msg._id) ? { ...msg, status: 'delivered' } : msg)); });
       socketService.on('message_read_receipt', (data) => { setMessages((prev) => prev.map((msg) => data.messageIds?.includes(msg._id) ? { ...msg, readStatus: true, status: 'read' } : msg)); });
+      socketService.on('message_deleted',      (data) => { setMessages((prev) => prev.filter((msg) => msg._id !== data.messageId)); });
 
       try {
         const { data } = await api.get(`/users/status/${userId}`);
@@ -740,6 +761,7 @@ const ChatScreen = ({ route, navigation }) => {
       socketService.off('typing_status');
       socketService.off('message_read_receipt');
       socketService.off('message_delivered');
+      socketService.off('message_deleted');
       socketService.off('user_status_changed');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
@@ -811,10 +833,31 @@ const ChatScreen = ({ route, navigation }) => {
         onPress={() => setShowContextMenu(false)}
       >
         <View style={styles.contextMenu}>
-          <TouchableOpacity style={styles.contextMenuItem} onPress={openReportUser}>
-            <Ionicons name="flag-outline" size={18} color="#EF4444" />
-            <Text style={styles.contextMenuText}>Report {userName || 'User'}</Text>
-          </TouchableOpacity>
+          {selectedMessage ? (
+            <>
+              {selectedMessage.senderId !== currentUserId && (
+                <TouchableOpacity
+                  style={styles.contextMenuItem}
+                  onPress={() => openReportMessage(selectedMessage)}
+                >
+                  <Ionicons name="flag-outline" size={18} color="#EF4444" />
+                  <Text style={styles.contextMenuText}>Report Message</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.contextMenuItem}
+                onPress={() => deleteMessage(selectedMessage)}
+              >
+                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                <Text style={styles.contextMenuText}>Delete</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.contextMenuItem} onPress={openReportUser}>
+              <Ionicons name="flag-outline" size={18} color="#EF4444" />
+              <Text style={styles.contextMenuText}>Report {userName || 'User'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </TouchableOpacity>
     </Modal>

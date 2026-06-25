@@ -884,9 +884,9 @@ exports.changePassword = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 exports.deactivateAccount = async (req, res) => {
   try {
-    await User.findByIdAndUpdate(req.user._id, { accountStatus: 'deactivated' });
-    res.json({ message: 'Account deactivated.' });
+    await User.findByIdAndUpdate(req.user._id, { accountStatus: 'suspended' });
+    res.json({ message: 'Account suspended.' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to deactivate account.' });
+    res.status(500).json({ error: 'Failed to suspend account.' });
   }
 };

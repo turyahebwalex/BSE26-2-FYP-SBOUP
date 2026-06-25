@@ -2,7 +2,12 @@ const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     type: {
       type: String,
       enum: [
@@ -17,7 +22,8 @@ const notificationSchema = new mongoose.Schema(
         'reminder',
         'mention',
         'job_alert',
-        'moderation' 
+        'moderation',      // admin-facing: new report, moderation case opened, etc.
+        'account_status',  // user-facing: warn, suspend, ban, reinstate on their own account
       ],
       required: true,
     },
@@ -31,7 +37,7 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index for efficient unread count queries
+// Efficient unread count queries
 notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

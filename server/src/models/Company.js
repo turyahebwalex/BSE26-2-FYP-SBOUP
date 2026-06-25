@@ -33,14 +33,30 @@ const companySchema = new mongoose.Schema(
     location: { type: String, maxlength: 200 },
     contactEmail: { type: String, lowercase: true, maxlength: 255 },
     contactPhone: { type: String, maxlength: 20 },
+    // ✅ NEW: link to the user who owns/created this company
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
     verificationStatus: {
       type: String,
       enum: ['unverified', 'pending', 'verified', 'rejected'],
       default: 'unverified',
     },
+    moderationStatus: {
+      type: String,
+      enum: ['active', 'warned', 'suspended', 'banned'],
+      default: 'active',
+    },
+    moderationNote: {
+      type: String,
+      maxlength: 500,
+      default: null,
+    },
     trustScore: { type: Number, min: 0, max: 100, default: 50 },
     avatarBase64: {
-      type: String,   // base64-encoded logo/photo stored directly in MongoDB
+      type: String,
       default: null,
     },
   },
@@ -48,6 +64,8 @@ const companySchema = new mongoose.Schema(
 );
 
 companySchema.index({ verificationStatus: 1 });
+companySchema.index({ moderationStatus: 1 });
 companySchema.index({ industry: 1 });
+companySchema.index({ userId: 1 }); 
 
 module.exports = mongoose.model('Company', companySchema);

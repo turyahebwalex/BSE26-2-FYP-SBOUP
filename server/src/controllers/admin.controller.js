@@ -4,7 +4,10 @@ const Application = require('../models/Application');
 const Report = require('../models/Report');
 const Profile = require('../models/Profile');
 const FraudLog = require('../models/FraudLog');
+const Company = require('../models/Company');
+const Message = require('../models/Message');
 const opportunityController = require('./opportunity.controller');
+const notificationService = require('../services/notification.service');
 const logger = require('../utils/logger');
 
 const FRAUD_LOW = parseInt(process.env.FRAUD_LOW_THRESHOLD, 10) || 30;
@@ -255,6 +258,16 @@ exports.getUsers = async (req, res) => {
     res.json({ users, pagination: { page: Number(page), limit: Number(limit), total } });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+};
+
+exports.getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select('-passwordHash');
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user.' });
   }
 };
 
@@ -720,5 +733,259 @@ exports.getTrainingExport = async (req, res) => {
   } catch (error) {
     logger.error('Training export proxy error:', error);
     res.status(500).json({ error: 'Failed to fetch training export data.' });
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// ─── Report-driven moderation actions (user / company / message) ────────
+// ════════════════════════════════════════════════════════════════════════
+
+const ACCOUNT_STATUS_VALUES = ['active', 'warned', 'suspended', 'banned'];
+
+/**
+ * POST /admin/users/:userId/action
+ * body: { action: 'warn' | 'suspend' | 'ban' | 'reinstate', reportId?, note? }
+ * Applies a moderation action to a User account (skilled_worker or employer),
+ * optionally linked to the Report that triggered it, and writes an AuditLog.
+ */
+exports.applyUserAction = async (req, res) => {
+  try {
+    const { action, reportId, note } = req.body;
+    const actionMap = {
+      warn: 'warned',
+      suspend: 'suspended',
+      ban: 'banned',
+      reinstate: 'active',
+    };
+
+    const newStatus = actionMap[action];
+    if (!newStatus) {
+      return res.status(400).json({ error: `Invalid action. Must be one of: ${Object.keys(actionMap).join(', ')}` });
+    }
+
+    let user = await User.findById(req.params.userId).select('-passwordHash');
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    if (action === 'reinstate' && user.accountStatus === 'banned') {
+      return res.status(403).json({ error: 'Banned accounts cannot be reinstated. This action is permanent.' });
+    }
+
+    user = await User.findByIdAndUpdate(
+      req.params.userId,
+      {
+        accountStatus: newStatus,
+        ...(note ? { moderationNote: note } : {}),
+      },
+      { new: true }
+    ).select('-passwordHash');
+
+    // If this action was taken in response to a report, update that report's status too.
+    if (reportId) {
+      await Report.findByIdAndUpdate(reportId, {
+        status: action === 'reinstate' ? 'dismissed' : 'action_taken',
+      });
+    }
+
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        adminId: req.user._id,
+        action: `user_${action}`,
+        targetType: 'user',
+        targetId: user._id,
+        notes: note || '',
+        metadata: { reportId: reportId || null, previousStatus: user.accountStatus },
+      });
+    } catch (err) {
+      logger.warn(`Audit log failed for user action: ${err.message}`);
+    }
+
+    // Notify the user about the action taken on their account.
+    const notificationCopy = {
+      warn:      { title: 'Account Warning',    content: `Your account has received a formal warning from our moderation team due to a violation of platform rules.${note ? ` Reason: ${note}.` : ''} Further violations may result in suspension.` },
+      suspend:   { title: 'Account Suspended',  content: `Your account has been temporarily suspended due to a violation of platform rules.${note ? ` Reason: ${note}.` : ''} Contact admin@skillbridge.ug if you believe this is an error.` },
+      ban:       { title: 'Account Banned',     content: `Your account has been permanently banned due to serious or repeated violations of platform rules.${note ? ` Reason: ${note}.` : ''} This action is not reversible.` },
+      reinstate: { title: 'Account Reinstated', content: 'Your account has been reviewed and reinstated. You can now access the platform again. Please ensure you comply with platform rules going forward.' },
+    };
+    const copy = notificationCopy[action];
+    if (copy) {
+      try {
+        await notificationService.create({
+          userId: user._id,
+          type: 'account_status',
+          title: copy.title,
+          content: copy.content,
+          metadata: { action, reportId: reportId || null },
+        });
+      } catch (err) {
+        logger.warn(`Notification failed for user action: ${err.message}`);
+      }
+    }
+
+    logger.info(`Admin ${req.user._id} performed ${action} on user ${user._id}`);
+    res.json({ message: `User ${action === 'reinstate' ? 'reinstated' : action + 'ed'}.`, user });
+  } catch (error) {
+    logger.error('Apply user action error:', error);
+    res.status(500).json({ error: 'Failed to apply action to user.' });
+  }
+};
+
+/**
+ * POST /admin/companies/:companyId/action
+ * body: { action: 'warn' | 'suspend' | 'ban' | 'reinstate', reportId?, note? }
+ * Applies a moderation action to a Company profile. Companies don't have an
+ * accountStatus field (they use verificationStatus for verification, separate
+ * from moderation), so we track moderation state via verificationStatus +
+ * a dedicated moderationStatus-style mapping to keep this self-contained.
+ */
+exports.applyCompanyAction = async (req, res) => {
+  try {
+    const { action, reportId, note } = req.body;
+    const actionMap = {
+      warn: 'warned',
+      suspend: 'suspended',
+      ban: 'banned',
+      reinstate: 'active',
+    };
+
+    const newStatus = actionMap[action];
+    if (!newStatus) {
+      return res.status(400).json({ error: `Invalid action. Must be one of: ${Object.keys(actionMap).join(', ')}` });
+    }
+
+    let company = await Company.findById(req.params.companyId);
+    if (!company) return res.status(404).json({ error: 'Company not found.' });
+    if (action === 'reinstate' && company.moderationStatus === 'banned') {
+      return res.status(403).json({ error: 'Banned companies cannot be reinstated. This action is permanent.' });
+    }
+
+    company = await Company.findByIdAndUpdate(
+      req.params.companyId,
+      {
+        moderationStatus: newStatus,
+        ...(note ? { moderationNote: note } : {}),
+      },
+      { new: true }
+    );
+
+    // Notify employer users linked to this company BEFORE status change
+    const notificationCopy = {
+      warn:      { title: 'Company Account Warning',    content: `Your company "${company.name}" has received a formal warning from our moderation team due to a violation of platform rules.${note ? ` Reason: ${note}.` : ''} Further violations may result in suspension.` },
+      suspend:   { title: 'Company Account Suspended',  content: `Your company "${company.name}" has been temporarily suspended due to a violation of platform rules.${note ? ` Reason: ${note}.` : ''} Your listings are hidden during this period. Contact admin@skillbridge.ug if you believe this is an error.` },
+      ban:       { title: 'Company Account Banned',     content: `Your company "${company.name}" has been permanently banned from the platform due to serious or repeated violations of platform rules.${note ? ` Reason: ${note}.` : ''}` },
+      reinstate: { title: 'Company Account Reinstated', content: `Your company "${company.name}" has been reviewed and reinstated. Your listings are now visible again. Please ensure full compliance with platform rules going forward.` },
+    };
+    const copy = notificationCopy[action];
+    if (copy) {
+      try {
+        const linkedEmployers = await User.find({
+          companyId: company._id,
+          role: 'employer',
+        }).select('_id');
+
+        await Promise.all(
+          linkedEmployers.map((employer) =>
+            notificationService.create({
+              userId: employer._id,
+              type: 'account_status',
+              title: copy.title,
+              content: copy.content,
+              metadata: { action, companyId: company._id, reportId: reportId || null },
+            })
+          )
+        );
+      } catch (err) {
+        logger.warn(`Notification failed for company action: ${err.message}`);
+      }
+    }
+
+    // Sync user accountStatus for all linked employer accounts
+    const userUpdate = action === 'reinstate' 
+      ? { accountStatus: 'active', moderationNote: null }
+      : { accountStatus: newStatus, moderationNote: note || null };
+    await User.updateMany(
+      { companyId: company._id, role: 'employer' },
+      { $set: userUpdate }
+    );
+
+    if (reportId) {
+      await Report.findByIdAndUpdate(reportId, {
+        status: action === 'reinstate' ? 'dismissed' : 'action_taken',
+      });
+    }
+
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        adminId: req.user._id,
+        action: `company_${action}`,
+        targetType: 'company',
+        targetId: company._id,
+        notes: note || '',
+        metadata: { reportId: reportId || null },
+      });
+    } catch (err) {
+      logger.warn(`Audit log failed for company action: ${err.message}`);
+    }
+
+    logger.info(`Admin ${req.user._id} performed ${action} on company ${company._id}`);
+    res.json({ message: `Company ${action === 'reinstate' ? 'reinstated' : action + 'ed'}.`, company });
+  } catch (error) {
+    logger.error('Apply company action error:', error);
+    res.status(500).json({ error: 'Failed to apply action to company.' });
+  }
+};
+
+/**
+ * POST /admin/messages/:messageId/action
+ * body: { action: 'remove' | 'leave', reportId?, note? }
+ * 'remove' sets moderationStatus to 'blocked' (message is hidden from the
+ * conversation but not hard-deleted, preserving it for audit). 'leave'
+ * resets it to 'normal' and dismisses the report without altering content.
+ */
+exports.applyMessageAction = async (req, res) => {
+  try {
+    const { action, reportId, note } = req.body;
+    if (!['remove', 'leave'].includes(action)) {
+      return res.status(400).json({ error: "Invalid action. Must be 'remove' or 'leave'." });
+    }
+
+    const newModerationStatus = action === 'remove' ? 'blocked' : 'normal';
+
+    const message = await Message.findByIdAndUpdate(
+      req.params.messageId,
+      { moderationStatus: newModerationStatus },
+      { new: true }
+    );
+
+    if (!message) return res.status(404).json({ error: 'Message not found.' });
+
+    if (reportId) {
+      await Report.findByIdAndUpdate(reportId, {
+        status: action === 'remove' ? 'action_taken' : 'dismissed',
+      });
+    }
+
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        adminId: req.user._id,
+        action: `message_${action}`,
+        targetType: 'message',
+        targetId: message._id,
+        notes: note || '',
+        metadata: { reportId: reportId || null },
+      });
+    } catch (err) {
+      logger.warn(`Audit log failed for message action: ${err.message}`);
+    }
+
+    logger.info(`Admin ${req.user._id} performed ${action} on message ${message._id}`);
+    res.json({
+      message: action === 'remove' ? 'Message removed from view.' : 'Message left as-is.',
+      data: message,
+    });
+  } catch (error) {
+    logger.error('Apply message action error:', error);
+    res.status(500).json({ error: 'Failed to apply action to message.' });
   }
 };

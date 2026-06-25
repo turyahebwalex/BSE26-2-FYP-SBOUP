@@ -2,6 +2,11 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+// Statuses that should be blocked from accessing the platform.
+// 'warned' is intentionally excluded — a warning is a notification only;
+// the user remains fully active until a suspension or ban is applied.
+const BLOCKED_STATUSES = ['suspended', 'banned', 'locked'];
+
 /**
  * Authenticate JWT token from Authorization header
  */
@@ -15,12 +20,19 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select('-passwordHash');
+    const user = await User.findById(decoded.id).select('-passwordHash').populate('companyId');
     if (!user) {
       return res.status(401).json({ error: 'Invalid token. User not found.' });
     }
-    if (user.accountStatus !== 'active') {
+
+    // Check if user account is blocked
+    if (BLOCKED_STATUSES.includes(user.accountStatus)) {
       return res.status(403).json({ error: `Account is ${user.accountStatus}.` });
+    }
+
+    // Check if employer's company is banned/suspended
+    if (user.role === 'employer' && user.companyId && BLOCKED_STATUSES.includes(user.companyId.moderationStatus)) {
+      return res.status(403).json({ error: `Company account is ${user.companyId.moderationStatus}.` });
     }
 
     req.user = user;

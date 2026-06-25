@@ -110,8 +110,7 @@ const EmployerDashboard = () => {
                 <div className="flex-1">
                   <h3 className="font-semibold">{opp.title}</h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    {opp.location} • {opp.category} •{' '}
-                    {opp.applicationCount || 0} application{(opp.applicationCount || 0) !== 1 ? 's' : ''}
+                    {opp.category} • {opp.applicationCount || 0} application{(opp.applicationCount || 0) !== 1 ? 's' : ''}
                   </p>
                   {opp.createdAt && (
                     <p className="text-xs text-gray-400 mt-1">
