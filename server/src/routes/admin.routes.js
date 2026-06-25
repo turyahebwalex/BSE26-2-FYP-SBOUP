@@ -11,6 +11,7 @@ router.get('/fraud-insights', authenticate, authorize('admin'), ctrl.getFraudIns
 router.get('/flagged', authenticate, authorize('admin'), ctrl.getFlaggedContent);
 router.post('/moderate', authenticate, authorize('admin'), ctrl.moderateContent);
 router.get('/users', authenticate, authorize('admin'), ctrl.getUsers);
+router.get('/users/:userId', authenticate, authorize('admin'), ctrl.getUserById);
 router.put('/users/:userId', authenticate, authorize('admin'), ctrl.updateUserStatus);
 router.get('/appeals', authenticate, authorize('admin'), ctrl.getAppealsQueue);
 router.post('/appeals/:id/review', authenticate, authorize('admin'), ctrl.reviewAppeal);
@@ -21,5 +22,10 @@ router.delete('/opportunities/:id/permanent-remove', authenticate, authorize('ad
 // Model health, drift detection & training export
 router.get('/model-health', authenticate, authorize('admin'), ctrl.getModelHealth);
 router.get('/training-export', authenticate, authorize('admin'), ctrl.getTrainingExport);
+
+// Report-driven moderation actions (user / company / message)
+router.post('/users/:userId/action', authenticate, authorize('admin'), ctrl.applyUserAction);
+router.post('/companies/:companyId/action', authenticate, authorize('admin'), ctrl.applyCompanyAction);
+router.post('/messages/:messageId/action', authenticate, authorize('admin'), ctrl.applyMessageAction);
 
 module.exports = router;

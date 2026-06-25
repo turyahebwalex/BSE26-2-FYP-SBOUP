@@ -33,6 +33,8 @@ import ChatScreen from './pages/ChatScreen';
 
 // Admin Pages
 import AdminDashboard from './pages/AdminDashboard';
+import AdminTargetDetailPage from './pages/AdminTargetDetailPage';
+import AdminOpportunityReviewPage from './pages/AdminOpportunityReviewPage';
 
 // Layout
 import Navbar from './components/common/Navbar';
@@ -101,6 +103,8 @@ function AppContent() {
 
           {/* Admin Routes */}
           <Route path="/admin" element={<ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/target/:targetType/:targetId" element={<ProtectedRoute roles={['admin']}><AdminTargetDetailPage /></ProtectedRoute>} />
+          <Route path="/admin/opportunities/:id/review" element={<ProtectedRoute roles={['admin']}><AdminOpportunityReviewPage /></ProtectedRoute>} />
 
           {/* Default */}
           <Route path="/" element={<Navigate to="/login" replace />} />

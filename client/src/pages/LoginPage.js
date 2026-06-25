@@ -1,22 +1,47 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 
 const LoginPage = () => {
   const { login } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  // ─── Check for error from interceptor or route guard ──────────────
+  useEffect(() => {
+    // 1. Check navigation state (from ProtectedRoute or AuthContext logout)
+    const stateError = location.state?.authError;
+    // 2. Check query parameter (from interceptor redirect)
+    const params = new URLSearchParams(location.search);
+    const queryError = params.get('error');
+
+    const error = stateError || queryError;
+    if (error) {
+      setAuthError(error);
+      toast.error(error);
+      // Clean URL to remove error param
+      if (queryError) {
+        navigate('/login', { replace: true, state: {} });
+      }
+    }
+  }, [location, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setAuthError('');
     try {
       await login(form.email, form.password);
       toast.success('Welcome back!');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Login failed');
+      const msg = error.response?.data?.error || 'Login failed';
+      setAuthError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -37,6 +62,13 @@ const LoginPage = () => {
           <p className="text-center mb-6">
             <Link to="/register" className="text-primary font-medium hover:underline">No account? Click Here</Link>
           </p>
+
+          {/* ─── Error Banner ─────────────────────────────────────────── */}
+          {authError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+              {authError}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

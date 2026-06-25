@@ -122,8 +122,8 @@ If action === "suspend":
 If action === "reactivate" || "restore":
   ✓ Update User.accountStatus → 'active'
   
-If action === "ban" || "remove" || "deactivate":
-  ✓ Update User.accountStatus → 'deactivated'
+If action === "ban" || "remove":
+  ✓ Update User.accountStatus → 'banned'
 ```
 
 #### For **Message**:

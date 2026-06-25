@@ -28,7 +28,7 @@ const loginAttemptSchema = new mongoose.Schema({
       'success',
       'invalid_credentials',
       'account_locked',
-      'account_deactivated',
+      'account_suspended',
       'unknown_email',
       'oauth_linked',
     ],

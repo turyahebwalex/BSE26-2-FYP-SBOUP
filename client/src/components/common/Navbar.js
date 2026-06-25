@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { FiBell, FiMessageSquare, FiUser, FiLogOut } from 'react-icons/fi';
 
 const Navbar = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, unreadNotificationCount, unreadMessageCount } = useAuth();
 
   const getDashboardLink = () => {
     if (user?.role === 'admin') return '/admin';
@@ -38,12 +38,26 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Notifications */}
             <Link to="/notifications" className="relative text-gray-500 hover:text-primary">
               <FiBell size={20} />
+              {unreadNotificationCount > 0 && (
+                <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                  {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                </span>
+              )}
             </Link>
+
+            {/* Messages */}
             <Link to="/messages" className="relative text-gray-500 hover:text-primary">
               <FiMessageSquare size={20} />
+              {unreadMessageCount > 0 && (
+                <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                  {unreadMessageCount > 99 ? '99+' : unreadMessageCount}
+                </span>
+              )}
             </Link>
+
             <Link to="/profile" className="text-gray-500 hover:text-primary">
               <FiUser size={20} />
             </Link>

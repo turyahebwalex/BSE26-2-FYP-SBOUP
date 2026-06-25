@@ -11,7 +11,6 @@ import {
   FiCalendar,
   FiStar,
   FiDownload,
-  FiEye,
   FiPaperclip,
   FiMessageSquare,
   FiXCircle,
@@ -85,17 +84,8 @@ const ViewApplicationsPage = () => {
         </span>
         <a
           href={fullUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ml-1 text-primary hover:text-primary-dark"
-          title="View"
-        >
-          <FiEye size={13} />
-        </a>
-        <a
-          href={fullUrl}
           download={fileName}
-          className="text-gray-500 hover:text-gray-700"
+          className="ml-1 text-gray-500 hover:text-gray-700"
           title="Download"
         >
           <FiDownload size={13} />
@@ -194,7 +184,7 @@ const ViewApplicationsPage = () => {
           <div>
             <h1 className="text-xl font-bold">{opportunity?.title || 'Applications'}</h1>
             <p className="text-sm text-gray-500 mt-1">
-              {opportunity?.location || 'Location TBD'} • {opportunity?.category || 'General'}
+              {opportunity?.category || 'General'}
             </p>
             <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
               <FiUsers size={12} /> {counts.total} applicant{counts.total !== 1 ? 's' : ''}
@@ -277,28 +267,10 @@ const ViewApplicationsPage = () => {
                 </div>
 
                 {/* Match breakdown */}
-                <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                <div className="grid grid-cols-1 gap-2 mt-3 text-xs">
                   <div className="bg-gray-50 rounded-lg p-2">
                     <p className="text-gray-500">Skill Match</p>
                     <p className="font-semibold">{getSkillScore(app)}%</p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-2">
-                    <p className="text-gray-500">Location</p>
-                    <p className="font-semibold">
-                      {app.matchBreakdown?.locationMatch != null
-                        ? (app.matchBreakdown.locationMatch ? '✓ Match' : '✗ No match')
-                        : '—'}
-                    </p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-2">
-                    <p className="text-gray-500">Experience</p>
-                    <p className="font-semibold">
-                      {app.matchBreakdown?.expFit != null
-                        ? (app.matchBreakdown.expFit ? '✓ Meets req' : '✗ Below req')
-                        : app.matchBreakdown?.experienceScore != null
-                        ? `${Math.round(app.matchBreakdown.experienceScore)}%`
-                        : '—'}
-                    </p>
                   </div>
                 </div>
 
@@ -375,7 +347,7 @@ const ViewApplicationsPage = () => {
                   {workerId ? (
                     <button
                       onClick={() => openChat(workerId, workerName, workerAvatar)}
-                      className="badge bg-blue-500 text-white cursor-pointer hover:bg-blue-600 text-xs flex items-center gap-1"
+                      className="badge bg-orange-500 text-white cursor-pointer hover:bg-orange-600 text-xs flex items-center gap-1"
                       title="Message this applicant"
                     >
                       <FiMessageSquare size={12} /> Message

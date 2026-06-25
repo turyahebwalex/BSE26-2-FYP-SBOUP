@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { messageAPI, profileAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 import api from '../services/api';
 import ReportBottomSheet from '../pages/ReportBottomSheet';
-import { FiTrash2 } from 'react-icons/fi'; 
+import { FiTrash2, FiMoreVertical } from 'react-icons/fi'; 
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
@@ -266,13 +267,14 @@ const MessagesPage = () => {
   const [isOnline, setIsOnline] = useState(false);
   const [unreadCount, setUnreadCount] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredConversations, setFilteredConversations] = useState([]);
   const [onlineStatuses, setOnlineStatuses] = useState({});
   const [profileModal, setProfileModal] = useState(null);
   const [attachments, setAttachments] = useState([]);
   const [attachPreviews, setAttachPreviews] = useState([]);
   const [uploadError, setUploadError] = useState('');
   const [reportTarget, setReportTarget] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
 
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
@@ -289,7 +291,31 @@ const MessagesPage = () => {
       targetType: 'message',
       targetLabel: `"${msg.content?.substring(0, 30)}${msg.content?.length > 30 ? '...' : ''}"`,
     });
+    setOpenMenuId(null);
   };
+
+  // ─── Delete message handler ───────────────────────────────────────────────
+  const handleDeleteMessage = async (msg) => {
+    setOpenMenuId(null);
+    try {
+      await messageAPI.deleteMessage(msg._id);
+      setMessages((prev) => prev.filter((m) => m._id !== msg._id));
+    } catch {
+      alert('Failed to delete message');
+    }
+  };
+
+  // Close message menu when clicking outside
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleClick = (e) => {
+      if (!e.target.closest('.msg-menu-container') && !e.target.closest('.msg-menu-portal')) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openMenuId]);
 
   // ─── Socket.IO ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -347,16 +373,17 @@ const MessagesPage = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      setFilteredConversations(conversations.filter(c =>
-        c.otherUser?.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.otherUser?.email?.toLowerCase().includes(searchQuery.toLowerCase())
-      ));
-    } else {
-      setFilteredConversations(conversations);
-    }
-  }, [searchQuery, conversations]);
+  const filteredConversations = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return conversations;
+
+    return conversations.filter((conv) => {
+      const other = conv.otherUser || {};
+      return [other.fullName, other.name, other.email].some((value) =>
+        value?.toLowerCase().includes(query)
+      );
+    });
+  }, [conversations, searchQuery]);
 
   useEffect(() => {
     (async () => {
@@ -545,7 +572,11 @@ const MessagesPage = () => {
           <h1 className="text-xl font-bold text-gray-900 tracking-tight">Messages</h1>
           <div className="mt-3 relative">
             <input
-              type="text"
+              type="search"
+              inputMode="search"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="Search conversations..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -709,20 +740,21 @@ const MessagesPage = () => {
                         {isSent && <StatusIcon status={msg.status} />}
                       </div>
 
-                      {/* ─── Report Button ─── */}
-                      {!isSent && (
-                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition">
-                          <button
-                            onClick={() => handleReportMessage(msg)}
-                            className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-red-500"
-                            title="Report this message"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
+                      {/* ─── Message Options Menu ─── */}
+                      <div className="absolute top-1 right-1 msg-menu-container">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setMenuPos({ top: rect.bottom + 4, left: rect.right - 140 });
+                            setOpenMenuId(openMenuId === msg._id ? null : msg._id);
+                          }}
+                          className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition"
+                          title="Message options"
+                        >
+                          <FiMoreVertical size={14} />
+                        </button>
+                      </div>
                     </div>
                     {isSent && (
                       <div className="flex-shrink-0 mb-1">
@@ -842,6 +874,39 @@ const MessagesPage = () => {
         )}
       </div>
 
+
+            {/* Message Options Dropdown (portal) */}
+            {openMenuId && createPortal(
+              <div
+                className="msg-menu-portal fixed bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-[9999] min-w-[140px]"
+                style={{ top: menuPos.top, left: menuPos.left }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => {
+                    const msg = messages.find(m => m._id === openMenuId);
+                    if (msg) handleReportMessage(msg);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                  </svg>
+                  Report Message
+                </button>
+                <button
+                  onClick={() => {
+                    const msg = messages.find(m => m._id === openMenuId);
+                    if (msg) handleDeleteMessage(msg);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                >
+                  <FiTrash2 className="w-4 h-4" />
+                  Delete
+                </button>
+              </div>,
+              document.body
+            )}
       {/* Profile Modal */}
       {profileModal && <ProfileModal user={profileModal} onClose={() => setProfileModal(null)} />}
 

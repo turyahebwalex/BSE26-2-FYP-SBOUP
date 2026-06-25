@@ -1,9 +1,11 @@
 const Report = require('../models/Report');
 const Opportunity = require('../models/Opportunity');
 const User = require('../models/User');
+const Company = require('../models/Company');
 const Message = require('../models/Message');
 const ModerationCase = require('../models/ModerationCase');
 const AuditLog = require('../models/AuditLog');
+const Profile = require('../models/Profile');
 const notificationService = require('../services/notification.service');
 
 const AUTO_HIDE_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -33,7 +35,17 @@ const getTargetDetails = async (targetType, targetId) => {
     if (!targetType || !targetId) return null;
 
     if (targetType === 'user') {
-      return await User.findById(targetId).select('fullName name email role avatar title companyName location');
+      const user = await User.findById(targetId).select('fullName email role phoneNumber accountStatus createdAt lastLoginAt companyId avatar');
+      if (!user) return null;
+      // For skilled workers, also fetch profile details
+      if (user.role === 'skilled_worker') {
+        const profile = await Profile.findOne({ userId: targetId }).select('title bio location portfolioItems');
+        return {
+          ...user.toObject(),
+          profile: profile || null,
+        };
+      }
+      return user;
     }
     if (targetType === 'message') {
       return await Message.findById(targetId)
@@ -42,7 +54,26 @@ const getTargetDetails = async (targetType, targetId) => {
         .select('content attachments sentAt senderId receiverId');
     }
     if (targetType === 'opportunity') {
-      return await Opportunity.findById(targetId).select('title companyId status');
+      return await Opportunity.findById(targetId)
+        .select('title companyId status category location compensationRange deadline fraudRiskScore fraudSignals')
+        .populate('companyId', 'name verificationStatus')
+        .populate('postedByUserId', 'fullName email');
+    }
+    if (targetType === 'company') {
+      const company = await Company.findById(targetId).select('name industry location verificationStatus logoUrl moderationStatus moderationNote description website contactEmail contactPhone userId createdAt trustScore');
+      if (!company) return null;
+      // Get open positions count and list
+      const positions = await Opportunity.find({ companyId: targetId, status: 'published' })
+        .select('title category location compensationRange status createdAt')
+        .sort({ createdAt: -1 })
+        .limit(20);
+      // Get linked employers count
+      const employerCount = await User.countDocuments({ companyId: targetId, role: 'employer' });
+      return {
+        ...company.toObject(),
+        openPositions: positions,
+        employerCount,
+      };
     }
     return null;
   } catch (error) {
@@ -70,6 +101,7 @@ const findTarget = async (targetType, targetId) => {
   if (targetType === 'opportunity') return Opportunity.findById(targetId);
   if (targetType === 'user') return User.findById(targetId);
   if (targetType === 'message') return Message.findById(targetId);
+  if (targetType === 'company') return Company.findById(targetId);
   return null;
 };
 
@@ -144,6 +176,12 @@ exports.createReport = async (req, res) => {
 
       if (targetType === 'message') {
         await Message.findByIdAndUpdate(targetId, { moderationStatus: 'under_review' });
+      }
+
+      if (targetType === 'company') {
+        if (target.verificationStatus !== 'rejected') {
+          await Company.findByIdAndUpdate(targetId, { verificationStatus: 'pending' });
+        }
       }
 
       await AuditLog.create({
